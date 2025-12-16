@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "548728610706",
+    "project_id": "favo-bdb08",
+    "storage_bucket": "favo-bdb08.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:548728610706:android:82b981f0a1979e9818eb4b",
+        "android_client_info": {
+          "package_name": "com.example.favo_mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBlvoGYus1drsof1jYGjxYzeeI7kGOyM64"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
