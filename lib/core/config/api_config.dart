@@ -8,7 +8,7 @@ class ApiConfig {
   // Örnek: 'http://192.168.1.100:8080'
   // 
   // NOT: Her iki bilgisayar aynı WiFi ağında olmalı!
-  static const String baseUrl = 'http://192.168.1.100:8080'; // BU IP ADRESİNİ DEĞİŞTİRİN!
+  static const String baseUrl = 'https://backend-production-f771.up.railway.app'; // BU IP ADRESİNİ DEĞİŞTİRİN!
   
   // API endpoint paths
   static const String loginPath = '/api/auth/login';

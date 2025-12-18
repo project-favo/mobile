@@ -1,36 +1,15 @@
 # favo_mobile
 
-Favo Mobile Flutter Application
+A new Flutter project.
 
 ## Getting Started
 
-This project is a Flutter mobile application with Firebase Authentication and backend integration.
+This project is a starting point for a Flutter application.
 
-### Features
+A few resources to get you started if this is your first Flutter project:
 
-- Firebase Authentication (Email/Password)
-- Backend API integration
-- Login & Registration pages
-- User management
-
-### Setup
-
-1. Install dependencies:
-```bash
-flutter pub get
-```
-
-2. Configure backend URL in `lib/core/config/api_config.dart`
-
-3. Firebase configuration files are already included:
-   - `ios/Runner/GoogleService-Info.plist`
-   - `android/app/google-services.json`
-
-### Backend Configuration
-
-See [README_BACKEND_SETUP.md](README_BACKEND_SETUP.md) for detailed backend connection instructions.
-
-### Development
+- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
+- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
 
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
