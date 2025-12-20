@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../../routes/app_routes.dart';
-import 'widgets/input_field.dart';
+import '../../../core/widgets/app_input.dart';
+import '../../../core/widgets/app_button.dart';
+import '../../../core/theme/app_text_styles.dart';
+import '../../../core/theme/app_colors.dart';
 import '../data/services/auth_service.dart';
 
 class RegisterPage extends StatefulWidget {
@@ -79,8 +82,11 @@ class _RegisterPageState extends State<RegisterPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Registration successful! Welcome ${userDto.userName}!'),
-            backgroundColor: Colors.green,
+            content: Text(
+              'Registration successful! Welcome ${userDto.userName}!',
+              style: AppTextStyles.body,
+            ),
+            backgroundColor: AppColors.success,
           ),
         );
         Navigator.pushReplacementNamed(context, AppRoutes.login);
@@ -89,8 +95,11 @@ class _RegisterPageState extends State<RegisterPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(e.toString().replaceFirst('Exception: ', '')),
-            backgroundColor: Colors.red,
+            content: Text(
+              e.toString().replaceFirst('Exception: ', ''),
+              style: AppTextStyles.body,
+            ),
+            backgroundColor: AppColors.error,
           ),
         );
       }
@@ -104,12 +113,12 @@ class _RegisterPageState extends State<RegisterPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFECF4F7),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF39404B)),
+          icon: const Icon(Icons.arrow_back, color: AppColors.textPrimary),
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -134,30 +143,23 @@ class _RegisterPageState extends State<RegisterPage> {
                   const SizedBox(height: 20),
                   const Text(
                     "Create Account",
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF39404B),
-                    ),
+                    style: AppTextStyles.heading1,
                   ),
                   const SizedBox(height: 8),
                   const Text(
                     "Sign up to get started",
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Color(0xFF71727A),
-                    ),
+                    style: AppTextStyles.bodySecondary,
                   ),
                   const SizedBox(height: 32),
 
-                  InputField(
+                  AppInput(
                     controller: _userName,
                     hint: "Username",
                     validator: _userNameValidator,
                   ),
                   const SizedBox(height: 10),
 
-                  InputField(
+                  AppInput(
                     controller: _email,
                     hint: "Email Address",
                     keyboardType: TextInputType.emailAddress,
@@ -165,7 +167,7 @@ class _RegisterPageState extends State<RegisterPage> {
                   ),
                   const SizedBox(height: 10),
 
-                  InputField(
+                  AppInput(
                     controller: _password,
                     hint: "Password",
                     obscure: _obscurePassword,
@@ -175,7 +177,7 @@ class _RegisterPageState extends State<RegisterPage> {
                   ),
                   const SizedBox(height: 10),
 
-                  InputField(
+                  AppInput(
                     controller: _confirmPassword,
                     hint: "Confirm Password",
                     obscure: _obscureConfirmPassword,
@@ -186,38 +188,10 @@ class _RegisterPageState extends State<RegisterPage> {
 
                   const SizedBox(height: 24),
 
-                  SizedBox(
-                    width: double.infinity,
-                    height: 52,
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _onRegister,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF910029),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        elevation: 0,
-                      ),
-                      child: _isLoading
-                          ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  Color(0xFFF8F9FE),
-                                ),
-                              ),
-                            )
-                          : const Text(
-                              "Register",
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFFF8F9FE),
-                              ),
-                            ),
-                    ),
+                  AppButton(
+                    text: "Register",
+                    isLoading: _isLoading,
+                    onPressed: _onRegister,
                   ),
 
                   const SizedBox(height: 14),
@@ -225,10 +199,7 @@ class _RegisterPageState extends State<RegisterPage> {
                   Center(
                     child: RichText(
                       text: TextSpan(
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF71727A),
-                        ),
+                        style: AppTextStyles.bodySecondary,
                         children: [
                           const TextSpan(text: "Already have an account? "),
                           WidgetSpan(
@@ -237,11 +208,7 @@ class _RegisterPageState extends State<RegisterPage> {
                                   context, AppRoutes.login),
                               child: const Text(
                                 "Login now",
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFF910029),
-                                ),
+                                style: AppTextStyles.link,
                               ),
                             ),
                           ),

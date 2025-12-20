@@ -19,7 +19,7 @@ class AppTextStyles {
   static const body = TextStyle(
     fontSize: 14,
     fontWeight: FontWeight.w400,
-    color: AppColors.textPrimary,
+    color: AppColors.background,
   );
 
   static const bodySecondary = TextStyle(
