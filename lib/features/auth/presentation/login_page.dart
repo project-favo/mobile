@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../../routes/app_routes.dart';
-import 'widgets/input_field.dart';
+import '../../../core/theme/app_text_styles.dart';
+import '../../../core/widgets/app_button.dart';
+import '../../../core/widgets/app_input.dart';
+import '../../../core/theme/app_colors.dart';
 import '../data/services/auth_service.dart';
 
 
@@ -62,8 +65,11 @@ class _LoginPageState extends State<LoginPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Welcome ${userDto.userName}!'),
-            backgroundColor: Colors.green,
+            content: Text(
+              'Welcome ${userDto.userName}!',
+              style: AppTextStyles.body,
+            ),
+            backgroundColor: AppColors.success,
           ),
         );
         // Navigator.pushReplacementNamed(context, AppRoutes.home); // Home route'u eklendiğinde
@@ -72,8 +78,11 @@ class _LoginPageState extends State<LoginPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(e.toString().replaceFirst('Exception: ', '')),
-            backgroundColor: Colors.red,
+            content: Text(
+              'Wrong e-mail or password!',
+              style: AppTextStyles.body,
+            ),
+            backgroundColor: AppColors.error,
           ),
         );
       }
@@ -94,7 +103,7 @@ class _LoginPageState extends State<LoginPage> {
   @override
 Widget build(BuildContext context) {
   return Scaffold(
-    backgroundColor: const Color(0xFFECF4F7),
+    backgroundColor: AppColors.background,
 
     body: GestureDetector(
       behavior: HitTestBehavior.translucent,
@@ -141,15 +150,11 @@ Widget build(BuildContext context) {
                         children: [
                           const Text(
                             "Welcome!",
-                            style: TextStyle(
-                              fontSize: 28,
-                              fontWeight: FontWeight.w800,
-                              color: Color(0xFF39404B),
-                            ),
+                            style: AppTextStyles.heading1,
                           ),
                           const SizedBox(height: 18),
 
-                          InputField(
+                          AppInput(
                             controller: _email,
                             hint: "Email Address",
                             keyboardType: TextInputType.emailAddress,
@@ -157,7 +162,7 @@ Widget build(BuildContext context) {
                           ),
                           const SizedBox(height: 10),
 
-                          InputField(
+                          AppInput(
                             controller: _password,
                             hint: "Password",
                             obscure: _obscure,
@@ -172,48 +177,16 @@ Widget build(BuildContext context) {
                             onTap: _onForgotPassword,
                             child: const Text(
                               "Forgot password?",
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF910029),
-                              ),
+                              style: AppTextStyles.link,
                             ),
                           ),
 
                           const SizedBox(height: 20),
 
-                          SizedBox(
-                            width: double.infinity,
-                            height: 52,
-                            child: ElevatedButton(
-                              onPressed: _isLoading ? null : _onLogin,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF910029),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                                elevation: 0,
-                              ),
-                              child: _isLoading
-                                  ? const SizedBox(
-                                      height: 20,
-                                      width: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        valueColor: AlwaysStoppedAnimation<Color>(
-                                          Color(0xFFF8F9FE),
-                                        ),
-                                      ),
-                                    )
-                                  : const Text(
-                                      "Login",
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600,
-                                        color: Color(0xFFF8F9FE),
-                                      ),
-                                    ),
-                            ),
+                          AppButton(
+                            text: "Login",
+                            isLoading: _isLoading,
+                            onPressed: _onLogin,
                           ),
 
                           const SizedBox(height: 14),
@@ -221,10 +194,7 @@ Widget build(BuildContext context) {
                           Center(
                             child: RichText(
                               text: TextSpan(
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: Color(0xFF71727A),
-                                ),
+                                style: AppTextStyles.bodySecondary,
                                 children: [
                                   const TextSpan(text: "Not a member? "),
                                   WidgetSpan(
@@ -233,11 +203,7 @@ Widget build(BuildContext context) {
                                           context, AppRoutes.register),
                                       child: const Text(
                                         "Register now",
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
-                                          color: Color(0xFF910029),
-                                        ),
+                                        style: AppTextStyles.link,
                                       ),
                                     ),
                                   ),
@@ -247,7 +213,7 @@ Widget build(BuildContext context) {
                           ),
 
                           const SizedBox(height: 24),
-                          const Divider(height: 1, color: Color(0xFFD4D6DD)),
+                          const Divider(height: 1, color: AppColors.border),
                         ],
                       ),
                     ),
