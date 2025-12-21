@@ -72,7 +72,7 @@ class _LoginPageState extends State<LoginPage> {
             backgroundColor: AppColors.success,
           ),
         );
-        // Navigator.pushReplacementNamed(context, AppRoutes.home); // Home route'u eklendiğinde
+        Navigator.pushReplacementNamed(context, AppRoutes.home); // Home route'u eklendiğinde
       }
     } catch (e) {
       if (mounted) {

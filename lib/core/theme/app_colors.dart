@@ -19,4 +19,5 @@ class AppColors {
   // States
   static const error = Color(0xFF910029);
   static const success = Colors.green;
+  static const warning = Color(0xFFFFC107);
 }
