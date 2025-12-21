@@ -10,7 +10,7 @@ class AppColors {
 
   // Text
   static const textPrimary = Color(0xFF39404B);
-  static const textSecondary = Color(0xFF71727A);
+  static const textSecondary = Color(0xFF64656D);
   static const hint = Color(0xFF8F9098);
 
   // Borders
