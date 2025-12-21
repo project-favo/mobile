@@ -5,13 +5,21 @@ import '../../../core/theme/app_chip_styles.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../widgets/product_card.dart';
 import '../widgets/top_product_card.dart';
+import 'profile/pages/profile_page.dart';
 
-class HomePage extends StatelessWidget {
+class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
   @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  int _currentIndex = 0;
+
+  @override
   Widget build(BuildContext context) {
-    // Örnek ürün listesi
+    /// PRODUCTS
     final List<Map<String, dynamic>> products = [
       {
         "imageUrl":
@@ -88,6 +96,7 @@ class HomePage extends StatelessWidget {
       },
     ];
 
+    /// TOP 10 PRODUCTS
     final List<Map<String, dynamic>> top10Products = [
       {
         "imageUrl":
@@ -160,21 +169,15 @@ class HomePage extends StatelessWidget {
         ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.only(
-          left: AppSpacing.xLarge,
-          right: AppSpacing.xLarge,
-          bottom: AppSpacing.xLarge,
-          top: AppSpacing.xLarge,
-        ),
+        padding: const EdgeInsets.all(AppSpacing.xLarge),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            /// TOP 10 PRODUCTS
+            /// TOP 10
             const Text(
               'Top 10 Products',
               style: AppTextStyles.heading2,
             ),
-
             const SizedBox(height: AppSpacing.large),
 
             SizedBox(
@@ -219,8 +222,9 @@ class HomePage extends StatelessWidget {
               children: products.map((product) {
                 return SizedBox(
                   width:
-                  (MediaQuery.of(context).size.width - AppSpacing.xLarge * 2 - AppSpacing.xLarge) /
-                      2, // 2 sütun
+                  (MediaQuery.of(context).size.width -
+                      AppSpacing.xLarge * 3) /
+                      2,
                   child: ProductCard(
                     imageUrl: product["imageUrl"],
                     title: product["title"],
@@ -235,18 +239,37 @@ class HomePage extends StatelessWidget {
           ],
         ),
       ),
+
+      /// BOTTOM NAV
       bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 0,
+        currentIndex: _currentIndex,
         selectedItemColor: AppColors.primary,
         unselectedItemColor: AppColors.textSecondary,
         showSelectedLabels: false,
         showUnselectedLabels: false,
+        onTap: (index) {
+          if (index == 4) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const ProfilePage(),
+              ),
+            );
+            return;
+          }
+
+          setState(() {
+            _currentIndex = index;
+          });
+        },
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
           BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
           BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add'),
-          BottomNavigationBarItem(icon: Icon(Icons.favorite_border), label: 'Favorites'),
-          BottomNavigationBarItem(icon: Icon(Icons.person_outline), label: 'Profile'),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.favorite_border), label: 'Favorites'),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.person_outline), label: 'Profile'),
         ],
       ),
     );

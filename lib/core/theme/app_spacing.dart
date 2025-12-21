@@ -7,6 +7,8 @@ class AppSpacing {
   static const double xLarge = 16;
   static const double xxLarge = 24;
   static const double categoryChipHeight = 36;
+  static const double toolbarHeight = 64;
+  static const double settingPages = 80;
   static const double productImageHeight = 120;
   static const double productCardWidth = 170;
 }
