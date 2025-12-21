@@ -4,6 +4,7 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../core/theme/app_chip_styles.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../widgets/product_card.dart';
+import '../widgets/top_product_card.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -87,6 +88,59 @@ class HomePage extends StatelessWidget {
       },
     ];
 
+    final List<Map<String, dynamic>> top10Products = [
+      {
+        "imageUrl":
+        "https://ce1999-mudo.akinoncloudcdn.com/products/2024/10/30/547665/4957dc47-e013-4617-a889-6355ada4da42.jpg",
+        "title": "MUDO Blanket",
+      },
+      {
+        "imageUrl":
+        "https://cdn.dsmcdn.com/mnresize/-/280/ty1547/product/media/images/ty1545/prod/QC/20240915/14/6fbbdd8f-9758-353f-b95b-0819ac60133b/1_org_zoom.jpg",
+        "title": "Sony Headphone",
+      },
+      {
+        "imageUrl":
+        "https://happyskincosmetics.com/cdn/shop/files/all_around_powder_brush_7_V2_2048x.jpg?v=1720252548",
+        "title": "Makeup Brush Set",
+      },
+      {
+        "imageUrl":
+        "https://ideacdn.net/idea/fp/51/myassets/products/555/gb-m12w-main.jpg",
+        "title": "Gaming Mouse",
+      },
+      {
+        "imageUrl":
+        "https://innovist.com/cdn/shop/files/Vit-C-first-imageFirst-Image-Guides.jpg",
+        "title": "Vitamin C Serum",
+      },
+      {
+        "imageUrl":
+        "https://www.nativeunion.com/cdn/shop/files/DeskStand_Sandstone_1200x1200_crop_center.png",
+        "title": "Laptop Stand",
+      },
+      {
+        "imageUrl":
+        "https://m.media-amazon.com/images/I/61s1AsMBKAL.jpg",
+        "title": "Organic Pillow",
+      },
+      {
+        "imageUrl":
+        "https://cdn.shopify.com/s/files/1/0625/0070/0405/files/Velvet_Couch.webp?v=1704120215",
+        "title": "Sofa Cushion",
+      },
+      {
+        "imageUrl":
+        "https://m.media-amazon.com/images/I/61H49SeYn3L._AC_UF894,1000_QL80_.jpg",
+        "title": "Minimal Lamp",
+      },
+      {
+        "imageUrl":
+        "https://img.kwcdn.com/product/fancy/0f6becbd-5c91-46ff-b9a0-3dce7c59148c.jpg?imageView2/2/w/500/q/60/format/webp",
+        "title": "Coffee Mug",
+      },
+    ];
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -110,10 +164,38 @@ class HomePage extends StatelessWidget {
           left: AppSpacing.xLarge,
           right: AppSpacing.xLarge,
           bottom: AppSpacing.xLarge,
+          top: AppSpacing.xLarge,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            /// TOP 10 PRODUCTS
+            const Text(
+              'Top 10 Products',
+              style: AppTextStyles.heading2,
+            ),
+
+            const SizedBox(height: AppSpacing.large),
+
+            SizedBox(
+              height: AppSpacing.productImageHeight + 60,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: top10Products.length,
+                separatorBuilder: (_, __) =>
+                const SizedBox(width: AppSpacing.xLarge),
+                itemBuilder: (context, index) {
+                  final product = top10Products[index];
+                  return TopProductList(
+                    imageUrl: product["imageUrl"],
+                    title: product["title"],
+                  );
+                },
+              ),
+            ),
+
+            const SizedBox(height: AppSpacing.xxLarge),
+
             /// CATEGORIES
             SizedBox(
               height: AppSpacing.categoryChipHeight,
