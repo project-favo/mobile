@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/theme/app_chip_styles.dart';
@@ -6,6 +7,11 @@ import '../../../core/theme/app_spacing.dart';
 import '../widgets/product_card.dart';
 import '../widgets/top_product_card.dart';
 import 'profile/pages/profile_page.dart';
+import '../data/repositories/tag_repository.dart';
+import '../data/repositories/product_repository.dart';
+import '../data/repositories/auth_repository.dart';
+import '../data/models/tag_dto.dart';
+import '../data/models/product_dto.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -16,139 +22,126 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _currentIndex = 0;
+  final TagRepository _tagRepository = TagRepository();
+  final ProductRepository _productRepository = ProductRepository();
+  final AuthRepository _authRepository = AuthRepository();
+  
+  List<TagDto> _tags = [];
+  List<ProductDto> _products = [];
+  bool _isLoading = true;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      // Get Firebase ID token for authentication (required for tag endpoints)
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        throw Exception('User not authenticated. Please login first.');
+      }
+
+      final firebaseIdToken = await user.getIdToken();
+      if (firebaseIdToken == null) {
+        throw Exception('Failed to get Firebase ID token');
+      }
+
+      // IMPORTANT: Backend requires a session to be established via /api/auth/login
+      // before making authenticated requests. The login endpoint establishes a session
+      // on the backend that must be maintained for subsequent requests.
+      // 
+      // The backend uses session-based authentication, so we need to:
+      // 1. Call login to establish the session
+      // 2. Use the same ApiClient instance (which is a singleton) to maintain the session
+      // 3. Ensure the auth token is set before making authenticated requests
+      try {
+        await _authRepository.login(firebaseIdToken);
+      } catch (e) {
+        // If login fails, we can't proceed with authenticated requests
+        throw Exception('Failed to establish backend session: $e');
+      }
+
+      // Fetch tags (requires authentication) and products (no auth required)
+      // The session should now be established and maintained by the ApiClient singleton
+      final tags = await _tagRepository.getRootTags(firebaseIdToken);
+      final products = await _productRepository.getAllProducts();
+      
+      setState(() {
+        _tags = tags;
+        _products = products;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = e.toString();
+        _isLoading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    /// PRODUCTS
-    final List<Map<String, dynamic>> products = [
-      {
-        "imageUrl":
-        "https://ce1999-mudo.akinoncloudcdn.com/products/2024/10/30/547665/4957dc47-e013-4617-a889-6355ada4da42.jpg",
-        "title": "MUDO DARSEY Blanket",
-        "category": "HOME",
-        "rating": 4,
-        "desc":
-        "Produced in accordance with Oeko-Tex 100 quality standards. Our products with an internationally valid...",
-        "isFavorite": true,
-      },
-      {
-        "imageUrl":
-        "https://cdn.dsmcdn.com/mnresize/-/280/ty1547/product/media/images/ty1545/prod/QC/20240915/14/6fbbdd8f-9758-353f-b95b-0819ac60133b/1_org_zoom.jpg",
-        "title": "SONY WH-CH520 Headphone",
-        "category": "TECHNOLOGY",
-        "rating": 5,
-        "desc": "Wireless headphone with long battery life and deep bass.",
-        "isFavorite": false,
-      },
-      {
-        "imageUrl":
-        "https://happyskincosmetics.com/cdn/shop/files/all_around_powder_brush_7_V2_2048x.jpg?v=1720252548",
-        "title": "Makeup Brush Set",
-        "category": "BEAUTY",
-        "rating": 3,
-        "desc": "Professional makeup brushes for flawless application.",
-        "isFavorite": false,
-      },
-      {
-        "imageUrl":
-        "https://olivias.com/cdn/shop/collections/Untitled_design_22_9b78b3b7-732b-47c7-80b8-a9000b37204e.jpg?v=1761061282",
-        "title": "Luxury Sofa Cushion",
-        "category": "HOME",
-        "rating": 4,
-        "desc": "Soft and stylish cushion for your sofa or armchair.",
-        "isFavorite": true,
-      },
-      {
-        "imageUrl":
-        "https://ideacdn.net/idea/fp/51/myassets/products/555/gb-m12w-main.jpg?revision=1733401561",
-        "title": "Gaming Mouse",
-        "category": "TECHNOLOGY",
-        "rating": 5,
-        "desc": "High precision gaming mouse with customizable buttons.",
-        "isFavorite": true,
-      },
-      {
-        "imageUrl":
-        "https://innovist.com/cdn/shop/files/Vit-C-first-imageFirst-Image-Guides.jpg?v=1756544774",
-        "title": "Face Serum",
-        "category": "BEAUTY",
-        "rating": 4,
-        "desc": "Hydrating serum with vitamin C for glowing skin.",
-        "isFavorite": true,
-      },
-      {
-        "imageUrl":
-        "https://www.nativeunion.com/cdn/shop/files/DeskStand_Sandstone_1200x1200_crop_center.png?v=1755767340",
-        "title": "Laptop Stand",
-        "category": "TECHNOLOGY",
-        "rating": 4,
-        "desc": "Ergonomic laptop stand suitable for all sizes.",
-        "isFavorite": true,
-      },
-      {
-        "imageUrl":
-        "https://m.media-amazon.com/images/I/61s1AsMBKAL.jpg",
-        "title": "Organic Pillow",
-        "category": "HOME",
-        "rating": 3,
-        "desc": "Comfortable organic pillow for better sleep.",
-        "isFavorite": false,
-      },
-    ];
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          title: const Text(
+            'FAVO',
+            style: AppTextStyles.HomeHeader,
+          ),
+          centerTitle: true,
+        ),
+        body: const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
 
-    /// TOP 10 PRODUCTS
-    final List<Map<String, dynamic>> top10Products = [
-      {
-        "imageUrl":
-        "https://ce1999-mudo.akinoncloudcdn.com/products/2024/10/30/547665/4957dc47-e013-4617-a889-6355ada4da42.jpg",
-        "title": "MUDO Blanket",
-      },
-      {
-        "imageUrl":
-        "https://cdn.dsmcdn.com/mnresize/-/280/ty1547/product/media/images/ty1545/prod/QC/20240915/14/6fbbdd8f-9758-353f-b95b-0819ac60133b/1_org_zoom.jpg",
-        "title": "Sony Headphone",
-      },
-      {
-        "imageUrl":
-        "https://happyskincosmetics.com/cdn/shop/files/all_around_powder_brush_7_V2_2048x.jpg?v=1720252548",
-        "title": "Makeup Brush Set",
-      },
-      {
-        "imageUrl":
-        "https://ideacdn.net/idea/fp/51/myassets/products/555/gb-m12w-main.jpg",
-        "title": "Gaming Mouse",
-      },
-      {
-        "imageUrl":
-        "https://innovist.com/cdn/shop/files/Vit-C-first-imageFirst-Image-Guides.jpg",
-        "title": "Vitamin C Serum",
-      },
-      {
-        "imageUrl":
-        "https://www.nativeunion.com/cdn/shop/files/DeskStand_Sandstone_1200x1200_crop_center.png",
-        "title": "Laptop Stand",
-      },
-      {
-        "imageUrl":
-        "https://m.media-amazon.com/images/I/61s1AsMBKAL.jpg",
-        "title": "Organic Pillow",
-      },
-      {
-        "imageUrl":
-        "https://cdn.shopify.com/s/files/1/0625/0070/0405/files/Velvet_Couch.webp?v=1704120215",
-        "title": "Sofa Cushion",
-      },
-      {
-        "imageUrl":
-        "https://m.media-amazon.com/images/I/61H49SeYn3L._AC_UF894,1000_QL80_.jpg",
-        "title": "Minimal Lamp",
-      },
-      {
-        "imageUrl":
-        "https://img.kwcdn.com/product/fancy/0f6becbd-5c91-46ff-b9a0-3dce7c59148c.jpg?imageView2/2/w/500/q/60/format/webp",
-        "title": "Coffee Mug",
-      },
-    ];
+    if (_errorMessage != null) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          title: const Text(
+            'FAVO',
+            style: AppTextStyles.HomeHeader,
+          ),
+          centerTitle: true,
+        ),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                'Error: $_errorMessage',
+                style: AppTextStyles.body,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: AppSpacing.large),
+              ElevatedButton(
+                onPressed: _loadData,
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    /// TOP 10 PRODUCTS - Use first 10 products from backend
+    final top10Products = _products.take(10).toList();
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -190,8 +183,8 @@ class _HomePageState extends State<HomePage> {
                 itemBuilder: (context, index) {
                   final product = top10Products[index];
                   return TopProductList(
-                    imageUrl: product["imageUrl"],
-                    title: product["title"],
+                    imageUrl: product.imageURL,
+                    title: product.name,
                   );
                 },
               ),
@@ -204,12 +197,14 @@ class _HomePageState extends State<HomePage> {
               height: AppSpacing.categoryChipHeight,
               child: ListView(
                 scrollDirection: Axis.horizontal,
-                children: const [
-                  _CategoryChip(title: 'BEAUTY'),
-                  _CategoryChip(title: 'HOME', selected: true),
-                  _CategoryChip(title: 'TECHNOLOGY'),
-                  _CategoryChip(title: 'MAKEUP'),
-                ],
+                children: _tags.asMap().entries.map<Widget>((entry) {
+                  final index = entry.key;
+                  final tag = entry.value;
+                  return _CategoryChip(
+                    title: tag.name,
+                    selected: index == 0, // First tag selected by default
+                  );
+                }).toList(),
               ),
             ),
 
@@ -219,19 +214,19 @@ class _HomePageState extends State<HomePage> {
             Wrap(
               spacing: AppSpacing.xLarge,
               runSpacing: AppSpacing.xLarge,
-              children: products.map((product) {
+              children: _products.map<Widget>((product) {
                 return SizedBox(
                   width:
                   (MediaQuery.of(context).size.width -
                       AppSpacing.xLarge * 3) /
                       2,
                   child: ProductCard(
-                    imageUrl: product["imageUrl"],
-                    title: product["title"],
-                    category: product["category"],
-                    rating: product["rating"].toDouble(),
-                    desc: product["desc"],
-                    isFavorite: product["isFavorite"],
+                    imageUrl: product.imageURL,
+                    title: product.name,
+                    category: product.tag.name,
+                    rating: 0.0, // Default rating if not provided by backend
+                    desc: product.description ?? '', // Use description from backend or empty string
+                    isFavorite: false, // Default favorite status if not provided by backend
                   ),
                 );
               }).toList(),

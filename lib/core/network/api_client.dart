@@ -1,4 +1,6 @@
 import 'package:dio/dio.dart';
+import 'package:dio_cookie_manager/dio_cookie_manager.dart';
+import 'package:cookie_jar/cookie_jar.dart';
 import '../config/api_config.dart';
 
 class ApiClient {
@@ -7,8 +9,12 @@ class ApiClient {
   ApiClient._internal();
 
   late Dio _dio;
+  late CookieJar _cookieJar;
 
   void initialize({String? baseUrl, String? authToken}) {
+    // Initialize cookie jar for session management
+    _cookieJar = CookieJar();
+    
     _dio = Dio(
       BaseOptions(
         baseUrl: baseUrl ?? ApiConfig.baseUrl,
@@ -21,6 +27,9 @@ class ApiClient {
         },
       ),
     );
+
+    // Add cookie manager to handle session cookies
+    _dio.interceptors.add(CookieManager(_cookieJar));
 
     // Error interceptor (optional - debugging için)
     _dio.interceptors.add(
