@@ -38,6 +38,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _loadData() async {
+    
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -49,6 +50,7 @@ class _HomePageState extends State<HomePage> {
       if (user == null) {
         throw Exception('User not authenticated. Please login first.');
       }
+
 
       final firebaseIdToken = await user.getIdToken();
       if (firebaseIdToken == null) {

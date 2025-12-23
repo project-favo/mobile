@@ -2,127 +2,403 @@ import 'package:flutter/material.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
-import '../widgets/profile_menu_item.dart';
+import '../../../../auth/data/services/auth_service.dart';
+import '../../../../auth/data/models/user_response_dto.dart';
+import 'settings_page.dart';
 
-class ProfilePage extends StatelessWidget {
+class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
 
   @override
+  State<ProfilePage> createState() => _ProfilePageState();
+}
+
+class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  final AuthService _authService = AuthService();
+  UserResponseDto? _user;
+  bool _isLoading = true;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+    _loadUserData();
+  }
+
+  Future<void> _loadUserData() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final user = await _authService.getMe();
+      setState(() {
+        _user = user;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = e.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.surface,
-      appBar: AppBar(
+    if (_isLoading) {
+      return Scaffold(
         backgroundColor: AppColors.background,
-        toolbarHeight: AppSpacing.toolbarHeight,
-        title: const Text('Settings', style: AppTextStyles.HomeHeader,),
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          title: const Text(
+            'Profile',
+            style: AppTextStyles.HomeHeader,
+          ),
+          centerTitle: true,
+        ),
+        body: const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
+    if (_errorMessage != null || _user == null) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          title: const Text(
+            'Profile',
+            style: AppTextStyles.HomeHeader,
+          ),
+          centerTitle: true,
+        ),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                _errorMessage ?? 'Failed to load user data',
+                style: AppTextStyles.body,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: AppSpacing.large),
+              ElevatedButton(
+                onPressed: _loadUserData,
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        title: const Text(
+          'Profile',
+          style: AppTextStyles.HomeHeader,
+        ),
         centerTitle: true,
-        leading: Padding(
-          padding: const EdgeInsets.symmetric(vertical: AppSpacing.small),
-          child: const BackButton(
-            color: AppColors.primary,
-          ),
-        ),
         actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: AppSpacing.large),
-            child: Container(
-              decoration: BoxDecoration(
-                color: AppColors.primary,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: IconButton(
-                icon: const Icon(Icons.logout),
-                color: Colors.white,
-                onPressed: () {
-                  // TODO: logout modal
-                },
-              ),
-            ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            color: AppColors.primary,
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const SettingsPage(),
+                ),
+              );
+            },
           ),
         ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Divider(
-            height: 1,
-            thickness: 1,
-            color: AppColors.textSecondary.withOpacity(0.2),
-          ),
+      ),
+      body: SingleChildScrollView(
+        child: Column(
+          children: [
+            const SizedBox(height: AppSpacing.xxLarge),
+            
+            // Avatar
+            CircleAvatar(
+              radius: 50,
+              backgroundColor: AppColors.surface,
+              child: const Icon(
+                Icons.person_outline_rounded,
+                size: 60,
+                color: AppColors.primary,
+              ),
+            ),
+
+            const SizedBox(height: AppSpacing.large),
+
+            // Name - Backend'den gelen userName
+            Text(
+              _user!.userName,
+              style: AppTextStyles.titleMedium,
+            ),
+
+            const SizedBox(height: AppSpacing.small),
+
+            // Username placeholder (şimdilik boş, sonra entegre edilecek)
+            Text(
+              '@${_user!.userName.toLowerCase().replaceAll(' ', '')}',
+              style: AppTextStyles.bodySmall.copyWith(
+                color: AppColors.textSecondary,
+              ),
+            ),
+
+            const SizedBox(height: AppSpacing.xxLarge),
+
+            // Statistics
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _StatItem(label: '2.4K Followers'),
+                const SizedBox(width: AppSpacing.xxLarge),
+                _StatItem(label: '342 Following'),
+                const SizedBox(width: AppSpacing.xxLarge),
+                _StatItem(label: '128 Reviews'),
+              ],
+            ),
+
+            const SizedBox(height: AppSpacing.xxLarge),
+
+            // Follow Button
+            SizedBox(
+              width: 120,
+              child: ElevatedButton(
+                onPressed: () {},
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.medium),
+                ),
+                child: const Text(
+                  'Follow',
+                  style: AppTextStyles.button,
+                ),
+              ),
+            ),
+
+            const SizedBox(height: AppSpacing.xxLarge),
+
+            // Summary Cards
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _SummaryCard(
+                      title: 'AVERAGE RATING',
+                      content: '4.2 /5.0',
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.xLarge),
+                  Expanded(
+                    child: _SummaryCard(
+                      title: 'TOP CATEGORY',
+                      content: 'Electronics 35%\nBeauty 30%\nFashion 20%',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: AppSpacing.xxLarge),
+
+            // Tabs
+            TabBar(
+              controller: _tabController,
+              labelColor: AppColors.primary,
+              unselectedLabelColor: AppColors.textSecondary,
+              indicatorColor: AppColors.primary,
+              indicatorWeight: 2,
+              tabs: const [
+                Tab(text: 'My Reviews'),
+                Tab(text: 'Favorites'),
+                Tab(text: 'Wishlist'),
+              ],
+            ),
+
+            const SizedBox(height: AppSpacing.large),
+
+            // Sort By Section
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'SORT BY',
+                    style: AppTextStyles.bodyMedium.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      _SortDropdown(
+                        label: 'Date',
+                        items: ['Newest', 'Oldest'],
+                      ),
+                      const SizedBox(width: AppSpacing.large),
+                      _SortDropdown(
+                        label: 'Rating',
+                        items: ['Highest', 'Lowest'],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: AppSpacing.xxLarge),
+
+            // Tab Content Placeholder
+            SizedBox(
+              height: 300,
+              child: TabBarView(
+                controller: _tabController,
+                children: const [
+                  Center(child: Text('My Reviews content')),
+                  Center(child: Text('Favorites content')),
+                  Center(child: Text('Wishlist content')),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: 4, // Profile tab is selected
+        selectedItemColor: AppColors.primary,
+        unselectedItemColor: AppColors.textSecondary,
+        showSelectedLabels: false,
+        showUnselectedLabels: false,
+        onTap: (index) {
+          if (index != 4) {
+            Navigator.pop(context);
+          }
+        },
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+          BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
+          BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add'),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.favorite_border), label: 'Favorites'),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.person_outline), label: 'Profile'),
+        ],
+      ),
+    );
+  }
+}
 
-      body: Column(
+class _StatItem extends StatelessWidget {
+  final String label;
+
+  const _StatItem({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(
+          label.split(' ')[0],
+          style: AppTextStyles.heading3,
+        ),
+        const SizedBox(height: AppSpacing.small),
+        Text(
+          label.split(' ').skip(1).join(' '),
+          style: AppTextStyles.bodySecondary,
+        ),
+      ],
+    );
+  }
+}
+
+class _SummaryCard extends StatelessWidget {
+  final String title;
+  final String content;
+
+  const _SummaryCard({
+    required this.title,
+    required this.content,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.xLarge),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: AppSpacing.xxLarge),
-
-          // Avatar
-          CircleAvatar(
-            radius: 45,
-            backgroundColor: AppColors.background,
-            child: const Icon(
-              Icons.person_outline_rounded,
-              size: 50,
-              color: AppColors.primary,
+          Text(
+            title,
+            style: AppTextStyles.bodySecondary.copyWith(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
             ),
           ),
-
-          const SizedBox(height: AppSpacing.large),
-
+          const SizedBox(height: AppSpacing.medium),
           Text(
-            'Özge Tontu',
-            style: AppTextStyles.titleMedium,
-          ),
-
-          const SizedBox(height: 0),
-
-          Text(
-            '@ozgetnt',
-            style: AppTextStyles.bodySmall.copyWith(
-              color: Colors.grey,
-            ),
-          ),
-
-          const SizedBox(height: AppSpacing.settingPages),
-
-          Divider(
-            thickness: 2,
-            color: AppColors.textSecondary.withOpacity(0.2),
-          ),
-          // Menu Items
-          ProfileMenuItem(
-            title: 'Edit Profile',
-            onTap: () {},
-          ),
-          Divider(
-            thickness: 2,
-            color: AppColors.textSecondary.withOpacity(0.2),
-          ),
-          ProfileMenuItem(
-            title: 'Notifications',
-            onTap: () {},
-          ),
-          Divider(
-            thickness: 2,
-            color: AppColors.textSecondary.withOpacity(0.2),
-          ),
-          ProfileMenuItem(
-            title: 'Change Password',
-            onTap: () {},
-          ),
-          Divider(
-            thickness: 2,
-            color: AppColors.textSecondary.withOpacity(0.2),
-          ),
-          ProfileMenuItem(
-            title: 'Delete Account',
-            isDestructive: true,
-            onTap: () {},
-          ),
-          Divider(
-            thickness: 2,
-            color: AppColors.textSecondary.withOpacity(0.2),
+            content,
+            style: AppTextStyles.heading3,
           ),
         ],
       ),
+    );
+  }
+}
+
+class _SortDropdown extends StatelessWidget {
+  final String label;
+  final List<String> items;
+
+  const _SortDropdown({
+    required this.label,
+    required this.items,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButton<String>(
+      value: items[0],
+      underline: Container(),
+      style: AppTextStyles.bodyMedium,
+      items: items.map((String item) {
+        return DropdownMenuItem<String>(
+          value: item,
+          child: Text(item),
+        );
+      }).toList(),
+      onChanged: (String? newValue) {
+        // Handle sort change
+      },
+      icon: const Icon(Icons.arrow_drop_down, color: AppColors.textSecondary),
     );
   }
 }
