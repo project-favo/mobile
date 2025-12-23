@@ -100,6 +100,39 @@ class AuthService {
     }
   }
 
+  /// Şifre değiştirir (Firebase Auth)
+  /// Önce mevcut şifre ile re-authentication yapılır, sonra yeni şifre ayarlanır
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    try {
+      final user = _firebaseAuth.currentUser;
+      if (user == null) {
+        throw Exception('User not authenticated');
+      }
+
+      if (user.email == null) {
+        throw Exception('User email not found');
+      }
+
+      // 1. Mevcut şifre ile re-authentication yap
+      final credential = EmailAuthProvider.credential(
+        email: user.email!,
+        password: currentPassword,
+      );
+
+      await user.reauthenticateWithCredential(credential);
+
+      // 2. Yeni şifreyi ayarla
+      await user.updatePassword(newPassword);
+    } on FirebaseAuthException catch (e) {
+      throw _handleFirebaseError(e);
+    } catch (e) {
+      throw Exception(e.toString());
+    }
+  }
+
   /// Çıkış yapar
   Future<void> signOut() async {
     await _firebaseAuth.signOut();

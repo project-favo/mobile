@@ -5,6 +5,8 @@ import '../../../../../core/theme/app_spacing.dart';
 import '../../../../auth/data/services/auth_service.dart';
 import '../../../../auth/data/models/user_response_dto.dart';
 import '../widgets/profile_menu_item.dart';
+import 'edit_profile_page.dart';
+import 'change_password_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -186,7 +188,18 @@ class _SettingsPageState extends State<SettingsPage> {
           // Menu Items
           ProfileMenuItem(
             title: 'Edit Profile',
-            onTap: () {},
+            onTap: () async {
+              final result = await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => EditProfilePage(user: _user!),
+                ),
+              );
+              // Eğer profil güncellendiyse, kullanıcı bilgilerini yeniden yükle
+              if (result == true) {
+                _loadUserData();
+              }
+            },
           ),
           Divider(
             thickness: 2,
@@ -202,7 +215,14 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           ProfileMenuItem(
             title: 'Change Password',
-            onTap: () {},
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const ChangePasswordPage(),
+                ),
+              );
+            },
           ),
           Divider(
             thickness: 2,
