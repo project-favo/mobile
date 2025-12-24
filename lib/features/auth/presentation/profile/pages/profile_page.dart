@@ -119,13 +119,18 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
           IconButton(
             icon: const Icon(Icons.settings),
             color: AppColors.primary,
-            onPressed: () {
-              Navigator.push(
+            onPressed: () async {
+              // Settings'ten geri dönüldüğünde profil verilerini yeniden yükle
+              final result = await Navigator.push(
                 context,
                 MaterialPageRoute(
                   builder: (_) => const SettingsPage(),
                 ),
               );
+              // Settings'ten geri dönüldüğünde (özellikle Edit Profile yapıldıysa) verileri yenile
+              if (result == true || mounted) {
+                _loadUserData();
+              }
             },
           ),
         ],
@@ -148,21 +153,28 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
 
             const SizedBox(height: AppSpacing.large),
 
-            // Name - Backend'den gelen userName
-            Text(
-              _user!.userName,
-              style: AppTextStyles.titleMedium,
-            ),
-
-            const SizedBox(height: AppSpacing.small),
-
-            // Username placeholder (şimdilik boş, sonra entegre edilecek)
-            Text(
-              '@${_user!.userName.toLowerCase().replaceAll(' ', '')}',
-              style: AppTextStyles.bodySmall.copyWith(
-                color: AppColors.textSecondary,
+            // Name and Surname - Backend'den gelen name ve surname
+            // Eğer name ve surname varsa göster, yoksa sadece username göster
+            if (_user!.name != null || _user!.surname != null) ...[
+              Text(
+                '${_user!.name ?? ''} ${_user!.surname ?? ''}'.trim(),
+                style: AppTextStyles.titleMedium,
               ),
-            ),
+              const SizedBox(height: AppSpacing.small),
+              // Username (name/surname varsa altında göster)
+              Text(
+                '@${_user!.userName.toLowerCase().replaceAll(' ', '')}',
+                style: AppTextStyles.bodySmall.copyWith(
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ] else ...[
+              // Sadece username göster (name/surname yoksa)
+              Text(
+                '@${_user!.userName.toLowerCase().replaceAll(' ', '')}',
+                style: AppTextStyles.titleMedium,
+              ),
+            ],
 
             const SizedBox(height: AppSpacing.xxLarge),
 

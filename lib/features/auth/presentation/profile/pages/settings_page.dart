@@ -386,7 +386,12 @@ class _SettingsPageState extends State<SettingsPage> {
               );
               // Eğer profil güncellendiyse, kullanıcı bilgilerini yeniden yükle
               if (result == true) {
-                _loadUserData();
+                await _loadUserData();
+                // Profile sayfasını da güncellemek için true döndür (Settings'ten geri dönüldüğünde)
+                if (mounted) {
+                  // Settings sayfasından geri dönüldüğünde Profile sayfasına bilgi ver
+                  Navigator.pop(context, true);
+                }
               }
             },
           ),
