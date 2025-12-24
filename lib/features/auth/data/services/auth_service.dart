@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/user_response_dto.dart';
 import '../models/user_update_request_dto.dart';
+import '../models/register_request_dto.dart';
 import '../repositories/auth_repository.dart';
 
 class AuthService {
@@ -40,6 +41,9 @@ class AuthService {
     required String email,
     required String password,
     required String userName,
+    required String name,
+    required String surname,
+    required String birthdate,
   }) async {
     try {
       // 1. Firebase Authentication ile kayıt ol
@@ -54,8 +58,16 @@ class AuthService {
         throw Exception('Failed to get Firebase ID token');
       }
 
-      // 3. Backend'e register isteği gönder (idToken Authorization header'ında, userName query param'da)
-      final userDto = await _authRepository.register(idToken, userName);
+      // 3. RegisterRequestDto oluştur
+      final registerRequest = RegisterRequestDto(
+        userName: userName,
+        name: name,
+        surname: surname,
+        birthdate: birthdate,
+      );
+
+      // 4. Backend'e register isteği gönder (idToken Authorization header'ında, RegisterRequestDto request body'de)
+      final userDto = await _authRepository.register(idToken, registerRequest);
       return userDto;
     } on FirebaseAuthException catch (e) {
       throw _handleFirebaseError(e);
@@ -126,6 +138,31 @@ class AuthService {
 
       // 2. Yeni şifreyi ayarla
       await user.updatePassword(newPassword);
+    } on FirebaseAuthException catch (e) {
+      throw _handleFirebaseError(e);
+    } catch (e) {
+      throw Exception(e.toString());
+    }
+  }
+
+  /// Hesabı siler: önce backend'de /api/auth/me DELETE, sonra Firebase signOut
+  Future<void> deleteAccount() async {
+    try {
+      final user = _firebaseAuth.currentUser;
+      if (user == null) {
+        throw Exception('User not authenticated');
+      }
+
+      final idToken = await user.getIdToken();
+      if (idToken == null) {
+        throw Exception('Failed to get Firebase ID token');
+      }
+
+      // Backend'de hesabı sil
+      await _authRepository.deleteMe(idToken);
+
+      // Firebase oturumunu kapat
+      await _firebaseAuth.signOut();
     } on FirebaseAuthException catch (e) {
       throw _handleFirebaseError(e);
     } catch (e) {

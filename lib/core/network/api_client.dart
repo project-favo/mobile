@@ -8,8 +8,9 @@ class ApiClient {
   factory ApiClient() => _instance;
   ApiClient._internal();
 
-  late Dio _dio;
-  late CookieJar _cookieJar;
+  Dio? _dio;
+  CookieJar? _cookieJar;
+  bool _initialized = false;
 
   void initialize({String? baseUrl, String? authToken}) {
     // Initialize cookie jar for session management
@@ -29,26 +30,39 @@ class ApiClient {
     );
 
     // Add cookie manager to handle session cookies
-    _dio.interceptors.add(CookieManager(_cookieJar));
+    _dio!.interceptors.add(CookieManager(_cookieJar!));
 
     // Error interceptor (optional - debugging için)
-    _dio.interceptors.add(
+    _dio!.interceptors.add(
       LogInterceptor(
         requestBody: true,
         responseBody: true,
         error: true,
       ),
     );
+    
+    _initialized = true;
   }
 
   void setAuthToken(String token) {
-    _dio.options.headers['Authorization'] = 'Bearer $token';
+    if (!_initialized || _dio == null) {
+      throw Exception('ApiClient must be initialized before setting auth token');
+    }
+    _dio!.options.headers['Authorization'] = 'Bearer $token';
   }
 
   void clearAuthToken() {
-    _dio.options.headers.remove('Authorization');
+    if (!_initialized || _dio == null) {
+      return;
+    }
+    _dio!.options.headers.remove('Authorization');
   }
 
-  Dio get dio => _dio;
+  Dio get dio {
+    if (!_initialized || _dio == null) {
+      throw Exception('ApiClient must be initialized before use. Call initialize() first.');
+    }
+    return _dio!;
+  }
 }
 

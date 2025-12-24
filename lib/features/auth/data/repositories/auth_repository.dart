@@ -3,6 +3,7 @@ import '../../../../core/config/api_config.dart';
 import '../../../../core/network/api_client.dart';
 import '../models/user_response_dto.dart';
 import '../models/user_update_request_dto.dart';
+import '../models/register_request_dto.dart';
 
 class AuthRepository {
   final ApiClient _apiClient = ApiClient();
@@ -29,21 +30,51 @@ class AuthRepository {
   }
 
   /// Backend'e register isteği gönderir
-  /// Firebase idToken Authorization header'ında, userName query parameter olarak gönderilir
-  Future<UserResponseDto> register(String firebaseIdToken, String userName) async {
+  /// Firebase idToken Authorization header'ında Bearer token olarak gönderilir
+  /// RegisterRequestDto request body'de gönderilir
+  /// NOT: Email ve password Firebase'de tutulur, backend'e gönderilmez
+  Future<UserResponseDto> register(String firebaseIdToken, RegisterRequestDto request) async {
     try {
-      _apiClient.setAuthToken(firebaseIdToken);
+      // Token'ı temizle (başındaki/sonundaki boşlukları kaldır)
+      final cleanToken = firebaseIdToken.trim();
+      
+      // Token'ı header'a ekle (Bearer formatında)
+      _apiClient.setAuthToken(cleanToken);
+      
+      // Request body'yi hazırla
+      final requestBody = request.toJson();
+      
+      // Debug: Gönderilen verileri kontrol et
+      print('🔐 Register Request:');
+      print('  Token (first 50 chars): ${cleanToken.substring(0, cleanToken.length > 50 ? 50 : cleanToken.length)}...');
+      print('  Request Body: $requestBody');
+      
       final response = await _apiClient.dio.post(
         ApiConfig.registerPath,
-        queryParameters: {'userName': userName},
+        data: requestBody,
       );
       return UserResponseDto.fromJson(response.data);
     } on DioException catch (e) {
       if (e.response != null) {
+        final statusCode = e.response?.statusCode;
         final errorData = e.response?.data;
-        final errorMessage = errorData is Map
-            ? (errorData['message'] ?? errorData['error'] ?? 'Registration failed')
-            : errorData?.toString() ?? 'Registration failed';
+        
+        String errorMessage;
+        if (errorData is Map) {
+          errorMessage = errorData['message'] ?? 
+                        errorData['error'] ?? 
+                        'Registration failed';
+        } else if (errorData != null) {
+          errorMessage = errorData.toString();
+        } else {
+          errorMessage = 'Registration failed';
+        }
+        
+        // 403 hatası için özel mesaj
+        if (statusCode == 403) {
+          errorMessage = 'Access forbidden. Please check your authentication token or contact support.';
+        }
+        
         throw Exception(errorMessage);
       }
       throw Exception('Network error: ${e.message}');
@@ -86,6 +117,23 @@ class AuthRepository {
         final errorMessage = errorData is Map
             ? (errorData['message'] ?? errorData['error'] ?? 'Update failed')
             : errorData?.toString() ?? 'Update failed';
+        throw Exception(errorMessage);
+      }
+      throw Exception('Network error: ${e.message}');
+    }
+  }
+
+  /// Hesabı siler (backend'de /api/auth/me DELETE)
+  Future<void> deleteMe(String firebaseIdToken) async {
+    try {
+      _apiClient.setAuthToken(firebaseIdToken);
+      await _apiClient.dio.delete(ApiConfig.mePath);
+    } on DioException catch (e) {
+      if (e.response != null) {
+        final errorData = e.response?.data;
+        final errorMessage = errorData is Map
+            ? (errorData['message'] ?? errorData['error'] ?? 'Delete account failed')
+            : errorData?.toString() ?? 'Delete account failed';
         throw Exception(errorMessage);
       }
       throw Exception('Network error: ${e.message}');

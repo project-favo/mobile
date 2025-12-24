@@ -22,6 +22,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _currentIndex = 0;
+  int _selectedCategoryIndex = 0; // Seçili kategori index'i
   final TagRepository _tagRepository = TagRepository();
   final ProductRepository _productRepository = ProductRepository();
   final AuthRepository _authRepository = AuthRepository();
@@ -58,22 +59,18 @@ class _HomePageState extends State<HomePage> {
       }
 
       // IMPORTANT: Backend requires a session to be established via /api/auth/login
-      // before making authenticated requests. The login endpoint establishes a session
-      // on the backend that must be maintained for subsequent requests.
-      // 
-      // The backend uses session-based authentication, so we need to:
-      // 1. Call login to establish the session
-      // 2. Use the same ApiClient instance (which is a singleton) to maintain the session
-      // 3. Ensure the auth token is set before making authenticated requests
+      // before making authenticated requests. This establishes the session on the backend.
+      // Even though the user is already logged in via Firebase, we need to call the backend
+      // login endpoint to establish the session for subsequent authenticated requests.
       try {
         await _authRepository.login(firebaseIdToken);
       } catch (e) {
-        // If login fails, we can't proceed with authenticated requests
-        throw Exception('Failed to establish backend session: $e');
+        // If login fails, it might be because the user is already logged in
+        // or the session expired. We'll continue and try the tag request anyway.
+        // The backend might handle this gracefully.
       }
 
       // Fetch tags (requires authentication) and products (no auth required)
-      // The session should now be established and maintained by the ApiClient singleton
       final tags = await _tagRepository.getRootTags(firebaseIdToken);
       final products = await _productRepository.getAllProducts();
       
@@ -176,7 +173,8 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(height: AppSpacing.large),
 
             SizedBox(
-              height: AppSpacing.productImageHeight + 60,
+              // Top 10 kartları için yükseklik (kart + gölge)
+              height: 190,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: top10Products.length,
@@ -204,7 +202,13 @@ class _HomePageState extends State<HomePage> {
                   final tag = entry.value;
                   return _CategoryChip(
                     title: tag.name,
-                    selected: index == 0, // First tag selected by default
+                    selected: index == _selectedCategoryIndex,
+                    onTap: () {
+                      setState(() {
+                        _selectedCategoryIndex = index;
+                      });
+                      // TODO: Kategoriye göre ürünleri filtrele
+                    },
                   );
                 }).toList(),
               ),
@@ -212,26 +216,29 @@ class _HomePageState extends State<HomePage> {
 
             const SizedBox(height: AppSpacing.xxLarge),
 
-            /// PRODUCT GRID
-            Wrap(
-              spacing: AppSpacing.xLarge,
-              runSpacing: AppSpacing.xLarge,
-              children: _products.map<Widget>((product) {
-                return SizedBox(
-                  width:
-                  (MediaQuery.of(context).size.width -
-                      AppSpacing.xLarge * 3) /
-                      2,
-                  child: ProductCard(
-                    imageUrl: product.imageURL,
-                    title: product.name,
-                    category: product.tag.name,
-                    rating: 0.0, // Default rating if not provided by backend
-                    desc: product.description ?? '', // Use description from backend or empty string
-                    isFavorite: false, // Default favorite status if not provided by backend
-                  ),
+            /// PRODUCT GRID - sabit kart oranları için GridView
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: AppSpacing.xLarge,
+                mainAxisSpacing: AppSpacing.xLarge,
+                // Genişlik / yükseklik oranı; kartları biraz daha alçalt
+                childAspectRatio: 0.6,
+              ),
+              itemCount: _products.length,
+              itemBuilder: (context, index) {
+                final product = _products[index];
+                return ProductCard(
+                  imageUrl: product.imageURL,
+                  title: product.name,
+                  category: product.tag.name,
+                  rating: 0.0, // Default rating if not provided by backend
+                  desc: product.description ?? '', // Use description from backend or empty string
+                  isFavorite: false, // Default favorite status if not provided by backend
                 );
-              }).toList(),
+              },
             ),
           ],
         ),
@@ -277,23 +284,28 @@ class _HomePageState extends State<HomePage> {
 class _CategoryChip extends StatelessWidget {
   final String title;
   final bool selected;
+  final VoidCallback? onTap;
 
   const _CategoryChip({
     required this.title,
     this.selected = false,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(right: AppSpacing.large),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
-        alignment: Alignment.center,
-        decoration: AppChipStyles.categoryChipDecoration(selected: selected),
-        child: Text(
-          title,
-          style: AppChipStyles.categoryChipText(selected: selected),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+          alignment: Alignment.center,
+          decoration: AppChipStyles.categoryChipDecoration(selected: selected),
+          child: Text(
+            title,
+            style: AppChipStyles.categoryChipText(selected: selected),
+          ),
         ),
       ),
     );

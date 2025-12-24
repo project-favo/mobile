@@ -26,20 +26,36 @@ class ProductCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: AppSpacing.productCardWidth,
-      padding: const EdgeInsets.all(12),
+      // Genişliği parent (grid) belirlesin, kartlar aynı hizada dursun
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
       decoration: AppDecorations.productCard,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Ürün resmi
-          ClipRRect(
-            borderRadius: AppDecorations.cardRadius,
-            child: Image.network(
-              imageUrl,
-              height: AppSpacing.productImageHeight,
-              width: AppSpacing.productCardWidth,
-              fit: BoxFit.cover,
+          // Ürün resmi - Sabit boyutlu container içinde
+          Container(
+            height: AppSpacing.productImageHeight,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              borderRadius: AppDecorations.cardRadius,
+              color: AppColors.background,
+            ),
+            child: ClipRRect(
+              borderRadius: AppDecorations.cardRadius,
+              child: Image.network(
+                imageUrl,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) {
+                  return Container(
+                    color: AppColors.background,
+                    child: const Icon(
+                      Icons.image_not_supported,
+                      color: AppColors.textSecondary,
+                    ),
+                  );
+                },
+              ),
             ),
           ),
 
@@ -50,14 +66,16 @@ class ProductCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Text(
-                  title,
-                  style: AppTextStyles.productTitle,
-                  maxLines: 5,
-                  overflow: TextOverflow.ellipsis,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Text(
+                    title,
+                    style: AppTextStyles.productTitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ),
-              const SizedBox(width: 4),
               Icon(
                 isFavorite ? Icons.favorite : Icons.favorite_border,
                 color: AppColors.primary,
@@ -74,7 +92,7 @@ class ProductCard extends StatelessWidget {
             style: AppTextStyles.productCategory,
           ),
 
-          const SizedBox(height: AppSpacing.large),
+          const SizedBox(height: AppSpacing.medium),
 
           // Rating
           Row(
@@ -88,12 +106,14 @@ class ProductCard extends StatelessWidget {
             ),
           ),
 
-          const SizedBox(height: 6),
+          const SizedBox(height: 2),
 
           // Description
           Text(
             desc,
             style: AppTextStyles.productDesc,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),

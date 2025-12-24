@@ -1,10 +1,10 @@
-class UserUpdateRequestDto {
+class RegisterRequestDto {
   final String userName;
   final String name;
   final String surname;
   final String birthdate;
 
-  UserUpdateRequestDto({
+  RegisterRequestDto({
     required this.userName,
     required this.name,
     required this.surname,

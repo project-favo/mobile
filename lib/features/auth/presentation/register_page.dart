@@ -21,11 +21,15 @@ class _RegisterPageState extends State<RegisterPage> {
   final _password = TextEditingController();
   final _confirmPassword = TextEditingController();
   final _userName = TextEditingController();
+  final _name = TextEditingController();
+  final _surname = TextEditingController();
+  final _birthdate = TextEditingController();
 
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   bool _submitted = false;
   bool _isLoading = false;
+  DateTime? _selectedDate;
 
   @override
   void dispose() {
@@ -33,6 +37,9 @@ class _RegisterPageState extends State<RegisterPage> {
     _password.dispose();
     _confirmPassword.dispose();
     _userName.dispose();
+    _name.dispose();
+    _surname.dispose();
+    _birthdate.dispose();
     super.dispose();
   }
 
@@ -63,6 +70,50 @@ class _RegisterPageState extends State<RegisterPage> {
     return null;
   }
 
+  String? _nameValidator(String? v) {
+    final value = (v ?? '').trim();
+    if (value.isEmpty) return "Name is required";
+    return null;
+  }
+
+  String? _surnameValidator(String? v) {
+    final value = (v ?? '').trim();
+    if (value.isEmpty) return "Surname is required";
+    return null;
+  }
+
+  String? _birthdateValidator(String? v) {
+    if (_selectedDate == null) return "Birthdate is required";
+    return null;
+  }
+
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now().subtract(const Duration(days: 365 * 18)),
+      firstDate: DateTime(1900),
+      lastDate: DateTime.now(),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: AppColors.primary,
+              onPrimary: Colors.white,
+              onSurface: AppColors.textPrimary,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null && picked != _selectedDate) {
+      setState(() {
+        _selectedDate = picked;
+        _birthdate.text = "${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}";
+      });
+    }
+  }
+
   Future<void> _onRegister() async {
     setState(() => _submitted = true);
     final ok = _formKey.currentState?.validate() ?? false;
@@ -76,6 +127,9 @@ class _RegisterPageState extends State<RegisterPage> {
         email: _email.text.trim(),
         password: _password.text,
         userName: _userName.text.trim(),
+        name: _name.text.trim(),
+        surname: _surname.text.trim(),
+        birthdate: _birthdate.text.trim(),
       );
 
       // Başarılı kayıt - Login sayfasına yönlendir
@@ -156,6 +210,33 @@ class _RegisterPageState extends State<RegisterPage> {
                     controller: _userName,
                     hint: "Username",
                     validator: _userNameValidator,
+                  ),
+                  const SizedBox(height: 10),
+
+                  AppInput(
+                    controller: _name,
+                    hint: "Name",
+                    validator: _nameValidator,
+                  ),
+                  const SizedBox(height: 10),
+
+                  AppInput(
+                    controller: _surname,
+                    hint: "Surname",
+                    validator: _surnameValidator,
+                  ),
+                  const SizedBox(height: 10),
+
+                  GestureDetector(
+                    onTap: () => _selectDate(context),
+                    child: AbsorbPointer(
+                      child: AppInput(
+                        controller: _birthdate,
+                        hint: "Birthdate",
+                        validator: _birthdateValidator,
+                        suffixIcon: const Icon(Icons.calendar_today, color: AppColors.textSecondary),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 10),
 

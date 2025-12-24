@@ -8,6 +8,7 @@ class AppInput extends StatelessWidget {
   final VoidCallback? onToggleObscure;
   final String? Function(String?)? validator;
   final TextInputType keyboardType;
+  final Widget? suffixIcon;
 
   const AppInput({
     super.key,
@@ -17,6 +18,7 @@ class AppInput extends StatelessWidget {
     this.onToggleObscure,
     this.validator,
     this.keyboardType = TextInputType.text,
+    this.suffixIcon,
   });
 
   @override
@@ -63,9 +65,8 @@ class AppInput extends StatelessWidget {
           ),
           errorStyle: const TextStyle(fontSize: 11, height: 1.1),
 
-          suffixIcon: onToggleObscure == null
-              ? null
-              : IconButton(
+          suffixIcon: onToggleObscure != null
+              ? IconButton(
             onPressed: onToggleObscure,
             icon: Icon(
               obscure
@@ -74,7 +75,8 @@ class AppInput extends StatelessWidget {
               size: 18,
               color: AppColors.hint,
             ),
-          ),
+          )
+              : suffixIcon,
         ),
       ),
     );

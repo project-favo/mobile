@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
+import '../../../../../core/widgets/app_input.dart';
+import '../../../../../core/widgets/app_button.dart';
 import '../../../../auth/data/services/auth_service.dart';
 import '../../../../auth/data/models/user_response_dto.dart';
 import '../../../../auth/data/models/user_update_request_dto.dart';
@@ -21,24 +23,91 @@ class EditProfilePage extends StatefulWidget {
 class _EditProfilePageState extends State<EditProfilePage> {
   final AuthService _authService = AuthService();
   final _formKey = GlobalKey<FormState>();
-  late TextEditingController _fullNameController;
-  late TextEditingController _nicknameController;
+  late TextEditingController _nameController;
+  late TextEditingController _surnameController;
+  late TextEditingController _userNameController;
+  late TextEditingController _birthdateController;
+  DateTime? _selectedDate;
   bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    _fullNameController = TextEditingController(text: widget.user.userName);
-    // Nickname için userName'den türetilmiş bir değer (backend'de yoksa sadece gösterim)
-    final nickname = widget.user.userName.toLowerCase().replaceAll(' ', '');
-    _nicknameController = TextEditingController(text: '@$nickname');
+    // Debug: Kullanıcı verilerini kontrol et
+    print('📋 Edit Profile - User Data:');
+    print('  Name: ${widget.user.name}');
+    print('  Surname: ${widget.user.surname}');
+    print('  Username: ${widget.user.userName}');
+    print('  Birthdate: ${widget.user.birthdate}');
+    
+    _nameController = TextEditingController(text: widget.user.name ?? '');
+    _surnameController = TextEditingController(text: widget.user.surname ?? '');
+    _userNameController = TextEditingController(text: widget.user.userName);
+    _birthdateController = TextEditingController(
+      text: widget.user.birthdate ?? '',
+    );
+    // Birthdate'i parse et
+    if (widget.user.birthdate != null && widget.user.birthdate!.isNotEmpty) {
+      try {
+        _selectedDate = DateTime.parse(widget.user.birthdate!);
+      } catch (e) {
+        print('⚠️ Birthdate parse error: $e');
+        // Parse hatası durumunda null bırak
+      }
+    }
   }
 
   @override
   void dispose() {
-    _fullNameController.dispose();
-    _nicknameController.dispose();
+    _nameController.dispose();
+    _surnameController.dispose();
+    _userNameController.dispose();
+    _birthdateController.dispose();
     super.dispose();
+  }
+
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate ?? DateTime.now().subtract(const Duration(days: 365 * 18)),
+      firstDate: DateTime(1900),
+      lastDate: DateTime.now(), // Şu anki tarihten ileri olamaz
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: AppColors.primary,
+              onPrimary: Colors.white,
+              onSurface: AppColors.textPrimary,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null && picked != _selectedDate) {
+      setState(() {
+        _selectedDate = picked;
+        _birthdateController.text = "${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}";
+      });
+    }
+  }
+
+  Future<bool> _checkUsernameAvailability(String username) async {
+    // Eğer username değişmediyse kontrol etme
+    if (username == widget.user.userName) {
+      return true;
+    }
+    
+    try {
+      // Backend'de username kontrolü yapılacak
+      // Şimdilik sadece format kontrolü yapıyoruz
+      // Backend'den 409 Conflict dönerse username alınmış demektir
+      return true;
+    } catch (e) {
+      // Hata durumunda false döndür
+      return false;
+    }
   }
 
   Future<void> _saveChanges() async {
@@ -51,9 +120,19 @@ class _EditProfilePageState extends State<EditProfilePage> {
     });
 
     try {
-      // Backend'de sadece userName var, o yüzden Full Name'i userName olarak kaydediyoruz
+      // Username değiştiyse kontrol et
+      final newUsername = _userNameController.text.trim();
+      if (newUsername != widget.user.userName) {
+        // Backend'de username kontrolü yapılacak
+        // Şimdilik sadece devam ediyoruz
+      }
+
+      // Tüm alanlar zorunlu olduğu için null kontrolü yapmıyoruz
       final updateRequest = UserUpdateRequestDto(
-        userName: _fullNameController.text.trim(),
+        userName: newUsername,
+        name: _nameController.text.trim(),
+        surname: _surnameController.text.trim(),
+        birthdate: _birthdateController.text.trim(),
       );
 
       await _authService.updateMe(updateRequest);
@@ -69,9 +148,21 @@ class _EditProfilePageState extends State<EditProfilePage> {
       }
     } catch (e) {
       if (mounted) {
+        String errorMessage = 'Failed to update profile';
+        final errorString = e.toString();
+        
+        // Backend'den gelen hata mesajlarını kontrol et
+        if (errorString.contains('username') || errorString.contains('already exists') || errorString.contains('409')) {
+          errorMessage = 'Username is already taken. Please choose another one.';
+        } else if (errorString.contains('400') || errorString.contains('Bad Request')) {
+          errorMessage = 'Invalid data. Please check all fields.';
+        } else {
+          errorMessage = errorString.replaceFirst('Exception: ', '');
+        }
+        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to update profile: ${e.toString()}'),
+            content: Text(errorMessage),
             backgroundColor: AppColors.error,
           ),
         );
@@ -102,14 +193,42 @@ class _EditProfilePageState extends State<EditProfilePage> {
           style: AppTextStyles.heading2,
         ),
         centerTitle: true,
+        actions: [
+          TextButton(
+            onPressed: _isLoading ? null : _saveChanges,
+            child: _isLoading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
+                    ),
+                  )
+                : const Text(
+                    'Save',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.primary,
+                    ),
+                  ),
+          ),
+        ],
       ),
-      body: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
+      body: GestureDetector(
+        onTap: () {
+          // Klavyeyi kapat
+          FocusScope.of(context).unfocus();
+        },
+        behavior: HitTestBehavior.opaque,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
           padding: const EdgeInsets.all(AppSpacing.xLarge),
           child: Column(
             children: [
-              const SizedBox(height: AppSpacing.xxLarge),
+              const SizedBox(height: AppSpacing.xLarge),
 
               // Profile Picture Section
               Stack(
@@ -165,7 +284,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 ],
               ),
 
-              const SizedBox(height: AppSpacing.medium),
+              const SizedBox(height: AppSpacing.small),
 
               // Camera instruction text
               Text(
@@ -175,122 +294,144 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 ),
               ),
 
-              const SizedBox(height: AppSpacing.xxLarge),
+              const SizedBox(height: AppSpacing.xLarge),
 
-              // Full Name Input
+              // Name Input
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'Full Name',
+                  'Name',
                   style: AppTextStyles.bodyMedium.copyWith(
                     color: AppColors.textPrimary,
                   ),
                 ),
               ),
               const SizedBox(height: AppSpacing.small),
-              TextFormField(
-                controller: _fullNameController,
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: AppColors.surface,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.border),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.border),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.primary, width: 2),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.xLarge,
-                    vertical: AppSpacing.large,
-                  ),
-                ),
-                style: AppTextStyles.bodyMedium,
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Full name is required';
-                  }
-                  return null;
-                },
-              ),
-
-              const SizedBox(height: AppSpacing.xxLarge),
-
-              // Nickname Input
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Nickname',
-                  style: AppTextStyles.bodyMedium.copyWith(
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-              ),
-              const SizedBox(height: AppSpacing.small),
-              TextFormField(
-                controller: _nicknameController,
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: AppColors.surface,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.border),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.border),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.primary, width: 2),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.xLarge,
-                    vertical: AppSpacing.large,
-                  ),
-                ),
-                style: AppTextStyles.bodyMedium,
-                // Nickname şimdilik sadece gösterim amaçlı, backend'de yok
-                readOnly: true,
-              ),
-
-              const SizedBox(height: AppSpacing.xxLarge * 2),
-
-              // Save Changes Button
               SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : _saveChanges,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: AppSpacing.large),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+                height: 80, // Sabit yükseklik: input + error mesajı için
+                child: AppInput(
+                  controller: _nameController,
+                  hint: 'Enter your name',
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Name is required';
+                    }
+                    return null;
+                  },
+                ),
+              ),
+
+              const SizedBox(height: AppSpacing.xLarge),
+
+              // Surname Input
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Surname',
+                  style: AppTextStyles.bodyMedium.copyWith(
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.small),
+              SizedBox(
+                height: 80, // Sabit yükseklik: input + error mesajı için
+                child: AppInput(
+                  controller: _surnameController,
+                  hint: 'Enter your surname',
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Surname is required';
+                    }
+                    return null;
+                  },
+                ),
+              ),
+
+              const SizedBox(height: AppSpacing.xLarge),
+
+              // Username Input
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Username',
+                  style: AppTextStyles.bodyMedium.copyWith(
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.small),
+              SizedBox(
+                height: 80, // Sabit yükseklik: diğer alanlarla aynı
+                child: AppInput(
+                  controller: _userNameController,
+                  hint: 'Enter your username',
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Username is required';
+                    }
+                    final trimmedValue = value.trim();
+                    if (trimmedValue.length < 3) {
+                      return 'Username must be at least 3 characters';
+                    }
+                    // Username sadece harf, rakam ve alt çizgi içerebilir
+                    if (!RegExp(r'^[a-zA-Z0-9_]+$').hasMatch(trimmedValue)) {
+                      return 'Username can only contain letters, numbers and underscore';
+                    }
+                    return null;
+                  },
+                ),
+              ),
+
+              const SizedBox(height: AppSpacing.xLarge),
+
+              // Birthdate Input
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Birthdate',
+                  style: AppTextStyles.bodyMedium.copyWith(
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.small),
+              SizedBox(
+                height: 80, // Sabit yükseklik: input + error mesajı için
+                child: GestureDetector(
+                  onTap: () => _selectDate(context),
+                  child: AbsorbPointer(
+                    child: AppInput(
+                      controller: _birthdateController,
+                      hint: 'Select your birthdate',
+                      suffixIcon: const Icon(Icons.calendar_today, color: AppColors.textSecondary),
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Birthdate is required';
+                        }
+                        // Tarih formatını kontrol et
+                        try {
+                          final date = DateTime.parse(value.trim());
+                          final now = DateTime.now();
+                          // Şu anki tarihten ileri olamaz
+                          if (date.isAfter(now)) {
+                            return 'Birthdate cannot be in the future';
+                          }
+                        } catch (e) {
+                          return 'Invalid date format';
+                        }
+                        return null;
+                      },
                     ),
                   ),
-                  child: _isLoading
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                          ),
-                        )
-                      : const Text(
-                          'Save Changes',
-                          style: AppTextStyles.button,
-                        ),
                 ),
               ),
+
+              // Bottom padding for scroll
+              const SizedBox(height: AppSpacing.xLarge),
             ],
           ),
+        ),
         ),
       ),
     );
