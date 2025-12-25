@@ -12,6 +12,7 @@ class ProductCard extends StatelessWidget {
   final double rating;
   final String desc;
   final bool isFavorite;
+  final VoidCallback? onTap;
 
   const ProductCard({
     super.key,
@@ -21,102 +22,102 @@ class ProductCard extends StatelessWidget {
     required this.rating,
     required this.desc,
     this.isFavorite = false,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      // Genişliği parent (grid) belirlesin, kartlar aynı hizada dursun
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-      decoration: AppDecorations.productCard,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Ürün resmi - Sabit boyutlu container içinde
-          Container(
-            height: AppSpacing.productImageHeight,
-            width: double.infinity,
-            decoration: BoxDecoration(
-              borderRadius: AppDecorations.cardRadius,
-              color: AppColors.background,
-            ),
-            child: ClipRRect(
-              borderRadius: AppDecorations.cardRadius,
-              child: Image.network(
-                imageUrl,
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) {
-                  return Container(
-                    color: AppColors.background,
-                    child: const Icon(
-                      Icons.image_not_supported,
-                      color: AppColors.textSecondary,
-                    ),
-                  );
-                },
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+        decoration: AppDecorations.productCard,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Ürün resmi
+            Container(
+              height: AppSpacing.productImageHeight,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                borderRadius: AppDecorations.cardRadius,
+                color: AppColors.background,
               ),
-            ),
-          ),
-
-          const SizedBox(height: AppSpacing.medium),
-
-          // Title + Favorite Row
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 4),
-                  child: Text(
-                    title,
-                    style: AppTextStyles.productTitle,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+              child: ClipRRect(
+                borderRadius: AppDecorations.cardRadius,
+                child: Image.network(
+                  imageUrl,
+                  fit: BoxFit.contain,
+                  errorBuilder: (context, error, stackTrace) {
+                    return Container(
+                      color: AppColors.background,
+                      child: const Icon(
+                        Icons.image_not_supported,
+                        color: AppColors.textSecondary,
+                      ),
+                    );
+                  },
                 ),
               ),
-              Icon(
-                isFavorite ? Icons.favorite : Icons.favorite_border,
-                color: AppColors.primary,
-                size: AppIconSizes.favorite,
-              ),
-            ],
-          ),
+            ),
 
-          const SizedBox(height: AppSpacing.small),
+            const SizedBox(height: AppSpacing.medium),
 
-          // Category
-          Text(
-            category.toUpperCase(),
-            style: AppTextStyles.productCategory,
-          ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: Text(
+                      title,
+                      style: AppTextStyles.productTitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+                Icon(
+                  isFavorite ? Icons.favorite : Icons.favorite_border,
+                  color: AppColors.primary,
+                  size: AppIconSizes.favorite,
+                ),
+              ],
+            ),
 
-          const SizedBox(height: AppSpacing.medium),
+            const SizedBox(height: AppSpacing.small),
 
-          // Rating
-          Row(
-            children: List.generate(
-              5,
-                  (index) => Icon(
-                index < rating ? Icons.star : Icons.star_border,
-                size: AppIconSizes.rating,
-                color: AppColors.primary,
+            Text(
+              category.toUpperCase(),
+              style: AppTextStyles.productCategory,
+            ),
+
+            const SizedBox(height: AppSpacing.medium),
+
+            Row(
+              children: List.generate(
+                5,
+                    (index) => Icon(
+                  index < rating ? Icons.star : Icons.star_border,
+                  size: AppIconSizes.rating,
+                  color: AppColors.primary,
+                ),
               ),
             ),
-          ),
 
-          const SizedBox(height: 2),
+            const SizedBox(height: 2),
 
-          // Description
-          Text(
-            desc,
-            style: AppTextStyles.productDesc,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
+            Text(
+              desc,
+              style: AppTextStyles.productDesc,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
       ),
     );
   }
 }
+

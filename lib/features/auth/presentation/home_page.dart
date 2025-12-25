@@ -7,6 +7,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../widgets/product_card.dart';
 import '../widgets/top_product_card.dart';
 import 'profile/pages/profile_page.dart';
+import 'review/pages/review_page.dart';
 import '../data/repositories/tag_repository.dart';
 import '../data/repositories/product_repository.dart';
 import '../data/repositories/auth_repository.dart';
@@ -236,7 +237,15 @@ class _HomePageState extends State<HomePage> {
                   category: product.tag.name,
                   rating: 0.0, // Default rating if not provided by backend
                   desc: product.description ?? '', // Use description from backend or empty string
-                  isFavorite: false, // Default favorite status if not provided by backend
+                  isFavorite: false,
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ReviewPage(product: product),
+                      ),
+                    );
+                  },// Default favorite status if not provided by backend
                 );
               },
             ),
