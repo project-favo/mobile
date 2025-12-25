@@ -68,6 +68,17 @@ class AppTextStyles {
     color: AppColors.textSecondary,
   );
 
+  static const TextStyle bodyBold = TextStyle(
+    fontSize: 22,
+    fontWeight: FontWeight.w600,
+    decoration: TextDecoration.none,
+  );
+
+  static const TextStyle chip = TextStyle(
+    fontSize: 14,
+    decoration: TextDecoration.none,
+  );
+
   // =========================
   // Links / Actions
   // =========================
@@ -103,6 +114,12 @@ class AppTextStyles {
     fontWeight: FontWeight.w600,
     color: AppColors.primary,
     letterSpacing: 0.5,
+  );
+
+  static const productCardCategory = TextStyle(
+    fontSize: 16,
+    fontWeight: FontWeight.w600,
+    color: AppColors.primary,
   );
 
   static const productDesc = TextStyle(
