@@ -6,6 +6,8 @@ class ProductDto {
   final String imageURL;
   final String? description;
   final TagDto tag;
+  final double? averageRating;
+  final bool? isLiked;
 
   ProductDto({
     required this.id,
@@ -13,6 +15,8 @@ class ProductDto {
     required this.imageURL,
     this.description,
     required this.tag,
+    this.averageRating,
+    this.isLiked,
   });
 
   factory ProductDto.fromJson(Map<String, dynamic> json) {
@@ -22,6 +26,12 @@ class ProductDto {
       imageURL: json['imageURL']?.toString() ?? '',
       description: json['description']?.toString(),
       tag: TagDto.fromJson(json['tag'] ?? {}),
+      averageRating: json['averageRating'] != null 
+          ? (json['averageRating'] is num 
+              ? json['averageRating'].toDouble() 
+              : double.tryParse(json['averageRating'].toString()))
+          : null,
+      isLiked: json['isLiked'] as bool?,
     );
   }
 
@@ -32,6 +42,8 @@ class ProductDto {
       'imageURL': imageURL,
       'description': description,
       'tag': tag.toJson(),
+      'averageRating': averageRating,
+      'isLiked': isLiked,
     };
   }
 }

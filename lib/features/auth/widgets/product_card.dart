@@ -13,6 +13,7 @@ class ProductCard extends StatelessWidget {
   final String desc;
   final bool isFavorite;
   final VoidCallback? onTap;
+  final VoidCallback? onFavoriteTap;
 
   const ProductCard({
     super.key,
@@ -23,6 +24,7 @@ class ProductCard extends StatelessWidget {
     required this.desc,
     this.isFavorite = false,
     this.onTap,
+    this.onFavoriteTap,
   });
 
   @override
@@ -78,10 +80,17 @@ class ProductCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                Icon(
-                  isFavorite ? Icons.favorite : Icons.favorite_border,
-                  color: AppColors.primary,
-                  size: AppIconSizes.favorite,
+                GestureDetector(
+                  onTap: () {
+                    if (onFavoriteTap != null) {
+                      onFavoriteTap!();
+                    }
+                  },
+                  child: Icon(
+                    isFavorite ? Icons.favorite : Icons.favorite_border,
+                    color: AppColors.primary,
+                    size: AppIconSizes.favorite,
+                  ),
                 ),
               ],
             ),
@@ -95,16 +104,77 @@ class ProductCard extends StatelessWidget {
 
             const SizedBox(height: AppSpacing.medium),
 
-            Row(
-              children: List.generate(
-                5,
-                    (index) => Icon(
-                  index < rating ? Icons.star : Icons.star_border,
-                  size: AppIconSizes.rating,
-                  color: AppColors.primary,
+            // Yıldız gösterimi - sadece rating > 0 ise göster
+            if (rating > 0)
+              Row(
+                children: List.generate(
+                  5,
+                  (index) {
+                    // Rating 0-5 arası olmalı, null ise 0.0 kullan
+                    final normalizedRating = (rating.isNaN || rating.isInfinite) 
+                        ? 0.0 
+                        : rating.clamp(0.0, 5.0);
+                    
+                    // Tam dolu yıldız kontrolü: rating >= index + 1
+                    // Örnek: rating 4.0, index 3 → 4.0 >= 4 → true (4. yıldız dolu)
+                    if (normalizedRating >= index + 1) {
+                      return Icon(
+                        Icons.star,
+                        size: AppIconSizes.rating,
+                        color: AppColors.primary,
+                      );
+                    } 
+                    // Yarı dolu yıldız kontrolü: rating > index && rating < index + 1
+                    // Örnek: rating 4.5, index 4 → 4.5 > 4 && 4.5 < 5 → true (5. yıldız yarı dolu)
+                    else if (normalizedRating > index && normalizedRating < index + 1) {
+                      return SizedBox(
+                        width: AppIconSizes.rating,
+                        height: AppIconSizes.rating,
+                        child: Stack(
+                          children: [
+                            Icon(
+                              Icons.star_border,
+                              size: AppIconSizes.rating,
+                              color: AppColors.primary,
+                            ),
+                            ClipRect(
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                widthFactor: normalizedRating - index,
+                                child: Icon(
+                                  Icons.star,
+                                  size: AppIconSizes.rating,
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    } 
+                    // Boş yıldız
+                    else {
+                      return Icon(
+                        Icons.star_border,
+                        size: AppIconSizes.rating,
+                        color: AppColors.primary,
+                      );
+                    }
+                  },
+                ),
+              )
+            else
+              // Rating yoksa boş yıldızlar göster
+              Row(
+                children: List.generate(
+                  5,
+                  (index) => Icon(
+                    Icons.star_border,
+                    size: AppIconSizes.rating,
+                    color: AppColors.textSecondary,
+                  ),
                 ),
               ),
-            ),
 
             const SizedBox(height: 2),
 

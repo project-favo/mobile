@@ -11,6 +11,7 @@ import 'review/pages/review_page.dart';
 import '../data/repositories/tag_repository.dart';
 import '../data/repositories/product_repository.dart';
 import '../data/repositories/auth_repository.dart';
+import '../data/repositories/interaction_repository.dart';
 import '../data/models/tag_dto.dart';
 import '../data/models/product_dto.dart';
 
@@ -27,6 +28,7 @@ class _HomePageState extends State<HomePage> {
   final TagRepository _tagRepository = TagRepository();
   final ProductRepository _productRepository = ProductRepository();
   final AuthRepository _authRepository = AuthRepository();
+  final InteractionRepository _interactionRepository = InteractionRepository();
   
   List<TagDto> _tags = [];
   List<ProductDto> _products = [];
@@ -37,6 +39,40 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _loadData();
+  }
+
+  /// Product'ın like durumunu ve rating'ini backend'den yeniden çeker
+  Future<void> _refreshProductLikeStatus(String productId) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      final firebaseIdToken = await user.getIdToken(true); // Force refresh
+      if (firebaseIdToken == null) return;
+
+      // Backend session'ı kur
+      try {
+        await _authRepository.login(firebaseIdToken);
+      } catch (e) {
+        print('Login error in refresh: $e');
+      }
+
+      // Product'ı tamamen yeniden yükle (rating ve like durumu ile)
+      final updatedProduct = await _productRepository.getProductById(
+        productId,
+        firebaseIdToken: firebaseIdToken,
+      );
+
+      // Product listesinde bu product'ı bul ve güncelle
+      final index = _products.indexWhere((p) => p.id == productId);
+      if (index != -1) {
+        setState(() {
+          _products[index] = updatedProduct;
+        });
+      }
+    } catch (e) {
+      print('Failed to refresh product like status: $e');
+    }
   }
 
   Future<void> _loadData() async {
@@ -71,9 +107,9 @@ class _HomePageState extends State<HomePage> {
         // The backend might handle this gracefully.
       }
 
-      // Fetch tags (requires authentication) and products (no auth required)
+      // Fetch tags (requires authentication) and products (with rating and like info)
       final tags = await _tagRepository.getRootTags(firebaseIdToken);
-      final products = await _productRepository.getAllProducts();
+      final products = await _productRepository.getAllProducts(firebaseIdToken: firebaseIdToken);
       
       setState(() {
         _tags = tags;
@@ -231,21 +267,82 @@ class _HomePageState extends State<HomePage> {
               itemCount: _products.length,
               itemBuilder: (context, index) {
                 final product = _products[index];
+                // Debug: Rating ve like durumunu kontrol et
+                // print('Product: ${product.name}, Rating: ${product.averageRating}, Liked: ${product.isLiked}');
                 return ProductCard(
+                  key: ValueKey('product_${product.id}_${product.isLiked}_${product.averageRating}'), // Like ve rating durumu değiştiğinde widget'ı yenile
                   imageUrl: product.imageURL,
                   title: product.name,
                   category: product.tag.name,
-                  rating: 0.0, // Default rating if not provided by backend
+                  rating: product.averageRating ?? 0.0, // Backend'den gelen rating
                   desc: product.description ?? '', // Use description from backend or empty string
-                  isFavorite: false,
-                  onTap: () {
-                    Navigator.push(
+                  isFavorite: product.isLiked ?? false, // Backend'den gelen like durumu
+                  onTap: () async {
+                    // ReviewPage'e git ve dönüşte product'ın like durumunu kontrol et
+                    await Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder: (_) => ReviewPage(product: product),
                       ),
                     );
-                  },// Default favorite status if not provided by backend
+                    // ReviewPage'den dönüldüğünde product'ın like durumunu yenile
+                    await _refreshProductLikeStatus(product.id);
+                  },
+                  onFavoriteTap: () async {
+                    final user = FirebaseAuth.instance.currentUser;
+                    if (user == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Please login to like products'),
+                          backgroundColor: AppColors.error,
+                        ),
+                      );
+                      return;
+                    }
+                    
+                    try {
+                      // Token'ı yenile ve backend'e login yap (session için)
+                      final freshToken = await user.getIdToken(true); // Force refresh
+                      if (freshToken == null) {
+                        throw Exception('Failed to get Firebase ID token');
+                      }
+                      
+                      // Backend session'ı yenile
+                      try {
+                        await _authRepository.login(freshToken);
+                      } catch (e) {
+                        // Login hatası olabilir ama devam edelim
+                        print('Login error (may be already logged in): $e');
+                      }
+                      
+                      final newLikeStatus = await _interactionRepository.toggleProductLike(
+                        freshToken,
+                        product.id,
+                      );
+                      
+                      // Product listesini güncelle
+                      setState(() {
+                        _products[index] = ProductDto(
+                          id: product.id,
+                          name: product.name,
+                          imageURL: product.imageURL,
+                          description: product.description,
+                          tag: product.tag,
+                          averageRating: product.averageRating,
+                          isLiked: newLikeStatus,
+                        );
+                      });
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Failed to toggle like: ${e.toString()}'),
+                            backgroundColor: AppColors.error,
+                          ),
+                        );
+                      }
+                    }
+                  },
                 );
               },
             ),

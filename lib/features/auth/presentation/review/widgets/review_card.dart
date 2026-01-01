@@ -8,6 +8,9 @@ class ReviewCard extends StatelessWidget {
   final String content;
   final int rating;
   final bool isSponsored;
+  final int likeCount;
+  final bool isLiked;
+  final VoidCallback? onLikeTap;
 
   const ReviewCard({
     super.key,
@@ -15,6 +18,9 @@ class ReviewCard extends StatelessWidget {
     required this.content,
     required this.rating,
     this.isSponsored = false,
+    this.likeCount = 0,
+    this.isLiked = false,
+    this.onLikeTap,
   });
 
   @override
@@ -85,8 +91,28 @@ class ReviewCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              Icon(Icons.thumb_up_alt_outlined,
-                  size: 24, color: AppColors.textPrimary),
+              GestureDetector(
+                onTap: onLikeTap,
+                child: Row(
+                  children: [
+                    Icon(
+                      isLiked ? Icons.thumb_up : Icons.thumb_up_alt_outlined,
+                      size: 24,
+                      color: isLiked ? AppColors.primary : AppColors.textPrimary,
+                    ),
+                    if (likeCount > 0) ...[
+                      const SizedBox(width: 4),
+                      Text(
+                        likeCount.toString(),
+                        style: AppTextStyles.bodySmall.copyWith(
+                          decoration: TextDecoration.none,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
               const SizedBox(width: 12),
               Icon(Icons.flag_outlined,
                   size: 24, color: AppColors.primary),

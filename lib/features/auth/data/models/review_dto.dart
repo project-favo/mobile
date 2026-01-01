@@ -1,0 +1,171 @@
+class ReviewDto {
+  final String id;
+  final String title;
+  final String? description;
+  final bool isCollaborative;
+  final int rating;
+  final String createdAt;
+  final String productId;
+  final String productName;
+  final String ownerId;
+  final String ownerUserName;
+  final List<ReviewMediaDto> mediaList;
+  final int likeCount;
+  final bool isLikedByCurrentUser;
+
+  ReviewDto({
+    required this.id,
+    required this.title,
+    this.description,
+    required this.isCollaborative,
+    required this.rating,
+    required this.createdAt,
+    required this.productId,
+    required this.productName,
+    required this.ownerId,
+    required this.ownerUserName,
+    required this.mediaList,
+    required this.likeCount,
+    required this.isLikedByCurrentUser,
+  });
+
+  factory ReviewDto.fromJson(Map<String, dynamic> json) {
+    return ReviewDto(
+      id: json['id']?.toString() ?? '',
+      title: json['title']?.toString() ?? '',
+      description: json['description']?.toString(),
+      isCollaborative: json['isCollaborative'] as bool? ?? false,
+      rating: (json['rating'] as num?)?.toInt() ?? 0,
+      createdAt: json['createdAt']?.toString() ?? '',
+      productId: json['productId']?.toString() ?? '',
+      productName: json['productName']?.toString() ?? '',
+      ownerId: json['ownerId']?.toString() ?? '',
+      ownerUserName: json['ownerUserName']?.toString() ?? '',
+      mediaList: (json['mediaList'] as List?)
+              ?.map((item) => ReviewMediaDto.fromJson(item as Map<String, dynamic>))
+              .toList() ??
+          [],
+      likeCount: (json['likeCount'] as num?)?.toInt() ?? 0,
+      isLikedByCurrentUser: json['isLikedByCurrentUser'] as bool? ?? false,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'description': description,
+      'isCollaborative': isCollaborative,
+      'rating': rating,
+      'createdAt': createdAt,
+      'productId': productId,
+      'productName': productName,
+      'ownerId': ownerId,
+      'ownerUserName': ownerUserName,
+      'mediaList': mediaList.map((m) => m.toJson()).toList(),
+      'likeCount': likeCount,
+      'isLikedByCurrentUser': isLikedByCurrentUser,
+    };
+  }
+}
+
+class ReviewMediaDto {
+  final String id;
+  final String mimeType;
+  final String uploadDate;
+
+  ReviewMediaDto({
+    required this.id,
+    required this.mimeType,
+    required this.uploadDate,
+  });
+
+  factory ReviewMediaDto.fromJson(Map<String, dynamic> json) {
+    return ReviewMediaDto(
+      id: json['id']?.toString() ?? '',
+      mimeType: json['mimeType']?.toString() ?? '',
+      uploadDate: json['uploadDate']?.toString() ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'mimeType': mimeType,
+      'uploadDate': uploadDate,
+    };
+  }
+}
+
+class CreateReviewRequestDto {
+  final String productId;
+  final String title;
+  final String? description;
+  final bool isCollaborative;
+  final int rating;
+  final List<ReviewMediaRequestDto>? mediaList;
+
+  CreateReviewRequestDto({
+    required this.productId,
+    required this.title,
+    this.description,
+    this.isCollaborative = false,
+    required this.rating,
+    this.mediaList,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'productId': productId,
+      'title': title,
+      'description': description,
+      'isCollaborative': isCollaborative,
+      'rating': rating,
+      if (mediaList != null) 'mediaList': mediaList!.map((m) => m.toJson()).toList(),
+    };
+  }
+}
+
+class ReviewMediaRequestDto {
+  final List<int> imageData; // Base64 veya binary data
+  final String mimeType;
+
+  ReviewMediaRequestDto({
+    required this.imageData,
+    required this.mimeType,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'imageData': imageData,
+      'mimeType': mimeType,
+    };
+  }
+}
+
+class UpdateReviewRequestDto {
+  final String? title;
+  final String? description;
+  final bool? isCollaborative;
+  final int? rating;
+  final List<ReviewMediaRequestDto>? mediaList;
+
+  UpdateReviewRequestDto({
+    this.title,
+    this.description,
+    this.isCollaborative,
+    this.rating,
+    this.mediaList,
+  });
+
+  Map<String, dynamic> toJson() {
+    final json = <String, dynamic>{};
+    if (title != null) json['title'] = title;
+    if (description != null) json['description'] = description;
+    if (isCollaborative != null) json['isCollaborative'] = isCollaborative;
+    if (rating != null) json['rating'] = rating;
+    if (mediaList != null) json['mediaList'] = mediaList!.map((m) => m.toJson()).toList();
+    return json;
+  }
+}
+
