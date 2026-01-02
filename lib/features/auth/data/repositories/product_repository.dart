@@ -11,53 +11,49 @@ class ProductRepository {
   /// Optionally includes average rating and like status for each product
   Future<List<ProductDto>> getAllProducts({String? firebaseIdToken}) async {
     try {
+      // 1. Ana ürün listesini çek
       final response = await _apiClient.dio.get('/api/products');
       
       if (response.data is List) {
-        final products = (response.data as List)
+        final baseProducts = (response.data as List)
             .map((json) => ProductDto.fromJson(json as Map<String, dynamic>))
             .toList();
         
-        // Her product için rating ve like bilgilerini çek
+        // 2. Her ürün için ek bilgileri (like, rating) paralel olarak çek
         final productsWithRatings = await Future.wait(
-          products.map((product) async {
+          baseProducts.map((product) async {
             try {
-              // Average rating'i çek
-              double averageRating = 0.0;
-              try {
-                averageRating = await _interactionRepository.getProductAverageRating(product.id);
-              } catch (e) {
-                // Rating çekilemezse 0.0 kullan
-                print('Failed to get rating for product ${product.id}: $e');
-                averageRating = 0.0;
-              }
-              
-              // Like durumunu çek (eğer kullanıcı authenticated ise)
-              bool? isLiked;
-              if (firebaseIdToken != null) {
-                try {
-                  isLiked = await _interactionRepository.isProductLiked(firebaseIdToken, product.id);
-                } catch (e) {
-                  // Like durumu çekilemezse null bırak
-                  print('Failed to get like status for product ${product.id}: $e');
-                  isLiked = null;
-                }
-              }
-              
-              return ProductDto(
-                id: product.id,
-                name: product.name,
-                imageURL: product.imageURL,
-                description: product.description,
-                tag: product.tag,
-                // averageRating'i her zaman set et (0.0 olsa bile, null değil)
-                averageRating: averageRating,
-                isLiked: isLiked,
+              // Paralel olarak iki isteği birden başlatıyoruz
+              final results = await Future.wait([
+                _interactionRepository.getProductAverageRating(product.id).catchError((e) {
+                  print('Failed to get rating for product ${product.id}: $e');
+                  return 0.0;
+                }),
+                // Sadece token varsa like durumunu sor, yoksa direkt false dön
+                firebaseIdToken != null 
+                  ? _interactionRepository.isProductLiked(firebaseIdToken, product.id).catchError((e) {
+                      print('Failed to get like status for product ${product.id}: $e');
+                      return false; // Hata durumunda false dön
+                    })
+                  : Future.value(false), // Token yoksa false dön
+              ]);
+
+              // InteractionRepository'den gelen değerleri güvenli bir şekilde al
+              final double avgRating = results[0] as double? ?? 0.0;
+              final bool isLikedStatus = results[1] as bool? ?? false;
+
+              // copyWith kullanarak yeni DTO oluştur
+              return product.copyWith(
+                averageRating: avgRating,
+                isLiked: isLikedStatus,
               );
             } catch (e) {
-              // Hata durumunda orijinal product'ı döndür ama rating ve like null olabilir
               print('Error processing product ${product.id}: $e');
-              return product;
+              // Hata olsa bile listeyi bozma, ham veriyi dön (rating ve like null/false olacak)
+              return product.copyWith(
+                averageRating: 0.0,
+                isLiked: false,
+              );
             }
           }),
         );
@@ -85,27 +81,35 @@ class ProductRepository {
       
       final product = ProductDto.fromJson(response.data as Map<String, dynamic>);
       
-      // Rating ve like bilgilerini çek
+      // Rating ve like bilgilerini paralel olarak çek
       try {
-        final averageRating = await _interactionRepository.getProductAverageRating(productId);
-        bool? isLiked;
-        if (firebaseIdToken != null) {
-          isLiked = await _interactionRepository.isProductLiked(firebaseIdToken, productId);
-        }
-        
-        return ProductDto(
-          id: product.id,
-          name: product.name,
-          imageURL: product.imageURL,
-          description: product.description,
-          tag: product.tag,
-          // averageRating'i her zaman set et (0.0 olsa bile, null değil)
-          averageRating: averageRating,
-          isLiked: isLiked,
+        final results = await Future.wait([
+          _interactionRepository.getProductAverageRating(productId).catchError((e) {
+            print('Failed to get rating for product $productId: $e');
+            return 0.0;
+          }),
+          firebaseIdToken != null 
+            ? _interactionRepository.isProductLiked(firebaseIdToken, productId).catchError((e) {
+                print('Failed to get like status for product $productId: $e');
+                return false;
+              })
+            : Future.value(false),
+        ]);
+
+        final double avgRating = results[0] as double? ?? 0.0;
+        final bool isLikedStatus = results[1] as bool? ?? false;
+
+        return product.copyWith(
+          averageRating: avgRating,
+          isLiked: isLikedStatus,
         );
       } catch (e) {
-        // Hata durumunda orijinal product'ı döndür
-        return product;
+        // Hata durumunda orijinal product'ı döndür ama rating ve like değerlerini set et
+        print('Error getting product details for $productId: $e');
+        return product.copyWith(
+          averageRating: 0.0,
+          isLiked: false,
+        );
       }
     } on DioException catch (e) {
       if (e.response != null) {
@@ -129,28 +133,36 @@ class ProductRepository {
             .map((json) => ProductDto.fromJson(json as Map<String, dynamic>))
             .toList();
         
-        // Her product için rating ve like bilgilerini çek
+        // Her product için rating ve like bilgilerini paralel olarak çek
         final productsWithRatings = await Future.wait(
           products.map((product) async {
             try {
-              final averageRating = await _interactionRepository.getProductAverageRating(product.id);
-              bool? isLiked;
-              if (firebaseIdToken != null) {
-                isLiked = await _interactionRepository.isProductLiked(firebaseIdToken, product.id);
-              }
-              
-              return ProductDto(
-                id: product.id,
-                name: product.name,
-                imageURL: product.imageURL,
-                description: product.description,
-                tag: product.tag,
-                // averageRating'i her zaman set et (0.0 olsa bile, null değil)
-                averageRating: averageRating,
-                isLiked: isLiked,
+              final results = await Future.wait([
+                _interactionRepository.getProductAverageRating(product.id).catchError((e) {
+                  print('Failed to get rating for product ${product.id}: $e');
+                  return 0.0;
+                }),
+                firebaseIdToken != null 
+                  ? _interactionRepository.isProductLiked(firebaseIdToken, product.id).catchError((e) {
+                      print('Failed to get like status for product ${product.id}: $e');
+                      return false;
+                    })
+                  : Future.value(false),
+              ]);
+
+              final double avgRating = results[0] as double? ?? 0.0;
+              final bool isLikedStatus = results[1] as bool? ?? false;
+
+              return product.copyWith(
+                averageRating: avgRating,
+                isLiked: isLikedStatus,
               );
             } catch (e) {
-              return product;
+              print('Error processing product ${product.id}: $e');
+              return product.copyWith(
+                averageRating: 0.0,
+                isLiked: false,
+              );
             }
           }),
         );

@@ -46,5 +46,26 @@ class ProductDto {
       'isLiked': isLiked,
     };
   }
+
+  /// Yeni bir ProductDto oluşturur, sadece belirtilen alanları değiştirir
+  ProductDto copyWith({
+    String? id,
+    String? name,
+    String? imageURL,
+    String? description,
+    TagDto? tag,
+    double? averageRating,
+    bool? isLiked,
+  }) {
+    return ProductDto(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      imageURL: imageURL ?? this.imageURL,
+      description: description ?? this.description,
+      tag: tag ?? this.tag,
+      averageRating: averageRating ?? this.averageRating,
+      isLiked: isLiked ?? this.isLiked,
+    );
+  }
 }
 

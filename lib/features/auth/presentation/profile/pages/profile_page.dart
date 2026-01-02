@@ -56,9 +56,9 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return Scaffold(
+    return Scaffold(
         backgroundColor: AppColors.background,
-        appBar: AppBar(
+      appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
           title: const Text(
@@ -83,7 +83,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
             'Profile',
             style: AppTextStyles.HomeHeader,
           ),
-          centerTitle: true,
+        centerTitle: true,
         ),
         body: Center(
           child: Column(
@@ -113,19 +113,19 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
         title: const Text(
           'Profile',
           style: AppTextStyles.HomeHeader,
-        ),
+          ),
         centerTitle: true,
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
-            color: AppColors.primary,
+                color: AppColors.primary,
             onPressed: () async {
               // Settings'ten geri dönüldüğünde profil verilerini yeniden yükle
               final result = await Navigator.push(
                 context,
                 MaterialPageRoute(
                   builder: (_) => const SettingsPage(),
-                ),
+            ),
               );
               // Settings'ten geri dönüldüğünde (özellikle Edit Profile yapıldıysa) verileri yenile
               if (result == true || mounted) {
@@ -137,34 +137,34 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
       ),
       body: SingleChildScrollView(
         child: Column(
-          children: [
-            const SizedBox(height: AppSpacing.xxLarge),
-            
-            // Avatar
-            CircleAvatar(
+        children: [
+          const SizedBox(height: AppSpacing.xxLarge),
+
+          // Avatar
+          CircleAvatar(
               radius: 50,
               backgroundColor: AppColors.surface,
-              child: const Icon(
-                Icons.person_outline_rounded,
+            child: const Icon(
+              Icons.person_outline_rounded,
                 size: 60,
-                color: AppColors.primary,
-              ),
+              color: AppColors.primary,
             ),
+          ),
 
-            const SizedBox(height: AppSpacing.large),
+          const SizedBox(height: AppSpacing.large),
 
             // Name and Surname - Backend'den gelen name ve surname
             // Eğer name ve surname varsa göster, yoksa sadece username göster
             if (_user!.name != null || _user!.surname != null) ...[
-              Text(
+          Text(
                 '${_user!.name ?? ''} ${_user!.surname ?? ''}'.trim(),
-                style: AppTextStyles.titleMedium,
-              ),
+            style: AppTextStyles.titleMedium,
+          ),
               const SizedBox(height: AppSpacing.small),
               // Username (name/surname varsa altında göster)
-              Text(
+          Text(
                 '@${_user!.userName.toLowerCase().replaceAll(' ', '')}',
-                style: AppTextStyles.bodySmall.copyWith(
+            style: AppTextStyles.bodySmall.copyWith(
                   color: AppColors.textSecondary,
                 ),
               ),
@@ -173,7 +173,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
               Text(
                 '@${_user!.userName.toLowerCase().replaceAll(' ', '')}',
                 style: AppTextStyles.titleMedium,
-              ),
+          ),
             ],
 
             const SizedBox(height: AppSpacing.xxLarge),
@@ -204,7 +204,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                     borderRadius: BorderRadius.circular(12),
                   ),
                   padding: const EdgeInsets.symmetric(vertical: AppSpacing.medium),
-                ),
+          ),
                 child: const Text(
                   'Follow',
                   style: AppTextStyles.button,
@@ -230,7 +230,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                     child: _SummaryCard(
                       title: 'TOP CATEGORY',
                       content: 'Electronics 35%\nBeauty 30%\nFashion 20%',
-                    ),
+          ),
                   ),
                 ],
               ),
@@ -250,7 +250,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                 Tab(text: 'Favorites'),
                 Tab(text: 'Wishlist'),
               ],
-            ),
+          ),
 
             const SizedBox(height: AppSpacing.large),
 
@@ -295,7 +295,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                   Center(child: Text('Favorites content')),
                   Center(child: Text('Wishlist content')),
                 ],
-              ),
+          ),
             ),
           ],
         ),
@@ -342,7 +342,7 @@ class _StatItem extends StatelessWidget {
         Text(
           label.split(' ').skip(1).join(' '),
           style: AppTextStyles.bodySecondary,
-        ),
+          ),
       ],
     );
   }

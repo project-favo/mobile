@@ -11,6 +11,7 @@ class ReviewCard extends StatelessWidget {
   final int likeCount;
   final bool isLiked;
   final VoidCallback? onLikeTap;
+  final VoidCallback? onTap;
 
   const ReviewCard({
     super.key,
@@ -21,17 +22,20 @@ class ReviewCard extends StatelessWidget {
     this.likeCount = 0,
     this.isLiked = false,
     this.onLikeTap,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.large),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.primary, width: 2),
-      ),
-      child: Column(
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(AppSpacing.large),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.primary, width: 2),
+        ),
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           /// USER + TAG
@@ -119,6 +123,7 @@ class ReviewCard extends StatelessWidget {
             ],
           ),
         ],
+      ),
       ),
     );
   }

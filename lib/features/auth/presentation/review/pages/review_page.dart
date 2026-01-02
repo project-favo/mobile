@@ -12,6 +12,7 @@ import '../../../data/repositories/auth_repository.dart';
 import '../../../data/repositories/review_repository.dart';
 import '../../../data/repositories/product_repository.dart';
 import 'add_review_page.dart';
+import 'review_detail_page.dart';
 
 class ReviewPage extends StatefulWidget {
   final ProductDto product;
@@ -62,6 +63,8 @@ class _ReviewPageState extends State<ReviewPage> {
         _currentProduct.id,
         firebaseIdToken: firebaseIdToken,
       );
+
+      debugPrint('ReviewPage - Product refreshed: ${updatedProduct.name}, Rating: ${updatedProduct.averageRating}, Liked: ${updatedProduct.isLiked}');
 
       setState(() {
         _currentProduct = updatedProduct;
@@ -172,18 +175,30 @@ class _ReviewPageState extends State<ReviewPage> {
         _currentProduct.id,
       );
 
-      setState(() {
-        _currentProduct = ProductDto(
-          id: _currentProduct.id,
-          name: _currentProduct.name,
-          imageURL: _currentProduct.imageURL,
-          description: _currentProduct.description,
-          tag: _currentProduct.tag,
-          averageRating: _currentProduct.averageRating,
-          isLiked: newLikeStatus,
+      debugPrint('ReviewPage - Like toggled: Product ${_currentProduct.id}, New status: $newLikeStatus');
+
+      // Backend'den product'ı tekrar çekerek doğru like durumunu al
+      // Bu, backend'deki gerçek durumu yansıtır
+      try {
+        final updatedProduct = await _productRepository.getProductById(
+          _currentProduct.id,
+          firebaseIdToken: firebaseIdToken,
         );
-        _isLoading = false;
-      });
+        
+        setState(() {
+          _currentProduct = updatedProduct;
+          _isLoading = false;
+        });
+      } catch (e) {
+        // Eğer backend'den çekme başarısız olursa, toggle'dan dönen değeri kullan
+        print('Failed to refresh product after like: $e');
+        setState(() {
+          _currentProduct = _currentProduct.copyWith(
+            isLiked: newLikeStatus,
+          );
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       setState(() {
         _isLoading = false;
@@ -396,6 +411,17 @@ class _ReviewPageState extends State<ReviewPage> {
                         isSponsored: review.isCollaborative,
                         likeCount: review.likeCount,
                         isLiked: review.isLikedByCurrentUser,
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => ReviewDetailPage(
+                                review: review,
+                                product: _currentProduct,
+                              ),
+                            ),
+                          );
+                        },
                         onLikeTap: () async {
                           final user = FirebaseAuth.instance.currentUser;
                           if (user == null) {

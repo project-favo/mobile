@@ -29,6 +29,9 @@ class ProductCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Debug: Verinin gelip gelmediğini kontrol et
+    debugPrint('ProductCard - Ürün: $title, Rating: $rating, Favori: $isFavorite');
+    
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -104,77 +107,70 @@ class ProductCard extends StatelessWidget {
 
             const SizedBox(height: AppSpacing.medium),
 
-            // Yıldız gösterimi - sadece rating > 0 ise göster
-            if (rating > 0)
-              Row(
-                children: List.generate(
-                  5,
-                  (index) {
-                    // Rating 0-5 arası olmalı, null ise 0.0 kullan
-                    final normalizedRating = (rating.isNaN || rating.isInfinite) 
-                        ? 0.0 
-                        : rating.clamp(0.0, 5.0);
-                    
-                    // Tam dolu yıldız kontrolü: rating >= index + 1
-                    // Örnek: rating 4.0, index 3 → 4.0 >= 4 → true (4. yıldız dolu)
-                    if (normalizedRating >= index + 1) {
-                      return Icon(
-                        Icons.star,
-                        size: AppIconSizes.rating,
-                        color: AppColors.primary,
-                      );
-                    } 
-                    // Yarı dolu yıldız kontrolü: rating > index && rating < index + 1
-                    // Örnek: rating 4.5, index 4 → 4.5 > 4 && 4.5 < 5 → true (5. yıldız yarı dolu)
-                    else if (normalizedRating > index && normalizedRating < index + 1) {
-                      return SizedBox(
-                        width: AppIconSizes.rating,
-                        height: AppIconSizes.rating,
-                        child: Stack(
-                          children: [
-                            Icon(
-                              Icons.star_border,
-                              size: AppIconSizes.rating,
-                              color: AppColors.primary,
-                            ),
-                            ClipRect(
-                              child: Align(
-                                alignment: Alignment.centerLeft,
-                                widthFactor: normalizedRating - index,
-                                child: Icon(
-                                  Icons.star,
-                                  size: AppIconSizes.rating,
-                                  color: AppColors.primary,
+            // Yıldız gösterimi
+            Builder(
+              builder: (context) {
+                // Rating değerini normalize et
+                final rawRating = rating;
+                final normalizedRating = (rawRating.isNaN || rawRating.isInfinite || rawRating <= 0) 
+                    ? 0.0 
+                    : rawRating.clamp(0.0, 5.0);
+                
+                return Row(
+                  children: List.generate(
+                    5,
+                    (index) {
+                      // Tam dolu yıldız kontrolü: rating >= index + 1
+                      // Örnek: rating 4.0, index 3 → 4.0 >= 4 → true (4. yıldız dolu)
+                      // Örnek: rating 4.0, index 4 → 4.0 >= 5 → false (5. yıldız boş)
+                      if (normalizedRating >= index + 1) {
+                        return Icon(
+                          Icons.star,
+                          size: AppIconSizes.rating,
+                          color: AppColors.primary,
+                        );
+                      } 
+                      // Yarı dolu yıldız kontrolü: rating > index && rating < index + 1
+                      // Örnek: rating 4.5, index 4 → 4.5 > 4 && 4.5 < 5 → true (5. yıldız yarı dolu)
+                      else if (normalizedRating > index && normalizedRating < index + 1) {
+                        return SizedBox(
+                          width: AppIconSizes.rating,
+                          height: AppIconSizes.rating,
+                          child: Stack(
+                            children: [
+                              Icon(
+                                Icons.star_border,
+                                size: AppIconSizes.rating,
+                                color: AppColors.textSecondary,
+                              ),
+                              ClipRect(
+                                child: Align(
+                                  alignment: Alignment.centerLeft,
+                                  widthFactor: normalizedRating - index,
+                                  child: Icon(
+                                    Icons.star,
+                                    size: AppIconSizes.rating,
+                                    color: AppColors.primary,
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                      );
-                    } 
-                    // Boş yıldız
-                    else {
-                      return Icon(
-                        Icons.star_border,
-                        size: AppIconSizes.rating,
-                        color: AppColors.primary,
-                      );
-                    }
-                  },
-                ),
-              )
-            else
-              // Rating yoksa boş yıldızlar göster
-              Row(
-                children: List.generate(
-                  5,
-                  (index) => Icon(
-                    Icons.star_border,
-                    size: AppIconSizes.rating,
-                    color: AppColors.textSecondary,
+                            ],
+                          ),
+                        );
+                      } 
+                      // Boş yıldız
+                      else {
+                        return Icon(
+                          Icons.star_border,
+                          size: AppIconSizes.rating,
+                          color: normalizedRating > 0 ? AppColors.textSecondary : AppColors.textSecondary,
+                        );
+                      }
+                    },
                   ),
-                ),
-              ),
+                );
+              },
+            ),
 
             const SizedBox(height: 2),
 

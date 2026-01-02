@@ -63,6 +63,8 @@ class _HomePageState extends State<HomePage> {
         firebaseIdToken: firebaseIdToken,
       );
 
+      debugPrint('HomePage - Product refreshed: ${updatedProduct.name}, Rating: ${updatedProduct.averageRating}, Liked: ${updatedProduct.isLiked}');
+
       // Product listesinde bu product'ı bul ve güncelle
       final index = _products.indexWhere((p) => p.id == productId);
       if (index != -1) {
@@ -268,7 +270,7 @@ class _HomePageState extends State<HomePage> {
               itemBuilder: (context, index) {
                 final product = _products[index];
                 // Debug: Rating ve like durumunu kontrol et
-                // print('Product: ${product.name}, Rating: ${product.averageRating}, Liked: ${product.isLiked}');
+                debugPrint('HomePage - Product: ${product.name}, Rating: ${product.averageRating}, Liked: ${product.isLiked}');
                 return ProductCard(
                   key: ValueKey('product_${product.id}_${product.isLiked}_${product.averageRating}'), // Like ve rating durumu değiştiğinde widget'ı yenile
                   imageUrl: product.imageURL,
@@ -320,18 +322,11 @@ class _HomePageState extends State<HomePage> {
                         product.id,
                       );
                       
-                      // Product listesini güncelle
-                      setState(() {
-                        _products[index] = ProductDto(
-                          id: product.id,
-                          name: product.name,
-                          imageURL: product.imageURL,
-                          description: product.description,
-                          tag: product.tag,
-                          averageRating: product.averageRating,
-                          isLiked: newLikeStatus,
-                        );
-                      });
+                      debugPrint('HomePage - Like toggled: Product ${product.id}, New status: $newLikeStatus');
+                      
+                      // Backend'den product'ı tekrar çekerek doğru like durumunu al
+                      // Bu, backend'deki gerçek durumu yansıtır
+                      await _refreshProductLikeStatus(product.id);
                     } catch (e) {
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
