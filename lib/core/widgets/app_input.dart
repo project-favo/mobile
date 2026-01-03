@@ -9,6 +9,7 @@ class AppInput extends StatelessWidget {
   final String? Function(String?)? validator;
   final TextInputType keyboardType;
   final Widget? suffixIcon;
+  final VoidCallback? onChanged;
 
   const AppInput({
     super.key,
@@ -19,65 +20,75 @@ class AppInput extends StatelessWidget {
     this.validator,
     this.keyboardType = TextInputType.text,
     this.suffixIcon,
+    this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 64,
-      child: TextFormField(
-        controller: controller,
-        validator: validator,
-        keyboardType: keyboardType,
-        obscureText: obscure,
-        style: const TextStyle(
+    return TextFormField(
+      controller: controller,
+      validator: validator,
+      keyboardType: keyboardType,
+      obscureText: obscure,
+      onChanged: onChanged != null ? (_) => onChanged!() : null,
+      style: const TextStyle(
+        fontSize: 14,
+        color: AppColors.textPrimary,
+      ),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: const TextStyle(
           fontSize: 14,
-          color: AppColors.textPrimary,
+          color: AppColors.hint,
         ),
-        decoration: InputDecoration(
-          hintText: hint,
-          hintStyle: const TextStyle(
-            fontSize: 14,
-            color: AppColors.hint,
-          ),
-          contentPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide:
-            const BorderSide(color: AppColors.border, width: 1),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide:
-            const BorderSide(color: AppColors.textPrimary, width: 1.5),
-          ),
-          errorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide:
-            const BorderSide(color: AppColors.error, width: 1.2),
-          ),
-          focusedErrorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide:
-            const BorderSide(color: AppColors.error, width: 1.5),
-          ),
-          errorStyle: const TextStyle(fontSize: 11, height: 1.1),
-
-          suffixIcon: onToggleObscure != null
-              ? IconButton(
-            onPressed: onToggleObscure,
-            icon: Icon(
-              obscure
-                  ? Icons.visibility_off
-                  : Icons.visibility,
-              size: 18,
-              color: AppColors.hint,
-            ),
-          )
-              : suffixIcon,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        filled: true,
+        fillColor: AppColors.surface,
+        
+        // Normal border
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.border, width: 1),
         ),
+        
+        // Focused border (normal state)
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.primary, width: 2),
+        ),
+        
+        // Error border (when validation fails)
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.error, width: 2),
+        ),
+        
+        // Focused error border (when focused and has error)
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.error, width: 2),
+        ),
+        
+        // Error text style - daha görünür ve profesyonel
+        errorStyle: const TextStyle(
+          fontSize: 12,
+          color: AppColors.error,
+          height: 1.2,
+          fontWeight: FontWeight.w400,
+        ),
+        errorMaxLines: 2,
+        
+        // Suffix icon (password visibility toggle veya custom icon)
+        suffixIcon: onToggleObscure != null
+            ? IconButton(
+                onPressed: onToggleObscure,
+                icon: Icon(
+                  obscure ? Icons.visibility_off : Icons.visibility,
+                  size: 20,
+                  color: AppColors.hint,
+                ),
+              )
+            : suffixIcon,
       ),
     );
   }

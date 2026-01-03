@@ -4,6 +4,7 @@ import '../../../core/widgets/app_input.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/error_handler.dart';
 import '../data/services/auth_service.dart';
 
 class RegisterPage extends StatefulWidget {
@@ -30,6 +31,7 @@ class _RegisterPageState extends State<RegisterPage> {
   bool _submitted = false;
   bool _isLoading = false;
   DateTime? _selectedDate;
+  String? _registerError; // Backend'den gelen registration error
 
   @override
   void dispose() {
@@ -44,6 +46,11 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 
   String? _emailValidator(String? v) {
+    // Önce backend error'u kontrol et (email zaten kayıtlı gibi)
+    if (_registerError != null && _registerError!.toLowerCase().contains('email')) {
+      return _registerError;
+    }
+    
     final value = (v ?? '').trim();
     if (value.isEmpty) return "Email is required";
     final ok = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value);
@@ -64,6 +71,11 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 
   String? _userNameValidator(String? v) {
+    // Önce backend error'u kontrol et (username zaten alınmış gibi)
+    if (_registerError != null && _registerError!.toLowerCase().contains('username')) {
+      return _registerError;
+    }
+    
     final value = (v ?? '').trim();
     if (value.isEmpty) return "Username is required";
     if (value.length < 3) return "Min 3 characters";
@@ -115,7 +127,12 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 
   Future<void> _onRegister() async {
-    setState(() => _submitted = true);
+    // Önceki error'u temizle
+    setState(() {
+      _registerError = null;
+      _submitted = true;
+    });
+    
     final ok = _formKey.currentState?.validate() ?? false;
     if (!ok) return;
 
@@ -123,7 +140,7 @@ class _RegisterPageState extends State<RegisterPage> {
 
     try {
       // Firebase Auth ile kayıt ol ve backend'e istek gönder
-      final userDto = await _authService.registerWithEmailAndPassword(
+      await _authService.registerWithEmailAndPassword(
         email: _email.text.trim(),
         password: _password.text,
         userName: _userName.text.trim(),
@@ -132,33 +149,23 @@ class _RegisterPageState extends State<RegisterPage> {
         birthdate: _birthdate.text.trim(),
       );
 
-      // Başarılı kayıt - Login sayfasına yönlendir
+      // Başarılı kayıt - direkt login'e yönlendir (SnackBar yok)
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Registration successful! Welcome ${userDto.userName}!',
-              style: AppTextStyles.body,
-            ),
-            backgroundColor: AppColors.success,
-          ),
-        );
         Navigator.pushReplacementNamed(context, AppRoutes.login);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              e.toString().replaceFirst('Exception: ', ''),
-              style: AppTextStyles.body,
-            ),
-            backgroundColor: AppColors.error,
-          ),
-        );
+        final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
+        // Backend error'u ilgili field'a set et
+        setState(() {
+          _registerError = errorMessage;
+          _isLoading = false;
+        });
+        // Form'u yeniden validate et ki error gösterilsin
+        _formKey.currentState?.validate();
       }
     } finally {
-      if (mounted) {
+      if (mounted && _registerError == null) {
         setState(() => _isLoading = false);
       }
     }
@@ -210,22 +217,27 @@ class _RegisterPageState extends State<RegisterPage> {
                     controller: _userName,
                     hint: "Username",
                     validator: _userNameValidator,
+                    onChanged: () {
+                      if (_registerError != null) {
+                        setState(() => _registerError = null);
+                      }
+                    },
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 14),
 
                   AppInput(
                     controller: _name,
                     hint: "Name",
                     validator: _nameValidator,
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 14),
 
                   AppInput(
                     controller: _surname,
                     hint: "Surname",
                     validator: _surnameValidator,
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 14),
 
                   GestureDetector(
                     onTap: () => _selectDate(context),
@@ -238,15 +250,20 @@ class _RegisterPageState extends State<RegisterPage> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 14),
 
                   AppInput(
                     controller: _email,
                     hint: "Email Address",
                     keyboardType: TextInputType.emailAddress,
                     validator: _emailValidator,
+                    onChanged: () {
+                      if (_registerError != null) {
+                        setState(() => _registerError = null);
+                      }
+                    },
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 14),
 
                   AppInput(
                     controller: _password,
@@ -256,7 +273,7 @@ class _RegisterPageState extends State<RegisterPage> {
                         setState(() => _obscurePassword = !_obscurePassword),
                     validator: _passwordValidator,
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 14),
 
                   AppInput(
                     controller: _confirmPassword,
@@ -285,7 +302,7 @@ class _RegisterPageState extends State<RegisterPage> {
                           const TextSpan(text: "Already have an account? "),
                           WidgetSpan(
                             child: GestureDetector(
-                              onTap: () => Navigator.pushReplacementNamed(
+                              onTap: () => Navigator.pushNamed(
                                   context, AppRoutes.login),
                               child: const Text(
                                 "Login now",

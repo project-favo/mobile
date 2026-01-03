@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:cookie_jar/cookie_jar.dart';
+import 'package:flutter/foundation.dart';
 import '../config/api_config.dart';
 
 class ApiClient {
@@ -32,14 +33,16 @@ class ApiClient {
     // Add cookie manager to handle session cookies
     _dio!.interceptors.add(CookieManager(_cookieJar!));
 
-    // Error interceptor (optional - debugging için)
-    _dio!.interceptors.add(
-      LogInterceptor(
-        requestBody: true,
-        responseBody: true,
-        error: true,
-      ),
-    );
+    // Log interceptor only in debug mode (not in production)
+    if (kDebugMode) {
+      _dio!.interceptors.add(
+        LogInterceptor(
+          requestBody: true,
+          responseBody: true,
+          error: true,
+        ),
+      );
+    }
     
     _initialized = true;
   }

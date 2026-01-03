@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import '../../../../core/network/api_client.dart';
 import '../models/product_dto.dart';
 import 'interaction_repository.dart';
@@ -26,13 +27,17 @@ class ProductRepository {
               // Paralel olarak iki isteği birden başlatıyoruz
               final results = await Future.wait([
                 _interactionRepository.getProductAverageRating(product.id).catchError((e) {
-                  print('Failed to get rating for product ${product.id}: $e');
+                  if (kDebugMode) {
+                    debugPrint('Failed to get rating for product ${product.id}: $e');
+                  }
                   return 0.0;
                 }),
                 // Sadece token varsa like durumunu sor, yoksa direkt false dön
                 firebaseIdToken != null 
                   ? _interactionRepository.isProductLiked(firebaseIdToken, product.id).catchError((e) {
-                      print('Failed to get like status for product ${product.id}: $e');
+                      if (kDebugMode) {
+                        debugPrint('Failed to get like status for product ${product.id}: $e');
+                      }
                       return false; // Hata durumunda false dön
                     })
                   : Future.value(false), // Token yoksa false dön
@@ -56,7 +61,9 @@ class ProductRepository {
               
               return updatedProduct;
             } catch (e) {
-              print('Error processing product ${product.id}: $e');
+              if (kDebugMode) {
+                debugPrint('Error processing product ${product.id}: $e');
+              }
               // Hata olsa bile listeyi bozma, ham veriyi dön (rating ve like null/false olacak)
               return product.copyWith(
                 averageRating: 0.0,
@@ -93,12 +100,16 @@ class ProductRepository {
       try {
         final results = await Future.wait([
           _interactionRepository.getProductAverageRating(productId).catchError((e) {
-            print('Failed to get rating for product $productId: $e');
+            if (kDebugMode) {
+              debugPrint('Failed to get rating for product $productId: $e');
+            }
             return 0.0;
           }),
           firebaseIdToken != null 
             ? _interactionRepository.isProductLiked(firebaseIdToken, productId).catchError((e) {
-                print('Failed to get like status for product $productId: $e');
+                if (kDebugMode) {
+                  debugPrint('Failed to get like status for product $productId: $e');
+                }
                 return false;
               })
             : Future.value(false),
@@ -113,7 +124,9 @@ class ProductRepository {
         );
       } catch (e) {
         // Hata durumunda orijinal product'ı döndür ama rating ve like değerlerini set et
-        print('Error getting product details for $productId: $e');
+        if (kDebugMode) {
+          debugPrint('Error getting product details for $productId: $e');
+        }
         return product.copyWith(
           averageRating: 0.0,
           isLiked: false,
@@ -147,12 +160,16 @@ class ProductRepository {
             try {
               final results = await Future.wait([
                 _interactionRepository.getProductAverageRating(product.id).catchError((e) {
-                  print('Failed to get rating for product ${product.id}: $e');
+                  if (kDebugMode) {
+                    debugPrint('Failed to get rating for product ${product.id}: $e');
+                  }
                   return 0.0;
                 }),
                 firebaseIdToken != null 
                   ? _interactionRepository.isProductLiked(firebaseIdToken, product.id).catchError((e) {
-                      print('Failed to get like status for product ${product.id}: $e');
+                      if (kDebugMode) {
+                        debugPrint('Failed to get like status for product ${product.id}: $e');
+                      }
                       return false;
                     })
                   : Future.value(false),
@@ -166,7 +183,9 @@ class ProductRepository {
                 isLiked: isLikedStatus,
               );
             } catch (e) {
-              print('Error processing product ${product.id}: $e');
+              if (kDebugMode) {
+                debugPrint('Error processing product ${product.id}: $e');
+              }
               return product.copyWith(
                 averageRating: 0.0,
                 isLiked: false,

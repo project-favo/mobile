@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../widgets/review_card.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/widgets/app_button.dart';
+import '../../../../../core/widgets/custom_refresh_indicator.dart';
+import '../../../../../core/widgets/skeleton_loader.dart';
+import '../../../../../core/routes/custom_page_transitions.dart';
+import '../../../../../core/utils/error_handler.dart';
+import '../../../../../core/utils/session_helper.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/models/review_dto.dart';
 import '../../../data/repositories/interaction_repository.dart';
-import '../../../data/repositories/auth_repository.dart';
 import '../../../data/repositories/review_repository.dart';
 import '../../../data/repositories/product_repository.dart';
 import 'add_review_page.dart';
@@ -27,9 +32,9 @@ class _ReviewPageState extends State<ReviewPage> {
   final InteractionRepository _interactionRepository = InteractionRepository();
   final ReviewRepository _reviewRepository = ReviewRepository();
   final ProductRepository _productRepository = ProductRepository();
+  final SessionHelper _sessionHelper = SessionHelper();
   late ProductDto _currentProduct;
   List<ReviewDto> _reviews = [];
-  bool _isLoading = false;
   bool _isLoadingReviews = true;
   String? _errorMessage;
 
@@ -44,45 +49,26 @@ class _ReviewPageState extends State<ReviewPage> {
   /// Product'ı backend'den yeniden yükler (rating ve like durumu için)
   Future<void> _refreshProductData() async {
     try {
-      print('🔄 ReviewPage - _refreshProductData START');
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        print('⚠️ User is null, cannot refresh');
-        return;
-      }
+      final token = await _sessionHelper.getTokenAndSetHeader();
+      if (token == null) return;
 
-      final firebaseIdToken = await user.getIdToken(true);
-      if (firebaseIdToken == null) {
-        print('⚠️ Failed to get token');
-        return;
-      }
-
-      // Backend session'ı kur
-      try {
-        final authRepository = AuthRepository();
-        await authRepository.login(firebaseIdToken);
-      } catch (e) {
-        print('Login error in refresh: $e');
-      }
-
-      print('   Fetching product ${_currentProduct.id} from backend...');
       // Product'ı tamamen yeniden yükle
       final updatedProduct = await _productRepository.getProductById(
         _currentProduct.id,
-        firebaseIdToken: firebaseIdToken,
+        firebaseIdToken: token,
       );
 
-      print('✅ ReviewPage - Product refreshed:');
-      print('   Name: ${updatedProduct.name}');
-      print('   Rating: ${updatedProduct.averageRating}');
-      print('   Liked: ${updatedProduct.isLiked}');
+      if (kDebugMode) {
+        debugPrint('ReviewPage - Product refreshed: ${updatedProduct.name}, Rating: ${updatedProduct.averageRating}, Liked: ${updatedProduct.isLiked}');
+      }
 
       setState(() {
         _currentProduct = updatedProduct;
       });
-      print('🔄 ReviewPage - _refreshProductData END');
     } catch (e) {
-      print('❌ Failed to refresh product data: $e');
+      if (kDebugMode) {
+        debugPrint('Failed to refresh product data: $e');
+      }
     }
   }
 
@@ -115,31 +101,17 @@ class _ReviewPageState extends State<ReviewPage> {
         }
       }
 
-      // Token'ı al ve backend'e login yap (session için)
-      final firebaseIdToken = await user.getIdToken(true); // Force refresh
+      // Ensure session and get token
+      final firebaseIdToken = await _sessionHelper.ensureSession();
       if (firebaseIdToken == null) {
         throw Exception('Failed to get Firebase ID token');
       }
 
-      // Backend session'ı kur (cookie'ler için)
-      try {
-        final authRepository = AuthRepository();
-        await authRepository.login(firebaseIdToken);
-      } catch (e) {
-        // Login hatası olabilir ama devam edelim
-        print('Login error (may be already logged in): $e');
-      }
-
       // Review'ları çek
-      print('📋 ReviewPage - Loading reviews for product ${_currentProduct.id}');
       final reviews = await _reviewRepository.getReviewsByProductId(
         _currentProduct.id,
         firebaseIdToken: firebaseIdToken,
       );
-      print('📋 ReviewPage - Loaded ${reviews.length} reviews');
-      for (var review in reviews) {
-        print('   Review ID: ${review.id}, Rating: ${review.rating}, isLiked: ${review.isLikedByCurrentUser}, likeCount: ${review.likeCount}');
-      }
 
       setState(() {
         _reviews = reviews;
@@ -147,7 +119,7 @@ class _ReviewPageState extends State<ReviewPage> {
       });
     } catch (e) {
       setState(() {
-        _errorMessage = e.toString();
+        _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
         _isLoadingReviews = false;
       });
     }
@@ -167,63 +139,50 @@ class _ReviewPageState extends State<ReviewPage> {
       return;
     }
 
+    // Optimistic update - UI'ı hemen güncelle (loading indicator yok)
+    final previousLikeStatus = _currentProduct.isLiked ?? false;
     setState(() {
-      _isLoading = true;
+      _currentProduct = _currentProduct.copyWith(
+        isLiked: !previousLikeStatus,
+      );
     });
 
     try {
-      // Token'ı yenile ve backend'e login yap (session için)
-      final firebaseIdToken = await user.getIdToken(true); // Force refresh
-      if (firebaseIdToken == null) {
+      // Token al (session zaten var, sadece token'ı header'a ekle)
+      final token = await _sessionHelper.getTokenAndSetHeader();
+      if (token == null) {
         throw Exception('Failed to get Firebase ID token');
       }
 
-      // Backend session'ı yenile
-      try {
-        final authRepository = AuthRepository();
-        await authRepository.login(firebaseIdToken);
-      } catch (e) {
-        // Login hatası olabilir ama devam edelim
-        print('Login error (may be already logged in): $e');
-      }
-
+      // Backend'e like toggle isteği gönder
       final newLikeStatus = await _interactionRepository.toggleProductLike(
-        firebaseIdToken,
+        token,
         _currentProduct.id,
       );
 
-      debugPrint('ReviewPage - Like toggled: Product ${_currentProduct.id}, New status: $newLikeStatus');
-
-      // Backend'den product'ı tekrar çekerek doğru like durumunu al
-      // Bu, backend'deki gerçek durumu yansıtır
-      try {
-        final updatedProduct = await _productRepository.getProductById(
-          _currentProduct.id,
-          firebaseIdToken: firebaseIdToken,
-        );
-        
-        setState(() {
-          _currentProduct = updatedProduct;
-          _isLoading = false;
-        });
-      } catch (e) {
-        // Eğer backend'den çekme başarısız olursa, toggle'dan dönen değeri kullan
-        print('Failed to refresh product after like: $e');
-        setState(() {
-          _currentProduct = _currentProduct.copyWith(
-            isLiked: newLikeStatus,
-          );
-          _isLoading = false;
-        });
+      if (kDebugMode) {
+        debugPrint('ReviewPage - Like toggled: Product ${_currentProduct.id}, New status: $newLikeStatus');
       }
-    } catch (e) {
+
+      // Backend'den gelen gerçek durumu güncelle (arka planda, kullanıcı fark etmez)
       setState(() {
-        _isLoading = false;
+        _currentProduct = _currentProduct.copyWith(
+          isLiked: newLikeStatus,
+        );
       });
+    } catch (e) {
+      // Hata durumunda optimistic update'i geri al
+      setState(() {
+        _currentProduct = _currentProduct.copyWith(
+          isLiked: previousLikeStatus,
+        );
+      });
+      
       if (mounted) {
+        final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to toggle like: ${e.toString()}'),
+            content: Text(errorMessage),
             backgroundColor: AppColors.error,
           ),
         );
@@ -233,43 +192,50 @@ class _ReviewPageState extends State<ReviewPage> {
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: false, // Sistem geri butonunu engelle
-      onPopInvoked: (didPop) {
-        if (!didPop) {
-          // Geri butonuna basıldığında güncellenmiş product'ı döndür
-          Navigator.pop(context, _currentProduct);
-        }
-      },
-      child: Scaffold(
-        backgroundColor: AppColors.background,
-        appBar: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          iconTheme: const IconThemeData(color: AppColors.primary),
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: AppColors.primary),
-            onPressed: () {
-              // Geri butonuna basıldığında güncellenmiş product'ı döndür
-              Navigator.pop(context, _currentProduct);
-            },
-          ),
-        ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.xLarge),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: AppColors.primary),
+      ),
+      body: CustomRefreshIndicator(
+        onRefresh: () async {
+          await Future.wait([
+            _loadReviews(),
+            _refreshProductData(),
+          ]);
+        },
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.xLarge),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
 
-              /// PRODUCT IMAGE SECTION
-              ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: Image.network(
-                  _currentProduct.imageURL,
-                  height: 230,
-                  width: double.infinity,
-                  fit: BoxFit.fitHeight,
+              /// PRODUCT IMAGE SECTION with Hero animation
+              Hero(
+                tag: 'product_image_${_currentProduct.imageURL}',
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Image.network(
+                    _currentProduct.imageURL,
+                    height: 230,
+                    width: double.infinity,
+                    fit: BoxFit.fitHeight,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(
+                        height: 230,
+                        width: double.infinity,
+                        color: AppColors.textSecondary.withOpacity(0.1),
+                        child: const Icon(
+                          Icons.image_not_supported,
+                          color: AppColors.textSecondary,
+                          size: 48,
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ),
               const SizedBox(height: AppSpacing.xLarge),
@@ -286,23 +252,14 @@ class _ReviewPageState extends State<ReviewPage> {
                     ),
                   ),
                   GestureDetector(
-                    onTap: _isLoading ? null : _toggleLike,
-                    child: _isLoading
-                        ? const SizedBox(
-                            width: 30,
-                            height: 30,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
-                            ),
-                          )
-                        : Icon(
-                            _currentProduct.isLiked ?? false
-                                ? Icons.favorite
-                                : Icons.favorite_border,
-                            color: AppColors.primary,
-                            size: 30,
-                          ),
+                    onTap: _toggleLike,
+                    child: Icon(
+                      _currentProduct.isLiked ?? false
+                          ? Icons.favorite
+                          : Icons.favorite_border,
+                      color: AppColors.primary,
+                      size: 30,
+                    ),
                   ),
                 ],
               ),
@@ -312,7 +269,7 @@ class _ReviewPageState extends State<ReviewPage> {
               ),
               const SizedBox(height: AppSpacing.xLarge),
 
-              /// RATING STARS
+              /// RATING STARS with rating and review count
               Builder(
                 builder: (context) {
                   final rawRating = _currentProduct.averageRating ?? 0.0;
@@ -320,60 +277,90 @@ class _ReviewPageState extends State<ReviewPage> {
                       ? 0.0
                       : rawRating.clamp(0.0, 5.0);
                   
-                  print('⭐ ReviewPage - Displaying stars:');
-                  print('   rawRating: $rawRating');
-                  print('   averageRating from product: ${_currentProduct.averageRating}');
-                  print('   final rating: $rating');
-                  
-                  return Row(
-                    children: List.generate(
-                      5,
-                      (index) {
-                        // Tam dolu yıldız kontrolü: rating >= index + 1
-                        if (rating >= index + 1) {
-                          return Icon(
-                            Icons.star,
-                            size: 30,
-                            color: AppColors.primary,
-                          );
-                        } 
-                        // Yarı dolu yıldız kontrolü: rating > index && rating < index + 1
-                        else if (rating > index && rating < index + 1) {
-                          return SizedBox(
-                            width: 30,
-                            height: 30,
-                            child: Stack(
-                              children: [
-                                Icon(
-                                  Icons.star_border,
-                                  size: 30,
-                                  color: AppColors.textSecondary,
-                                ),
-                                ClipRect(
-                                  child: Align(
-                                    alignment: Alignment.centerLeft,
-                                    widthFactor: rating - index,
-                                    child: Icon(
-                                      Icons.star,
-                                      size: 30,
-                                      color: AppColors.primary,
-                                    ),
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          // Stars
+                          ...List.generate(
+                            5,
+                            (index) {
+                              // Tam dolu yıldız kontrolü: rating >= index + 1
+                              if (rating >= index + 1) {
+                                return const Icon(
+                                  Icons.star,
+                                  size: 24,
+                                  color: AppColors.primary,
+                                );
+                              } 
+                              // Yarı dolu yıldız kontrolü: rating > index && rating < index + 1
+                              else if (rating > index && rating < index + 1) {
+                                return SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: Stack(
+                                    children: [
+                                      const Icon(
+                                        Icons.star_border,
+                                        size: 24,
+                                        color: AppColors.textSecondary,
+                                      ),
+                                      ClipRect(
+                                        child: Align(
+                                          alignment: Alignment.centerLeft,
+                                          widthFactor: rating - index,
+                                          child: const Icon(
+                                            Icons.star,
+                                            size: 24,
+                                            color: AppColors.primary,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ),
-                              ],
+                                );
+                              } 
+                              // Boş yıldız
+                              else {
+                                return const Icon(
+                                  Icons.star_border,
+                                  size: 24,
+                                  color: AppColors.textSecondary,
+                                );
+                              }
+                            },
+                          ),
+                          const SizedBox(width: 8),
+                          // Rating text
+                          Text(
+                            rating.toStringAsFixed(1),
+                            style: AppTextStyles.bodyBold.copyWith(
+                              color: AppColors.textPrimary,
+                              fontSize: 16,
                             ),
-                          );
-                        } 
-                        // Boş yıldız
-                        else {
-                          return Icon(
-                            Icons.star_border,
-                            size: 30,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      // Review count
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.reviews_outlined,
+                            size: 14,
                             color: AppColors.textSecondary,
-                          );
-                        }
-                      },
-                    ),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${_reviews.length} review${_reviews.length != 1 ? 's' : ''}',
+                            style: AppTextStyles.bodySmall.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   );
                 },
               ),
@@ -401,10 +388,11 @@ class _ReviewPageState extends State<ReviewPage> {
 
               /// REVIEWS LIST
               if (_isLoadingReviews)
-                const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(AppSpacing.xxLarge),
-                    child: CircularProgressIndicator(),
+                ...List.generate(
+                  3,
+                  (index) => Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.large),
+                    child: ReviewCardSkeleton(),
                   ),
                 )
               else if (_errorMessage != null)
@@ -448,16 +436,21 @@ class _ReviewPageState extends State<ReviewPage> {
                         isSponsored: review.isCollaborative,
                         likeCount: review.likeCount,
                         isLiked: review.isLikedByCurrentUser,
-                        onTap: () {
-                          Navigator.push(
+                        onTap: () async {
+                          // Review detail'den dönüldüğünde review listesini yenile
+                          final result = await Navigator.push(
                             context,
-                            MaterialPageRoute(
-                              builder: (_) => ReviewDetailPage(
+                            SlideRightRoute(
+                              page: ReviewDetailPage(
                                 review: review,
                                 product: _currentProduct,
                               ),
                             ),
                           );
+                          // Review detail'de like yapıldıysa review listesini güncelle
+                          if (result == true) {
+                            await _loadReviews();
+                          }
                         },
                         onLikeTap: () async {
                           final user = FirebaseAuth.instance.currentUser;
@@ -465,7 +458,7 @@ class _ReviewPageState extends State<ReviewPage> {
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                  content: Text('Please login to like reviews'),
+                                  content: Text('Please login to upvote reviews'),
                                   backgroundColor: AppColors.error,
                                 ),
                               );
@@ -473,34 +466,96 @@ class _ReviewPageState extends State<ReviewPage> {
                             return;
                           }
 
+                          // Optimistic update - UI'ı hemen güncelle
+                          final reviewIndex = _reviews.indexWhere((r) => r.id == review.id);
+                          if (reviewIndex != -1) {
+                            final previousLikeStatus = _reviews[reviewIndex].isLikedByCurrentUser;
+                            final previousLikeCount = _reviews[reviewIndex].likeCount;
+                            
+                            setState(() {
+                              _reviews[reviewIndex] = ReviewDto(
+                                id: review.id,
+                                title: review.title,
+                                description: review.description,
+                                isCollaborative: review.isCollaborative,
+                                rating: review.rating,
+                                createdAt: review.createdAt,
+                                productId: review.productId,
+                                productName: review.productName,
+                                ownerId: review.ownerId,
+                                ownerUserName: review.ownerUserName,
+                                mediaList: review.mediaList,
+                                likeCount: previousLikeStatus 
+                                    ? (previousLikeCount > 0 ? previousLikeCount - 1 : 0)
+                                    : previousLikeCount + 1,
+                                isLikedByCurrentUser: !previousLikeStatus,
+                              );
+                            });
+                          }
+
                           try {
-                            final firebaseIdToken = await user.getIdToken(true);
-                            if (firebaseIdToken == null) {
+                            // Token al (session zaten var)
+                            final token = await _sessionHelper.getTokenAndSetHeader();
+                            if (token == null) {
                               throw Exception('Failed to get Firebase ID token');
                             }
 
-                            // Backend session'ı yenile
-                            try {
-                              final authRepository = AuthRepository();
-                              await authRepository.login(firebaseIdToken);
-                            } catch (e) {
-                              print('Login error: $e');
-                            }
-
+                            // Upvote toggle yap
                             final newLikeStatus = await _interactionRepository.toggleReviewLike(
-                              firebaseIdToken,
+                              token,
                               review.id,
                             );
 
-                            print('💚 Review like toggled: Review ${review.id}, New status: $newLikeStatus');
-                            
-                            // Backend'den review listesini yeniden yükle (doğru isLikedByCurrentUser değerini almak için)
-                            await _loadReviews();
+                            // Review'ı backend'den yeniden çek (güncel like durumu için)
+                            try {
+                              final updatedReview = await _reviewRepository.getReviewById(
+                                review.id,
+                                firebaseIdToken: token,
+                              );
+
+                              // Review listesini güncelle
+                              if (reviewIndex != -1) {
+                                setState(() {
+                                  _reviews[reviewIndex] = updatedReview;
+                                });
+                              }
+                            } catch (e) {
+                              // Backend'den çekme başarısız olursa, toggle'dan dönen değeri kullan
+                              if (reviewIndex != -1) {
+                                final currentReview = _reviews[reviewIndex];
+                                setState(() {
+                                  _reviews[reviewIndex] = ReviewDto(
+                                    id: currentReview.id,
+                                    title: currentReview.title,
+                                    description: currentReview.description,
+                                    isCollaborative: currentReview.isCollaborative,
+                                    rating: currentReview.rating,
+                                    createdAt: currentReview.createdAt,
+                                    productId: currentReview.productId,
+                                    productName: currentReview.productName,
+                                    ownerId: currentReview.ownerId,
+                                    ownerUserName: currentReview.ownerUserName,
+                                    mediaList: currentReview.mediaList,
+                                    likeCount: newLikeStatus
+                                        ? (currentReview.likeCount + 1)
+                                        : (currentReview.likeCount > 0 ? currentReview.likeCount - 1 : 0),
+                                    isLikedByCurrentUser: newLikeStatus,
+                                  );
+                                });
+                              }
+                            }
                           } catch (e) {
+                            // Hata durumunda optimistic update'i geri al
+                            if (reviewIndex != -1) {
+                              setState(() {
+                                _reviews[reviewIndex] = review;
+                              });
+                            }
                             if (mounted) {
+                              final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: Text('Failed to toggle like: ${e.toString()}'),
+                                  content: Text(errorMessage),
                                   backgroundColor: AppColors.error,
                                 ),
                               );
@@ -515,7 +570,7 @@ class _ReviewPageState extends State<ReviewPage> {
           ),
         ),
       ),
-
+      ),
       /// ADD REVIEW BUTTON
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.all(AppSpacing.large),
@@ -524,21 +579,20 @@ class _ReviewPageState extends State<ReviewPage> {
           onPressed: () async {
             final result = await Navigator.push(
               context,
-              MaterialPageRoute(
-                builder: (_) => AddReviewPage(product: _currentProduct),
+              SlideUpRoute(
+                page: AddReviewPage(product: _currentProduct),
               ),
             );
-            // Eğer review oluşturulduysa, review listesini ve product data'sını (rating dahil) yenile
+            // Eğer review oluşturulduysa, review listesini ve product verilerini (rating dahil) yenile
             if (result == true) {
-              await _loadReviews();
-              // Backend'in rating'i hesaplaması için kısa bir bekleme
-              await Future.delayed(const Duration(milliseconds: 500));
-              await _refreshProductData(); // Rating'i güncellemek için product data'sını yenile
+              await Future.wait([
+                _loadReviews(),
+                _refreshProductData(),
+              ]);
             }
           },
           isLoading: false,
         ),
-      ),
       ),
     );
   }

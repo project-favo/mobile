@@ -44,11 +44,6 @@ class AuthRepository {
       // Request body'yi hazırla
       final requestBody = request.toJson();
       
-      // Debug: Gönderilen verileri kontrol et
-      print('🔐 Register Request:');
-      print('  Token (first 50 chars): ${cleanToken.substring(0, cleanToken.length > 50 ? 50 : cleanToken.length)}...');
-      print('  Request Body: $requestBody');
-      
       final response = await _apiClient.dio.post(
         ApiConfig.registerPath,
         data: requestBody,
