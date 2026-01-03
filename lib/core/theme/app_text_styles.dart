@@ -62,6 +62,12 @@ class AppTextStyles {
     color: AppColors.textPrimary,
   );
 
+  static const loginMessage = TextStyle(
+    fontSize: 16,
+    fontWeight: FontWeight.w600,
+    color: AppColors.surface,
+  );
+
   static const bodySecondary = TextStyle(
     fontSize: 12,
     fontWeight: FontWeight.w400,
