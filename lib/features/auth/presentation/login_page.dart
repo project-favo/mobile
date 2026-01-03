@@ -67,7 +67,7 @@ class _LoginPageState extends State<LoginPage> {
           SnackBar(
             content: Text(
               'Welcome ${userDto.userName}!',
-              style: AppTextStyles.body,
+              style: AppTextStyles.loginMessage,
             ),
             backgroundColor: AppColors.success,
           ),
@@ -80,7 +80,7 @@ class _LoginPageState extends State<LoginPage> {
           SnackBar(
             content: Text(
               'Wrong e-mail or password!',
-              style: AppTextStyles.body,
+              style: AppTextStyles.loginMessage,
             ),
             backgroundColor: AppColors.error,
           ),
