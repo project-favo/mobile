@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/widgets/app_input.dart';
-import '../../../../../core/widgets/app_button.dart';
+import '../../../../../core/utils/error_handler.dart';
 import '../../../../auth/data/services/auth_service.dart';
 import '../../../../auth/data/models/user_response_dto.dart';
 import '../../../../auth/data/models/user_update_request_dto.dart';
@@ -29,17 +30,11 @@ class _EditProfilePageState extends State<EditProfilePage> {
   late TextEditingController _birthdateController;
   DateTime? _selectedDate;
   bool _isLoading = false;
+  String? _updateError; // Backend'den gelen update error
 
   @override
   void initState() {
     super.initState();
-    // Debug: Kullanıcı verilerini kontrol et
-    print('📋 Edit Profile - User Data:');
-    print('  Name: ${widget.user.name}');
-    print('  Surname: ${widget.user.surname}');
-    print('  Username: ${widget.user.userName}');
-    print('  Birthdate: ${widget.user.birthdate}');
-    
     _nameController = TextEditingController(text: widget.user.name ?? '');
     _surnameController = TextEditingController(text: widget.user.surname ?? '');
     _userNameController = TextEditingController(text: widget.user.userName);
@@ -51,8 +46,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
       try {
         _selectedDate = DateTime.parse(widget.user.birthdate!);
       } catch (e) {
-        print('⚠️ Birthdate parse error: $e');
         // Parse hatası durumunda null bırak
+        if (kDebugMode) {
+          debugPrint('Birthdate parse error: $e');
+        }
       }
     }
   }
@@ -93,24 +90,12 @@ class _EditProfilePageState extends State<EditProfilePage> {
     }
   }
 
-  Future<bool> _checkUsernameAvailability(String username) async {
-    // Eğer username değişmediyse kontrol etme
-    if (username == widget.user.userName) {
-      return true;
-    }
-    
-    try {
-      // Backend'de username kontrolü yapılacak
-      // Şimdilik sadece format kontrolü yapıyoruz
-      // Backend'den 409 Conflict dönerse username alınmış demektir
-      return true;
-    } catch (e) {
-      // Hata durumunda false döndür
-      return false;
-    }
-  }
-
   Future<void> _saveChanges() async {
+    // Önceki error'u temizle
+    setState(() {
+      _updateError = null;
+    });
+    
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -137,38 +122,23 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
       await _authService.updateMe(updateRequest);
 
+      // Başarılı - direkt geri dön (SnackBar yok)
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Profile updated successfully'),
-            backgroundColor: AppColors.success,
-          ),
-        );
-        Navigator.pop(context, true); // true döndürerek Settings sayfasına güncelleme yapıldığını bildir
+        Navigator.pop(context, true);
       }
     } catch (e) {
       if (mounted) {
-        String errorMessage = 'Failed to update profile';
-        final errorString = e.toString();
-        
-        // Backend'den gelen hata mesajlarını kontrol et
-        if (errorString.contains('username') || errorString.contains('already exists') || errorString.contains('409')) {
-          errorMessage = 'Username is already taken. Please choose another one.';
-        } else if (errorString.contains('400') || errorString.contains('Bad Request')) {
-          errorMessage = 'Invalid data. Please check all fields.';
-        } else {
-          errorMessage = errorString.replaceFirst('Exception: ', '');
-        }
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(errorMessage),
-            backgroundColor: AppColors.error,
-          ),
-        );
+        final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
+        // Backend error'u username field'ına set et
+        setState(() {
+          _updateError = errorMessage;
+          _isLoading = false;
+        });
+        // Form'u yeniden validate et ki error gösterilsin
+        _formKey.currentState?.validate();
       }
     } finally {
-      if (mounted) {
+      if (mounted && _updateError == null) {
         setState(() {
           _isLoading = false;
         });
@@ -307,18 +277,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 ),
               ),
               const SizedBox(height: AppSpacing.small),
-              SizedBox(
-                height: 80, // Sabit yükseklik: input + error mesajı için
-                child: AppInput(
-                  controller: _nameController,
-                  hint: 'Enter your name',
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Name is required';
-                    }
-                    return null;
-                  },
-                ),
+              AppInput(
+                controller: _nameController,
+                hint: 'Enter your name',
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Name is required';
+                  }
+                  return null;
+                },
               ),
 
               const SizedBox(height: AppSpacing.xLarge),
@@ -334,18 +301,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 ),
               ),
               const SizedBox(height: AppSpacing.small),
-              SizedBox(
-                height: 80, // Sabit yükseklik: input + error mesajı için
-                child: AppInput(
-                  controller: _surnameController,
-                  hint: 'Enter your surname',
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Surname is required';
-                    }
-                    return null;
-                  },
-                ),
+              AppInput(
+                controller: _surnameController,
+                hint: 'Enter your surname',
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Surname is required';
+                  }
+                  return null;
+                },
               ),
 
               const SizedBox(height: AppSpacing.xLarge),
@@ -361,26 +325,33 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 ),
               ),
               const SizedBox(height: AppSpacing.small),
-              SizedBox(
-                height: 80, // Sabit yükseklik: diğer alanlarla aynı
-                child: AppInput(
-                  controller: _userNameController,
-                  hint: 'Enter your username',
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Username is required';
-                    }
-                    final trimmedValue = value.trim();
-                    if (trimmedValue.length < 3) {
-                      return 'Username must be at least 3 characters';
-                    }
-                    // Username sadece harf, rakam ve alt çizgi içerebilir
-                    if (!RegExp(r'^[a-zA-Z0-9_]+$').hasMatch(trimmedValue)) {
-                      return 'Username can only contain letters, numbers and underscore';
-                    }
-                    return null;
-                  },
-                ),
+              AppInput(
+                controller: _userNameController,
+                hint: 'Enter your username',
+                validator: (value) {
+                  // Önce backend error'u kontrol et
+                  if (_updateError != null) {
+                    return _updateError;
+                  }
+                  
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Username is required';
+                  }
+                  final trimmedValue = value.trim();
+                  if (trimmedValue.length < 3) {
+                    return 'Username must be at least 3 characters';
+                  }
+                  // Username sadece harf, rakam ve alt çizgi içerebilir
+                  if (!RegExp(r'^[a-zA-Z0-9_]+$').hasMatch(trimmedValue)) {
+                    return 'Username can only contain letters, numbers and underscore';
+                  }
+                  return null;
+                },
+                onChanged: () {
+                  if (_updateError != null) {
+                    setState(() => _updateError = null);
+                  }
+                },
               ),
 
               const SizedBox(height: AppSpacing.xLarge),
@@ -396,33 +367,30 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 ),
               ),
               const SizedBox(height: AppSpacing.small),
-              SizedBox(
-                height: 80, // Sabit yükseklik: input + error mesajı için
-                child: GestureDetector(
-                  onTap: () => _selectDate(context),
-                  child: AbsorbPointer(
-                    child: AppInput(
-                      controller: _birthdateController,
-                      hint: 'Select your birthdate',
-                      suffixIcon: const Icon(Icons.calendar_today, color: AppColors.textSecondary),
-                      validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Birthdate is required';
+              GestureDetector(
+                onTap: () => _selectDate(context),
+                child: AbsorbPointer(
+                  child: AppInput(
+                    controller: _birthdateController,
+                    hint: 'Select your birthdate',
+                    suffixIcon: const Icon(Icons.calendar_today, color: AppColors.textSecondary),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Birthdate is required';
+                      }
+                      // Tarih formatını kontrol et
+                      try {
+                        final date = DateTime.parse(value.trim());
+                        final now = DateTime.now();
+                        // Şu anki tarihten ileri olamaz
+                        if (date.isAfter(now)) {
+                          return 'Birthdate cannot be in the future';
                         }
-                        // Tarih formatını kontrol et
-                        try {
-                          final date = DateTime.parse(value.trim());
-                          final now = DateTime.now();
-                          // Şu anki tarihten ileri olamaz
-                          if (date.isAfter(now)) {
-                            return 'Birthdate cannot be in the future';
-                          }
-                        } catch (e) {
-                          return 'Invalid date format';
-                        }
-                        return null;
-                      },
-                    ),
+                      } catch (e) {
+                        return 'Invalid date format';
+                      }
+                      return null;
+                    },
                   ),
                 ),
               ),

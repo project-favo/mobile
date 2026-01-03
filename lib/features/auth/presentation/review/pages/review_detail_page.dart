@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/config/api_config.dart';
+import '../../../../../core/utils/error_handler.dart';
+import '../../../../../core/utils/session_helper.dart';
 import '../../../data/models/review_dto.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/repositories/interaction_repository.dart';
-import '../../../data/repositories/auth_repository.dart';
 import '../../../data/repositories/review_repository.dart';
 
 class ReviewDetailPage extends StatefulWidget {
@@ -27,8 +29,8 @@ class ReviewDetailPage extends StatefulWidget {
 class _ReviewDetailPageState extends State<ReviewDetailPage> {
   final InteractionRepository _interactionRepository = InteractionRepository();
   final ReviewRepository _reviewRepository = ReviewRepository();
+  final SessionHelper _sessionHelper = SessionHelper();
   late ReviewDto _currentReview;
-  bool _isLoading = false;
 
   @override
   void initState() {
@@ -43,16 +45,9 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      final firebaseIdToken = await user.getIdToken(true);
+      // Get token (session already exists via cookies)
+      final firebaseIdToken = await _sessionHelper.getTokenAndSetHeader();
       if (firebaseIdToken == null) return;
-
-      // Backend session'ı kur
-      try {
-        final authRepository = AuthRepository();
-        await authRepository.login(firebaseIdToken);
-      } catch (e) {
-        print('Login error in refresh: $e');
-      }
 
       // Review'ı tamamen yeniden yükle
       final updatedReview = await _reviewRepository.getReviewById(
@@ -64,7 +59,9 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
         _currentReview = updatedReview;
       });
     } catch (e) {
-      print('Failed to refresh review: $e');
+      if (kDebugMode) {
+        debugPrint('Failed to refresh review: $e');
+      }
     }
   }
 
@@ -113,7 +110,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Please login to like reviews'),
+            content: Text('Please login to upvote reviews'),
             backgroundColor: AppColors.error,
           ),
         );
@@ -121,45 +118,103 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
       return;
     }
 
+    // Optimistic update - UI'ı hemen güncelle (loading indicator yok)
+    final previousLikeStatus = _currentReview.isLikedByCurrentUser;
+    final previousLikeCount = _currentReview.likeCount;
+    
     setState(() {
-      _isLoading = true;
+      _currentReview = ReviewDto(
+        id: _currentReview.id,
+        title: _currentReview.title,
+        description: _currentReview.description,
+        isCollaborative: _currentReview.isCollaborative,
+        rating: _currentReview.rating,
+        createdAt: _currentReview.createdAt,
+        productId: _currentReview.productId,
+        productName: _currentReview.productName,
+        ownerId: _currentReview.ownerId,
+        ownerUserName: _currentReview.ownerUserName,
+        mediaList: _currentReview.mediaList,
+        likeCount: previousLikeStatus 
+            ? (previousLikeCount > 0 ? previousLikeCount - 1 : 0)
+            : previousLikeCount + 1,
+        isLikedByCurrentUser: !previousLikeStatus,
+      );
     });
 
     try {
-      final firebaseIdToken = await user.getIdToken(true);
+      // Get token (session already exists via cookies)
+      final firebaseIdToken = await _sessionHelper.getTokenAndSetHeader();
       if (firebaseIdToken == null) {
         throw Exception('Failed to get Firebase ID token');
       }
 
-      // Backend session'ı yenile
-      try {
-        final authRepository = AuthRepository();
-        await authRepository.login(firebaseIdToken);
-      } catch (e) {
-        print('Login error: $e');
-      }
-
-      await _interactionRepository.toggleReviewLike(
+      // Upvote toggle yap
+      final newLikeStatus = await _interactionRepository.toggleReviewLike(
         firebaseIdToken,
         _currentReview.id,
       );
 
-      // Review'ı backend'den tekrar çek
-      await _refreshReview();
+      // Review'ı backend'den tekrar çek (güncel durum için)
+      try {
+        final updatedReview = await _reviewRepository.getReviewById(
+          _currentReview.id,
+          firebaseIdToken: firebaseIdToken,
+        );
+        
+        setState(() {
+          _currentReview = updatedReview;
+        });
+      } catch (e) {
+        // Backend'den çekme başarısız olursa, toggle'dan dönen değeri kullan
+        setState(() {
+          _currentReview = ReviewDto(
+            id: _currentReview.id,
+            title: _currentReview.title,
+            description: _currentReview.description,
+            isCollaborative: _currentReview.isCollaborative,
+            rating: _currentReview.rating,
+            createdAt: _currentReview.createdAt,
+            productId: _currentReview.productId,
+            productName: _currentReview.productName,
+            ownerId: _currentReview.ownerId,
+            ownerUserName: _currentReview.ownerUserName,
+            mediaList: _currentReview.mediaList,
+            likeCount: newLikeStatus
+                ? (previousLikeCount + 1)
+                : (previousLikeCount > 0 ? previousLikeCount - 1 : 0),
+            isLikedByCurrentUser: newLikeStatus,
+          );
+        });
+      }
     } catch (e) {
+      // Hata durumunda optimistic update'i geri al
+      setState(() {
+        _currentReview = ReviewDto(
+          id: _currentReview.id,
+          title: _currentReview.title,
+          description: _currentReview.description,
+          isCollaborative: _currentReview.isCollaborative,
+          rating: _currentReview.rating,
+          createdAt: _currentReview.createdAt,
+          productId: _currentReview.productId,
+          productName: _currentReview.productName,
+          ownerId: _currentReview.ownerId,
+          ownerUserName: _currentReview.ownerUserName,
+          mediaList: _currentReview.mediaList,
+          likeCount: previousLikeCount,
+          isLikedByCurrentUser: previousLikeStatus,
+        );
+      });
+      
       if (mounted) {
+        final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to toggle like: ${e.toString()}'),
+            content: Text(errorMessage),
             backgroundColor: AppColors.error,
           ),
         );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
       }
     }
   }
@@ -173,7 +228,10 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: AppColors.primary),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () {
+            // Review'da değişiklik olduysa (like/unlike) true döndür
+            Navigator.pop(context, true);
+          },
         ),
         title: const Text(
           'Review Details',
@@ -427,28 +485,18 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 GestureDetector(
-                  onTap: _isLoading ? null : _toggleLike,
+                  onTap: _toggleLike,
                   child: Row(
                     children: [
-                      _isLoading
-                          ? const SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor:
-                                    AlwaysStoppedAnimation<Color>(AppColors.primary),
-                              ),
-                            )
-                          : Icon(
-                              _currentReview.isLikedByCurrentUser
-                                  ? Icons.favorite
-                                  : Icons.favorite_border,
-                              size: 24,
-                              color: _currentReview.isLikedByCurrentUser
-                                  ? AppColors.primary
-                                  : AppColors.textPrimary,
-                            ),
+                      Icon(
+                        _currentReview.isLikedByCurrentUser
+                            ? Icons.thumb_up
+                            : Icons.thumb_up_alt_outlined,
+                        size: 24,
+                        color: _currentReview.isLikedByCurrentUser
+                            ? AppColors.primary
+                            : AppColors.textPrimary,
+                      ),
                       if (_currentReview.likeCount > 0) ...[
                         const SizedBox(width: 8),
                         Text(
@@ -486,4 +534,5 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
     );
   }
 }
+
 

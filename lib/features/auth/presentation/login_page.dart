@@ -4,6 +4,7 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_input.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/error_handler.dart';
 import '../data/services/auth_service.dart';
 
 
@@ -24,6 +25,7 @@ class _LoginPageState extends State<LoginPage> {
   bool _obscure = true;
   bool _submitted = false;
   bool _isLoading = false;
+  String? _authError; // Backend'den gelen authentication error
 
   @override
   void dispose() {
@@ -33,6 +35,15 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   String? _emailValidator(String? v) {
+    // Önce backend error'u kontrol et (yanlış email/şifre gibi)
+    // Email field'ında çerçeve kırmızı olsun ama mesaj password field'ında gösterilsin
+    if (_authError != null) {
+      // Sadece çerçeveyi kırmızı yapmak için boş string döndürme, 
+      // bunun yerine null döndürüp error state'i başka şekilde yönetmeliyiz
+      // Ya da aynı mesajı gösterelim
+      return _authError;
+    }
+    
     final value = (v ?? '').trim();
     if (value.isEmpty) return "Email is required";
     final ok = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value);
@@ -41,6 +52,11 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   String? _passwordValidator(String? v) {
+    // Önce backend error'u kontrol et (yanlış şifre gibi)
+    if (_authError != null) {
+      return _authError;
+    }
+    
     final value = (v ?? '');
     if (value.isEmpty) return "Password is required";
     if (value.length < 6) return "Min 6 characters";
@@ -48,7 +64,12 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _onLogin() async {
-    setState(() => _submitted = true);
+    // Önceki error'u temizle
+    setState(() {
+      _authError = null;
+      _submitted = true;
+    });
+    
     final ok = _formKey.currentState?.validate() ?? false;
     if (!ok) return;
 
@@ -56,38 +77,28 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       // Firebase Auth ile giriş yap ve backend'e istek gönder
-      final userDto = await _authService.loginWithEmailAndPassword(
+      await _authService.loginWithEmailAndPassword(
         email: _email.text.trim(),
         password: _password.text,
       );
 
-      // Başarılı giriş - TODO: Home sayfasına yönlendir veya state management ile user'ı sakla
+      // Başarılı giriş - direkt home'a yönlendir (SnackBar yok)
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Welcome ${userDto.userName}!',
-              style: AppTextStyles.body,
-            ),
-            backgroundColor: AppColors.success,
-          ),
-        );
-        Navigator.pushReplacementNamed(context, AppRoutes.home); // Home route'u eklendiğinde
+        Navigator.pushReplacementNamed(context, AppRoutes.home);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Wrong e-mail or password!',
-              style: AppTextStyles.body,
-            ),
-            backgroundColor: AppColors.error,
-          ),
-        );
+        final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
+        // Backend error'u password field'ına set et
+        setState(() {
+          _authError = errorMessage;
+          _isLoading = false;
+        });
+        // Form'u yeniden validate et ki error gösterilsin
+        _formKey.currentState?.validate();
       }
     } finally {
-      if (mounted) {
+      if (mounted && _authError == null) {
         setState(() => _isLoading = false);
       }
     }
@@ -95,9 +106,7 @@ class _LoginPageState extends State<LoginPage> {
 
   void _onForgotPassword() {
     // TODO: Forgot password ekranı/aksiyonu eklenebilir
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Forgot password clicked")),
-    );
+    // SnackBar yerine dialog veya başka bir sayfa açılabilir
   }
 
   @override
@@ -149,8 +158,15 @@ Widget build(BuildContext context) {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text(
-                            "Welcome!",
+                            "Welcome Back!",
                             style: AppTextStyles.heading1,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            "Sign in to continue your journey",
+                            style: AppTextStyles.bodySecondary.copyWith(
+                              fontSize: 14,
+                            ),
                           ),
                           const SizedBox(height: 18),
 
@@ -159,8 +175,14 @@ Widget build(BuildContext context) {
                             hint: "Email Address",
                             keyboardType: TextInputType.emailAddress,
                             validator: _emailValidator,
+                            onChanged: () {
+                              // Email değiştiğinde auth error'u temizle
+                              if (_authError != null) {
+                                setState(() => _authError = null);
+                              }
+                            },
                           ),
-                          const SizedBox(height: 10),
+                          const SizedBox(height: 14),
 
                           AppInput(
                             controller: _password,
@@ -169,6 +191,12 @@ Widget build(BuildContext context) {
                             onToggleObscure: () =>
                                 setState(() => _obscure = !_obscure),
                             validator: _passwordValidator,
+                            onChanged: () {
+                              // Password değiştiğinde auth error'u temizle
+                              if (_authError != null) {
+                                setState(() => _authError = null);
+                              }
+                            },
                           ),
 
                           const SizedBox(height: 6),

@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import '../../../../core/network/api_client.dart';
 
 class InteractionRepository {
@@ -220,13 +221,19 @@ class InteractionRepository {
             ? (errorData['message'] ?? errorData['error'] ?? 'Failed to get average rating')
             : errorData?.toString() ?? 'Failed to get average rating';
         // Hata durumunda 0.0 döndür (rating gösterilmez)
-        print('Failed to get rating for product $productId: $errorMessage');
+        if (kDebugMode) {
+          debugPrint('Failed to get rating for product $productId: $errorMessage');
+        }
         return 0.0;
       }
-      print('Network error getting rating for product $productId: ${e.message}');
+      if (kDebugMode) {
+        debugPrint('Network error getting rating for product $productId: ${e.message}');
+      }
       return 0.0;
     } catch (e) {
-      print('Unexpected error getting rating for product $productId: $e');
+      if (kDebugMode) {
+        debugPrint('Unexpected error getting rating for product $productId: $e');
+      }
       return 0.0;
     }
   }

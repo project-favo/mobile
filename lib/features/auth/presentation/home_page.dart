@@ -1,16 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/theme/app_chip_styles.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../../core/utils/error_handler.dart';
+import '../../../core/utils/session_helper.dart';
+import '../../../core/widgets/custom_refresh_indicator.dart';
+import '../../../core/widgets/skeleton_loader.dart';
+import '../../../core/routes/custom_page_transitions.dart';
 import '../widgets/product_card.dart';
 import '../widgets/top_product_card.dart';
 import 'profile/pages/profile_page.dart';
 import 'review/pages/review_page.dart';
 import '../data/repositories/tag_repository.dart';
 import '../data/repositories/product_repository.dart';
-import '../data/repositories/auth_repository.dart';
 import '../data/repositories/interaction_repository.dart';
 import '../data/models/tag_dto.dart';
 import '../data/models/product_dto.dart';
@@ -27,8 +32,8 @@ class _HomePageState extends State<HomePage> {
   int _selectedCategoryIndex = 0; // Seçili kategori index'i
   final TagRepository _tagRepository = TagRepository();
   final ProductRepository _productRepository = ProductRepository();
-  final AuthRepository _authRepository = AuthRepository();
   final InteractionRepository _interactionRepository = InteractionRepository();
+  final SessionHelper _sessionHelper = SessionHelper();
   
   List<TagDto> _tags = [];
   List<ProductDto> _products = [];
@@ -44,26 +49,18 @@ class _HomePageState extends State<HomePage> {
   /// Product'ın like durumunu ve rating'ini backend'den yeniden çeker
   Future<void> _refreshProductLikeStatus(String productId) async {
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
-
-      final firebaseIdToken = await user.getIdToken(true); // Force refresh
-      if (firebaseIdToken == null) return;
-
-      // Backend session'ı kur
-      try {
-        await _authRepository.login(firebaseIdToken);
-      } catch (e) {
-        print('Login error in refresh: $e');
-      }
+      final token = await _sessionHelper.getTokenAndSetHeader();
+      if (token == null) return;
 
       // Product'ı tamamen yeniden yükle (rating ve like durumu ile)
       final updatedProduct = await _productRepository.getProductById(
         productId,
-        firebaseIdToken: firebaseIdToken,
+        firebaseIdToken: token,
       );
 
-      debugPrint('HomePage - Product refreshed: ${updatedProduct.name}, Rating: ${updatedProduct.averageRating}, Liked: ${updatedProduct.isLiked}');
+      if (kDebugMode) {
+        debugPrint('HomePage - Product refreshed: ${updatedProduct.name}, Rating: ${updatedProduct.averageRating}, Liked: ${updatedProduct.isLiked}');
+      }
 
       // Product listesinde bu product'ı bul ve güncelle
       final index = _products.indexWhere((p) => p.id == productId);
@@ -73,7 +70,9 @@ class _HomePageState extends State<HomePage> {
         });
       }
     } catch (e) {
-      print('Failed to refresh product like status: $e');
+      if (kDebugMode) {
+        debugPrint('Failed to refresh product like status: $e');
+      }
     }
   }
 
@@ -92,21 +91,10 @@ class _HomePageState extends State<HomePage> {
       }
 
 
-      final firebaseIdToken = await user.getIdToken();
+      // Ensure backend session is established (only if needed)
+      final firebaseIdToken = await _sessionHelper.ensureSession();
       if (firebaseIdToken == null) {
         throw Exception('Failed to get Firebase ID token');
-      }
-
-      // IMPORTANT: Backend requires a session to be established via /api/auth/login
-      // before making authenticated requests. This establishes the session on the backend.
-      // Even though the user is already logged in via Firebase, we need to call the backend
-      // login endpoint to establish the session for subsequent authenticated requests.
-      try {
-        await _authRepository.login(firebaseIdToken);
-      } catch (e) {
-        // If login fails, it might be because the user is already logged in
-        // or the session expired. We'll continue and try the tag request anyway.
-        // The backend might handle this gracefully.
       }
 
       // Fetch tags (requires authentication) and products (with rating and like info)
@@ -120,7 +108,7 @@ class _HomePageState extends State<HomePage> {
       });
     } catch (e) {
       setState(() {
-        _errorMessage = e.toString();
+        _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
         _isLoading = false;
       });
     }
@@ -128,20 +116,64 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
+    if (_isLoading && _products.isEmpty) {
       return Scaffold(
         backgroundColor: AppColors.background,
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
-          title: const Text(
+          automaticallyImplyLeading: false, // Geri butonu olmasın
+          title: Text(
             'FAVO',
-            style: AppTextStyles.HomeHeader,
+            style: AppTextStyles.HomeHeader.copyWith(
+              fontWeight: FontWeight.w900,
+              letterSpacing: 2,
+              shadows: [
+                Shadow(
+                  color: AppColors.primary.withOpacity(0.3),
+                  offset: const Offset(0, 2),
+                  blurRadius: 4,
+                ),
+              ],
+            ),
           ),
           centerTitle: true,
         ),
-        body: const Center(
-          child: CircularProgressIndicator(),
+        body: CustomRefreshIndicator(
+          onRefresh: _loadData,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(AppSpacing.xLarge),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                /// TOP 10 SKELETON
+                const Text(
+                  'Top 10 Products',
+                  style: AppTextStyles.heading2,
+                ),
+                const SizedBox(height: AppSpacing.large),
+                SizedBox(
+                  height: 190,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: 10,
+                    separatorBuilder: (_, __) =>
+                        const SizedBox(width: AppSpacing.xLarge),
+                    itemBuilder: (context, index) => const TopProductCardSkeleton(),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xxLarge),
+                /// PRODUCTS SKELETON
+                ...List.generate(
+                  3,
+                  (index) => Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.large),
+                    child: ProductCardSkeleton(),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       );
     }
@@ -152,27 +184,51 @@ class _HomePageState extends State<HomePage> {
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
-          title: const Text(
+          automaticallyImplyLeading: false, // Geri butonu olmasın
+          title: Text(
             'FAVO',
-            style: AppTextStyles.HomeHeader,
+            style: AppTextStyles.HomeHeader.copyWith(
+              fontWeight: FontWeight.w900,
+              letterSpacing: 2,
+              shadows: [
+                Shadow(
+                  color: AppColors.primary.withOpacity(0.3),
+                  offset: const Offset(0, 2),
+                  blurRadius: 4,
+                ),
+              ],
+            ),
           ),
           centerTitle: true,
         ),
         body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                'Error: $_errorMessage',
-                style: AppTextStyles.body,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: AppSpacing.large),
-              ElevatedButton(
-                onPressed: _loadData,
-                child: const Text('Retry'),
-              ),
-            ],
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.xLarge),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.error_outline,
+                  size: 64,
+                  color: AppColors.error,
+                ),
+                const SizedBox(height: AppSpacing.large),
+                Text(
+                  _errorMessage ?? 'An error occurred',
+                  style: AppTextStyles.body,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: AppSpacing.large),
+                ElevatedButton(
+                  onPressed: _loadData,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
           ),
         ),
       );
@@ -186,9 +242,20 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text(
+        automaticallyImplyLeading: false, // Geri butonu olmasın
+        title: Text(
           'FAVO',
-          style: AppTextStyles.HomeHeader,
+          style: AppTextStyles.HomeHeader.copyWith(
+            fontWeight: FontWeight.w900,
+            letterSpacing: 2,
+            shadows: [
+              Shadow(
+                color: AppColors.primary.withOpacity(0.3),
+                offset: const Offset(0, 2),
+                blurRadius: 4,
+              ),
+            ],
+          ),
         ),
         centerTitle: true,
         actions: [
@@ -199,35 +266,37 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(AppSpacing.xLarge),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            /// TOP 10
-            const Text(
-              'Top 10 Products',
-              style: AppTextStyles.heading2,
-            ),
-            const SizedBox(height: AppSpacing.large),
-
-            SizedBox(
-              // Top 10 kartları için yükseklik (kart + gölge)
-              height: 190,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: top10Products.length,
-                separatorBuilder: (_, __) =>
-                const SizedBox(width: AppSpacing.xLarge),
-                itemBuilder: (context, index) {
-                  final product = top10Products[index];
-                  return TopProductList(
-                    imageUrl: product.imageURL,
-                    title: product.name,
-                  );
-                },
+      body: CustomRefreshIndicator(
+        onRefresh: _loadData,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(AppSpacing.xLarge),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              /// TOP 10
+              const Text(
+                'Top 10 Products',
+                style: AppTextStyles.heading2,
               ),
-            ),
+              const SizedBox(height: AppSpacing.large),
+
+              SizedBox(
+                // Top 10 kartları için yükseklik (artık daha yüksek olabilir)
+                height: 240,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: top10Products.length,
+                  separatorBuilder: (_, __) =>
+                  const SizedBox(width: AppSpacing.xLarge),
+                  itemBuilder: (context, index) {
+                    final product = top10Products[index];
+                    return TopProductList(
+                      product: product,
+                      rank: index + 1,
+                    );
+                  },
+                ),
+              ),
 
             const SizedBox(height: AppSpacing.xxLarge),
 
@@ -269,10 +338,9 @@ class _HomePageState extends State<HomePage> {
               itemCount: _products.length,
               itemBuilder: (context, index) {
                 final product = _products[index];
-                // Debug: Rating ve like durumunu kontrol et
-                debugPrint('HomePage - Product: ${product.name}, Rating: ${product.averageRating}, Liked: ${product.isLiked}');
                 return ProductCard(
                   key: ValueKey('product_${product.id}_${product.isLiked}_${product.averageRating}'), // Like ve rating durumu değiştiğinde widget'ı yenile
+                  productId: product.id,
                   imageUrl: product.imageURL,
                   title: product.name,
                   category: product.tag.name,
@@ -283,8 +351,8 @@ class _HomePageState extends State<HomePage> {
                     // ReviewPage'e git ve dönüşte product'ın like durumunu kontrol et
                     await Navigator.push(
                       context,
-                      MaterialPageRoute(
-                        builder: (_) => ReviewPage(product: product),
+                      SlideRightRoute(
+                        page: ReviewPage(product: product),
                       ),
                     );
                     // ReviewPage'den dönüldüğünde product'ın like durumunu yenile
@@ -302,36 +370,57 @@ class _HomePageState extends State<HomePage> {
                       return;
                     }
                     
+                    // Optimistic update - UI'ı hemen güncelle
+                    final currentIndex = _products.indexWhere((p) => p.id == product.id);
+                    if (currentIndex != -1) {
+                      final currentLikeStatus = _products[currentIndex].isLiked ?? false;
+                      setState(() {
+                        _products[currentIndex] = _products[currentIndex].copyWith(
+                          isLiked: !currentLikeStatus,
+                        );
+                      });
+                    }
+                    
                     try {
-                      // Token'ı yenile ve backend'e login yap (session için)
-                      final freshToken = await user.getIdToken(true); // Force refresh
-                      if (freshToken == null) {
+                      // Token al (session zaten var, sadece token'ı header'a ekle)
+                      final token = await _sessionHelper.getTokenAndSetHeader();
+                      if (token == null) {
                         throw Exception('Failed to get Firebase ID token');
                       }
                       
-                      // Backend session'ı yenile
-                      try {
-                        await _authRepository.login(freshToken);
-                      } catch (e) {
-                        // Login hatası olabilir ama devam edelim
-                        print('Login error (may be already logged in): $e');
-                      }
-                      
+                      // Backend'e like toggle isteği gönder
                       final newLikeStatus = await _interactionRepository.toggleProductLike(
-                        freshToken,
+                        token,
                         product.id,
                       );
                       
-                      debugPrint('HomePage - Like toggled: Product ${product.id}, New status: $newLikeStatus');
+                      if (kDebugMode) {
+                        debugPrint('HomePage - Like toggled: Product ${product.id}, New status: $newLikeStatus');
+                      }
                       
-                      // Backend'den product'ı tekrar çekerek doğru like durumunu al
-                      // Bu, backend'deki gerçek durumu yansıtır
-                      await _refreshProductLikeStatus(product.id);
+                      // Backend'den gelen gerçek durumu güncelle (sadece like durumu için)
+                      if (currentIndex != -1) {
+                        setState(() {
+                          _products[currentIndex] = _products[currentIndex].copyWith(
+                            isLiked: newLikeStatus,
+                          );
+                        });
+                      }
                     } catch (e) {
+                      // Hata durumunda optimistic update'i geri al
+                      if (currentIndex != -1) {
+                        setState(() {
+                          _products[currentIndex] = _products[currentIndex].copyWith(
+                            isLiked: product.isLiked,
+                          );
+                        });
+                      }
+                      
                       if (mounted) {
+                        final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: Text('Failed to toggle like: ${e.toString()}'),
+                            content: Text(errorMessage),
                             backgroundColor: AppColors.error,
                           ),
                         );
@@ -344,7 +433,7 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
       ),
-
+      ),
       /// BOTTOM NAV
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,

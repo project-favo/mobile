@@ -4,10 +4,11 @@ import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/widgets/app_button.dart';
+import '../../../../../core/utils/error_handler.dart';
+import '../../../../../core/utils/session_helper.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/models/review_dto.dart';
 import '../../../data/repositories/review_repository.dart';
-import '../../../data/repositories/auth_repository.dart';
 
 class AddReviewPage extends StatefulWidget {
   final ProductDto product;
@@ -20,6 +21,7 @@ class AddReviewPage extends StatefulWidget {
 
 class _AddReviewPageState extends State<AddReviewPage> {
   final ReviewRepository _reviewRepository = ReviewRepository();
+  final SessionHelper _sessionHelper = SessionHelper();
   final TextEditingController _reviewController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   
@@ -67,18 +69,10 @@ class _AddReviewPageState extends State<AddReviewPage> {
         throw Exception('User not authenticated. Please login first.');
       }
 
-      // Token'ı al ve backend'e login yap (session için)
-      final firebaseIdToken = await user.getIdToken(true);
+      // Ensure session and get token
+      final firebaseIdToken = await _sessionHelper.ensureSession();
       if (firebaseIdToken == null) {
         throw Exception('Failed to get Firebase ID token');
-      }
-
-      // Backend session'ı kur
-      try {
-        final authRepository = AuthRepository();
-        await authRepository.login(firebaseIdToken);
-      } catch (e) {
-        print('Login error: $e');
       }
 
       // Review oluştur
@@ -108,9 +102,10 @@ class _AddReviewPageState extends State<AddReviewPage> {
         _isLoading = false;
       });
       if (mounted) {
+        final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to post review: ${e.toString()}'),
+            content: Text(errorMessage),
             backgroundColor: AppColors.error,
           ),
         );

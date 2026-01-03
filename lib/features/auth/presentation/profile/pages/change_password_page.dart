@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
+import '../../../../../core/widgets/app_input.dart';
+import '../../../../../core/utils/error_handler.dart';
 import '../../../../auth/data/services/auth_service.dart';
 
 class ChangePasswordPage extends StatefulWidget {
@@ -21,6 +23,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
   bool _obscureCurrentPassword = true;
   bool _obscureNewPassword = true;
   bool _obscureConfirmPassword = true;
+  String? _passwordError; // Backend'den gelen password error
 
   @override
   void dispose() {
@@ -31,6 +34,11 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
   }
 
   Future<void> _changePassword() async {
+    // Önceki error'u temizle
+    setState(() {
+      _passwordError = null;
+    });
+    
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -45,26 +53,23 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
         newPassword: _newPasswordController.text,
       );
 
+      // Başarılı - direkt geri dön (SnackBar yok)
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Password changed successfully'),
-            backgroundColor: AppColors.success,
-          ),
-        );
         Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.toString().replaceFirst('Exception: ', '')),
-            backgroundColor: AppColors.error,
-          ),
-        );
+        final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
+        // Backend error'u current password field'ına set et
+        setState(() {
+          _passwordError = errorMessage;
+          _isLoading = false;
+        });
+        // Form'u yeniden validate et ki error gösterilsin
+        _formKey.currentState?.validate();
       }
     } finally {
-      if (mounted) {
+      if (mounted && _passwordError == null) {
         setState(() {
           _isLoading = false;
         });
@@ -107,48 +112,30 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                 ),
               ),
               const SizedBox(height: AppSpacing.small),
-              TextFormField(
+              AppInput(
                 controller: _currentPasswordController,
-                obscureText: _obscureCurrentPassword,
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: AppColors.surface,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.border),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.border),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.primary, width: 2),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.xLarge,
-                    vertical: AppSpacing.large,
-                  ),
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscureCurrentPassword
-                          ? Icons.visibility_outlined
-                          : Icons.visibility_off_outlined,
-                      color: AppColors.textSecondary,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _obscureCurrentPassword = !_obscureCurrentPassword;
-                      });
-                    },
-                  ),
-                ),
-                style: AppTextStyles.bodyMedium,
+                hint: 'Enter your current password',
+                obscure: _obscureCurrentPassword,
+                onToggleObscure: () {
+                  setState(() {
+                    _obscureCurrentPassword = !_obscureCurrentPassword;
+                  });
+                },
                 validator: (value) {
+                  // Önce backend error'u kontrol et (yanlış şifre gibi)
+                  if (_passwordError != null) {
+                    return _passwordError;
+                  }
+                  
                   if (value == null || value.isEmpty) {
                     return 'Current password is required';
                   }
                   return null;
+                },
+                onChanged: () {
+                  if (_passwordError != null) {
+                    setState(() => _passwordError = null);
+                  }
                 },
               ),
 
@@ -162,43 +149,15 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                 ),
               ),
               const SizedBox(height: AppSpacing.small),
-              TextFormField(
+              AppInput(
                 controller: _newPasswordController,
-                obscureText: _obscureNewPassword,
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: AppColors.surface,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.border),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.border),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.primary, width: 2),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.xLarge,
-                    vertical: AppSpacing.large,
-                  ),
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscureNewPassword
-                          ? Icons.visibility_outlined
-                          : Icons.visibility_off_outlined,
-                      color: AppColors.textSecondary,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _obscureNewPassword = !_obscureNewPassword;
-                      });
-                    },
-                  ),
-                ),
-                style: AppTextStyles.bodyMedium,
+                hint: 'Enter your new password',
+                obscure: _obscureNewPassword,
+                onToggleObscure: () {
+                  setState(() {
+                    _obscureNewPassword = !_obscureNewPassword;
+                  });
+                },
                 validator: (value) {
                   if (value == null || value.isEmpty) {
                     return 'New password is required';
@@ -223,43 +182,15 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                 ),
               ),
               const SizedBox(height: AppSpacing.small),
-              TextFormField(
+              AppInput(
                 controller: _confirmPasswordController,
-                obscureText: _obscureConfirmPassword,
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: AppColors.surface,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.border),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.border),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.primary, width: 2),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.xLarge,
-                    vertical: AppSpacing.large,
-                  ),
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscureConfirmPassword
-                          ? Icons.visibility_outlined
-                          : Icons.visibility_off_outlined,
-                      color: AppColors.textSecondary,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _obscureConfirmPassword = !_obscureConfirmPassword;
-                      });
-                    },
-                  ),
-                ),
-                style: AppTextStyles.bodyMedium,
+                hint: 'Confirm your new password',
+                obscure: _obscureConfirmPassword,
+                onToggleObscure: () {
+                  setState(() {
+                    _obscureConfirmPassword = !_obscureConfirmPassword;
+                  });
+                },
                 validator: (value) {
                   if (value == null || value.isEmpty) {
                     return 'Please confirm your new password';
