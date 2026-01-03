@@ -44,11 +44,18 @@ class _ReviewPageState extends State<ReviewPage> {
   /// Product'ı backend'den yeniden yükler (rating ve like durumu için)
   Future<void> _refreshProductData() async {
     try {
+      print('🔄 ReviewPage - _refreshProductData START');
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
+      if (user == null) {
+        print('⚠️ User is null, cannot refresh');
+        return;
+      }
 
       final firebaseIdToken = await user.getIdToken(true);
-      if (firebaseIdToken == null) return;
+      if (firebaseIdToken == null) {
+        print('⚠️ Failed to get token');
+        return;
+      }
 
       // Backend session'ı kur
       try {
@@ -58,19 +65,24 @@ class _ReviewPageState extends State<ReviewPage> {
         print('Login error in refresh: $e');
       }
 
+      print('   Fetching product ${_currentProduct.id} from backend...');
       // Product'ı tamamen yeniden yükle
       final updatedProduct = await _productRepository.getProductById(
         _currentProduct.id,
         firebaseIdToken: firebaseIdToken,
       );
 
-      debugPrint('ReviewPage - Product refreshed: ${updatedProduct.name}, Rating: ${updatedProduct.averageRating}, Liked: ${updatedProduct.isLiked}');
+      print('✅ ReviewPage - Product refreshed:');
+      print('   Name: ${updatedProduct.name}');
+      print('   Rating: ${updatedProduct.averageRating}');
+      print('   Liked: ${updatedProduct.isLiked}');
 
       setState(() {
         _currentProduct = updatedProduct;
       });
+      print('🔄 ReviewPage - _refreshProductData END');
     } catch (e) {
-      print('Failed to refresh product data: $e');
+      print('❌ Failed to refresh product data: $e');
     }
   }
 
@@ -119,10 +131,15 @@ class _ReviewPageState extends State<ReviewPage> {
       }
 
       // Review'ları çek
+      print('📋 ReviewPage - Loading reviews for product ${_currentProduct.id}');
       final reviews = await _reviewRepository.getReviewsByProductId(
         _currentProduct.id,
         firebaseIdToken: firebaseIdToken,
       );
+      print('📋 ReviewPage - Loaded ${reviews.length} reviews');
+      for (var review in reviews) {
+        print('   Review ID: ${review.id}, Rating: ${review.rating}, isLiked: ${review.isLikedByCurrentUser}, likeCount: ${review.likeCount}');
+      }
 
       setState(() {
         _reviews = reviews;
@@ -216,13 +233,28 @@ class _ReviewPageState extends State<ReviewPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: AppColors.primary),
-      ),
+    return PopScope(
+      canPop: false, // Sistem geri butonunu engelle
+      onPopInvoked: (didPop) {
+        if (!didPop) {
+          // Geri butonuna basıldığında güncellenmiş product'ı döndür
+          Navigator.pop(context, _currentProduct);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          iconTheme: const IconThemeData(color: AppColors.primary),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: AppColors.primary),
+            onPressed: () {
+              // Geri butonuna basıldığında güncellenmiş product'ı döndür
+              Navigator.pop(context, _currentProduct);
+            },
+          ),
+        ),
       body: SingleChildScrollView(
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.xLarge),
@@ -287,6 +319,11 @@ class _ReviewPageState extends State<ReviewPage> {
                   final rating = (rawRating.isNaN || rawRating.isInfinite)
                       ? 0.0
                       : rawRating.clamp(0.0, 5.0);
+                  
+                  print('⭐ ReviewPage - Displaying stars:');
+                  print('   rawRating: $rawRating');
+                  print('   averageRating from product: ${_currentProduct.averageRating}');
+                  print('   final rating: $rating');
                   
                   return Row(
                     children: List.generate(
@@ -455,31 +492,10 @@ class _ReviewPageState extends State<ReviewPage> {
                               review.id,
                             );
 
-                            // Review listesini güncelle
-                            setState(() {
-                              final index = _reviews.indexWhere((r) => r.id == review.id);
-                              if (index != -1) {
-                                // Review'ı güncelle - like durumunu değiştir
-                                final updatedReview = ReviewDto(
-                                  id: review.id,
-                                  title: review.title,
-                                  description: review.description,
-                                  isCollaborative: review.isCollaborative,
-                                  rating: review.rating,
-                                  createdAt: review.createdAt,
-                                  productId: review.productId,
-                                  productName: review.productName,
-                                  ownerId: review.ownerId,
-                                  ownerUserName: review.ownerUserName,
-                                  mediaList: review.mediaList,
-                                  likeCount: newLikeStatus
-                                      ? review.likeCount + 1
-                                      : (review.likeCount > 0 ? review.likeCount - 1 : 0),
-                                  isLikedByCurrentUser: newLikeStatus,
-                                );
-                                _reviews[index] = updatedReview;
-                              }
-                            });
+                            print('💚 Review like toggled: Review ${review.id}, New status: $newLikeStatus');
+                            
+                            // Backend'den review listesini yeniden yükle (doğru isLikedByCurrentUser değerini almak için)
+                            await _loadReviews();
                           } catch (e) {
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -512,13 +528,17 @@ class _ReviewPageState extends State<ReviewPage> {
                 builder: (_) => AddReviewPage(product: _currentProduct),
               ),
             );
-            // Eğer review oluşturulduysa, review listesini yenile
+            // Eğer review oluşturulduysa, review listesini ve product data'sını (rating dahil) yenile
             if (result == true) {
-              _loadReviews();
+              await _loadReviews();
+              // Backend'in rating'i hesaplaması için kısa bir bekleme
+              await Future.delayed(const Duration(milliseconds: 500));
+              await _refreshProductData(); // Rating'i güncellemek için product data'sını yenile
             }
           },
           isLoading: false,
         ),
+      ),
       ),
     );
   }

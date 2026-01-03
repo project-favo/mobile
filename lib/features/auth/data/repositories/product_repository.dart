@@ -42,11 +42,19 @@ class ProductRepository {
               final double avgRating = results[0] as double? ?? 0.0;
               final bool isLikedStatus = results[1] as bool? ?? false;
 
+              print('📦 ProductRepository - Product ${product.id} (${product.name}):');
+              print('   avgRating from backend: $avgRating');
+              print('   isLikedStatus: $isLikedStatus');
+
               // copyWith kullanarak yeni DTO oluştur
-              return product.copyWith(
+              final updatedProduct = product.copyWith(
                 averageRating: avgRating,
                 isLiked: isLikedStatus,
               );
+              
+              print('   Updated product averageRating: ${updatedProduct.averageRating}');
+              
+              return updatedProduct;
             } catch (e) {
               print('Error processing product ${product.id}: $e');
               // Hata olsa bile listeyi bozma, ham veriyi dön (rating ve like null/false olacak)

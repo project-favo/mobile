@@ -107,6 +107,13 @@ class ProductCard extends StatelessWidget {
 
             const SizedBox(height: AppSpacing.medium),
 
+            // DEBUG: Rating değerini göster
+            Text(
+              'Rating: $rating',
+              style: AppTextStyles.bodySmall.copyWith(color: AppColors.primary),
+            ),
+            const SizedBox(height: AppSpacing.small),
+
             // Yıldız gösterimi
             Builder(
               builder: (context) {
@@ -116,23 +123,44 @@ class ProductCard extends StatelessWidget {
                     ? 0.0 
                     : rawRating.clamp(0.0, 5.0);
                 
+                print('⭐ ProductCard - Displaying stars:');
+                print('   rawRating: $rawRating');
+                print('   normalizedRating: $normalizedRating');
+                print('   Product: $title');
+                print('   Will show ${normalizedRating.floor()} full stars');
+                
+                // Eğer rating 0 ise yıldız gösterme
+                if (normalizedRating <= 0) {
+                  return Row(
+                    children: List.generate(5, (index) => Icon(
+                      Icons.star_border,
+                      size: AppIconSizes.rating,
+                      color: AppColors.textSecondary,
+                    )),
+                  );
+                }
+                
                 return Row(
                   children: List.generate(
                     5,
                     (index) {
-                      // Tam dolu yıldız kontrolü: rating >= index + 1
-                      // Örnek: rating 4.0, index 3 → 4.0 >= 4 → true (4. yıldız dolu)
-                      // Örnek: rating 4.0, index 4 → 4.0 >= 5 → false (5. yıldız boş)
-                      if (normalizedRating >= index + 1) {
+                      final starIndex = index + 1; // 1-based index (1, 2, 3, 4, 5)
+                      
+                      // Tam dolu yıldız kontrolü: rating >= starIndex
+                      // Örnek: rating 4.0, starIndex 4 → 4.0 >= 4 → true (4. yıldız dolu)
+                      // Örnek: rating 4.0, starIndex 5 → 4.0 >= 5 → false (5. yıldız boş)
+                      if (normalizedRating >= starIndex) {
+                        print('   Star $starIndex: FULL');
                         return Icon(
                           Icons.star,
                           size: AppIconSizes.rating,
                           color: AppColors.primary,
                         );
                       } 
-                      // Yarı dolu yıldız kontrolü: rating > index && rating < index + 1
-                      // Örnek: rating 4.5, index 4 → 4.5 > 4 && 4.5 < 5 → true (5. yıldız yarı dolu)
-                      else if (normalizedRating > index && normalizedRating < index + 1) {
+                      // Yarı dolu yıldız kontrolü: rating > index && rating < starIndex
+                      // Örnek: rating 4.5, index 4, starIndex 5 → 4.5 > 4 && 4.5 < 5 → true (5. yıldız yarı dolu)
+                      else if (normalizedRating > index && normalizedRating < starIndex) {
+                        print('   Star $starIndex: HALF (rating: $normalizedRating, index: $index)');
                         return SizedBox(
                           width: AppIconSizes.rating,
                           height: AppIconSizes.rating,
@@ -160,10 +188,11 @@ class ProductCard extends StatelessWidget {
                       } 
                       // Boş yıldız
                       else {
+                        print('   Star $starIndex: EMPTY');
                         return Icon(
                           Icons.star_border,
                           size: AppIconSizes.rating,
-                          color: normalizedRating > 0 ? AppColors.textSecondary : AppColors.textSecondary,
+                          color: AppColors.textSecondary,
                         );
                       }
                     },

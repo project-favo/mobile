@@ -280,15 +280,25 @@ class _HomePageState extends State<HomePage> {
                   desc: product.description ?? '', // Use description from backend or empty string
                   isFavorite: product.isLiked ?? false, // Backend'den gelen like durumu
                   onTap: () async {
-                    // ReviewPage'e git ve dönüşte product'ın like durumunu kontrol et
-                    await Navigator.push(
+                    // ReviewPage'e git ve dönüşte güncellenmiş product'ı al
+                    final updatedProduct = await Navigator.push<ProductDto>(
                       context,
                       MaterialPageRoute(
                         builder: (_) => ReviewPage(product: product),
                       ),
                     );
-                    // ReviewPage'den dönüldüğünde product'ın like durumunu yenile
-                    await _refreshProductLikeStatus(product.id);
+                    // ReviewPage'den dönen güncellenmiş product varsa, listeyi güncelle
+                    if (updatedProduct != null) {
+                      final index = _products.indexWhere((p) => p.id == updatedProduct.id);
+                      if (index != -1) {
+                        setState(() {
+                          _products[index] = updatedProduct; // Rating ve like durumu güncellenmiş product'ı kullan
+                        });
+                      }
+                    } else {
+                      // Eğer product dönmediyse, backend'den yeniden çek
+                      await _refreshProductLikeStatus(product.id);
+                    }
                   },
                   onFavoriteTap: () async {
                     final user = FirebaseAuth.instance.currentUser;

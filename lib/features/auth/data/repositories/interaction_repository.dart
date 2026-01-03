@@ -186,11 +186,20 @@ class InteractionRepository {
   /// Returns: { "averageRating": 4.5, "productId": 123 }
   Future<double> getProductAverageRating(String productId) async {
     try {
+      print('⭐ ========== getProductAverageRating START ==========');
+      print('   Product ID: $productId');
+      
       final response = await _apiClient.dio.get('/api/interactions/product/$productId/average-rating');
+      
+      print('   Response Status Code: ${response.statusCode}');
+      print('   Response Data: ${response.data}');
       
       if (response.data is Map) {
         final ratingValue = response.data['averageRating'];
+        print('   Raw Rating Value: $ratingValue (type: ${ratingValue.runtimeType})');
+        
         if (ratingValue == null) {
+          print('⚠️ Rating value is null, returning 0.0');
           return 0.0;
         }
         
@@ -205,9 +214,14 @@ class InteractionRepository {
         }
         
         // Rating 0-5 arası olmalı
-        return rating.clamp(0.0, 5.0);
+        final finalRating = rating.clamp(0.0, 5.0);
+        print('✅ Final Rating: $finalRating');
+        print('⭐ ========== getProductAverageRating END ==========');
+        return finalRating;
       }
       
+      print('⚠️ Response is not a Map, returning 0.0');
+      print('⭐ ========== getProductAverageRating END ==========');
       return 0.0;
     } on DioException catch (e) {
       // 404 veya diğer hatalar için 0.0 döndür (rating yoksa)

@@ -92,7 +92,17 @@ class _AddReviewPageState extends State<AddReviewPage> {
         rating: _selectedRating,
       );
 
-      await _reviewRepository.createReview(firebaseIdToken, request);
+      print('📝 AddReviewPage - Creating review:');
+      print('   Product ID: ${widget.product.id}');
+      print('   Rating: $_selectedRating');
+      print('   Title: ${request.title}');
+      print('   Description: ${request.description}');
+      
+      final createdReview = await _reviewRepository.createReview(firebaseIdToken, request);
+      
+      print('✅ Review created successfully:');
+      print('   Review ID: ${createdReview.id}');
+      print('   Rating: ${createdReview.rating}');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

@@ -98,12 +98,23 @@ class ReviewRepository {
     CreateReviewRequestDto request,
   ) async {
     try {
+      print('📤 ReviewRepository - createReview START');
+      print('   Request: ${request.toJson()}');
+      
       _apiClient.setAuthToken(firebaseIdToken);
       final response = await _apiClient.dio.post(
         '/api/reviews',
         data: request.toJson(),
       );
-      return ReviewDto.fromJson(response.data as Map<String, dynamic>);
+      
+      print('   Response Status Code: ${response.statusCode}');
+      print('   Response Data: ${response.data}');
+      
+      final review = ReviewDto.fromJson(response.data as Map<String, dynamic>);
+      print('✅ Review created: ID=${review.id}, Rating=${review.rating}');
+      print('📤 ReviewRepository - createReview END');
+      
+      return review;
     } on DioException catch (e) {
       if (e.response != null) {
         final errorData = e.response?.data;

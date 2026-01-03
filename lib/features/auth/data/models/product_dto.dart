@@ -63,8 +63,10 @@ class ProductDto {
       imageURL: imageURL ?? this.imageURL,
       description: description ?? this.description,
       tag: tag ?? this.tag,
-      averageRating: averageRating ?? this.averageRating,
-      isLiked: isLiked ?? this.isLiked,
+      // averageRating için: eğer null değilse (0.0 dahil) kullan, null ise this.averageRating kullan
+      averageRating: averageRating != null ? averageRating : this.averageRating,
+      // isLiked için: eğer null değilse (false dahil) kullan, null ise this.isLiked kullan
+      isLiked: isLiked != null ? isLiked : this.isLiked,
     );
   }
 }
