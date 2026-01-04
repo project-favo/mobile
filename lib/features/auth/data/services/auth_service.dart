@@ -44,6 +44,8 @@ class AuthService {
     required String name,
     required String surname,
     required String birthdate,
+    String? profilePhotoBase64,
+    String? profilePhotoMimeType,
   }) async {
     try {
       // 1. Firebase Authentication ile kayıt ol
@@ -52,8 +54,23 @@ class AuthService {
         password: password,
       );
 
-      // 2. Firebase idToken al
-      final idToken = await userCredential.user?.getIdToken();
+      // 2. Firebase idToken al (force refresh ile yeni token al)
+      // Firebase'de kullanıcı oluşturulduktan sonra backend'in token'ı doğrulayabilmesi için delay ekle
+      await Future.delayed(const Duration(milliseconds: 1000));
+      
+      // Token'ı birkaç kez refresh etmeyi dene (bazı durumlarda ilk token henüz tam hazır olmayabilir)
+      String? idToken;
+      for (int i = 0; i < 3; i++) {
+        idToken = await userCredential.user?.getIdToken(true);
+        if (idToken != null) {
+          // Token başarıyla alındı, kısa bir delay daha ekle
+          await Future.delayed(const Duration(milliseconds: 300));
+          break;
+        }
+        // Token alınamadıysa kısa bir delay ile tekrar dene
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
+      
       if (idToken == null) {
         throw Exception('Failed to get Firebase ID token');
       }
@@ -64,6 +81,8 @@ class AuthService {
         name: name,
         surname: surname,
         birthdate: birthdate,
+        profilePhotoBase64: profilePhotoBase64,
+        profilePhotoMimeType: profilePhotoMimeType,
       );
 
       // 4. Backend'e register isteği gönder (idToken Authorization header'ında, RegisterRequestDto request body'de)

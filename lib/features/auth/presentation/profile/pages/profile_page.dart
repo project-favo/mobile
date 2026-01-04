@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
@@ -140,15 +141,22 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
         children: [
           const SizedBox(height: AppSpacing.xxLarge),
 
-          // Avatar
+          // Avatar - Profil fotoğrafı varsa göster
           CircleAvatar(
-              radius: 50,
-              backgroundColor: AppColors.surface,
-            child: const Icon(
-              Icons.person_outline_rounded,
-                size: 60,
-              color: AppColors.primary,
-            ),
+            radius: 50,
+            backgroundColor: AppColors.surface,
+            backgroundImage: _user!.profilePhotoData != null && _user!.profilePhotoData!.isNotEmpty
+                ? MemoryImage(
+                    base64Decode(_user!.profilePhotoData!),
+                  )
+                : null,
+            child: _user!.profilePhotoData == null || _user!.profilePhotoData!.isEmpty
+                ? const Icon(
+                    Icons.person_outline_rounded,
+                    size: 60,
+                    color: AppColors.primary,
+                  )
+                : null,
           ),
 
           const SizedBox(height: AppSpacing.large),

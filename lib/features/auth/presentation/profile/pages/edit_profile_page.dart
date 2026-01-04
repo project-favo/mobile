@@ -1,5 +1,8 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
@@ -31,6 +34,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
   DateTime? _selectedDate;
   bool _isLoading = false;
   String? _updateError; // Backend'den gelen update error
+  final ImagePicker _imagePicker = ImagePicker();
+  XFile? _selectedProfilePhoto;
+  Uint8List? _currentProfilePhotoBytes; // Backend'den gelen profil fotoğrafı
 
   @override
   void initState() {
@@ -52,6 +58,16 @@ class _EditProfilePageState extends State<EditProfilePage> {
         }
       }
     }
+    // Backend'den gelen profil fotoğrafını decode et
+    if (widget.user.profilePhotoData != null && widget.user.profilePhotoData!.isNotEmpty) {
+      try {
+        _currentProfilePhotoBytes = base64Decode(widget.user.profilePhotoData!);
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('Profile photo decode error: $e');
+        }
+      }
+    }
   }
 
   @override
@@ -61,6 +77,101 @@ class _EditProfilePageState extends State<EditProfilePage> {
     _userNameController.dispose();
     _birthdateController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickProfilePhoto(ImageSource source) async {
+    try {
+      final XFile? image = await _imagePicker.pickImage(
+        source: source,
+        imageQuality: 85,
+        maxWidth: 800,
+        maxHeight: 800,
+      );
+
+      if (image != null) {
+        setState(() {
+          _selectedProfilePhoto = image;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to pick image: ${e.toString()}'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    }
+  }
+
+  void _showPhotoSourceDialog() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library, color: AppColors.primary),
+              title: const Text('Choose from Gallery'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickProfilePhoto(ImageSource.gallery);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt, color: AppColors.primary),
+              title: const Text('Take a Photo'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickProfilePhoto(ImageSource.camera);
+              },
+            ),
+            if (_selectedProfilePhoto != null || _currentProfilePhotoBytes != null)
+              ListTile(
+                leading: const Icon(Icons.delete, color: AppColors.error),
+                title: const Text('Remove Photo'),
+                onTap: () {
+                  Navigator.pop(context);
+                  setState(() {
+                    _selectedProfilePhoto = null;
+                    _currentProfilePhotoBytes = null;
+                  });
+                },
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<String?> _convertImageToBase64() async {
+    if (_selectedProfilePhoto == null) return null;
+    
+    try {
+      final file = File(_selectedProfilePhoto!.path);
+      final bytes = await file.readAsBytes();
+      final base64String = base64Encode(bytes);
+      final mimeType = _selectedProfilePhoto!.mimeType ?? 'image/jpeg';
+      // Data URI formatında döndür: "data:image/jpeg;base64,..."
+      return 'data:$mimeType;base64,$base64String';
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to process image: ${e.toString()}'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+      return null;
+    }
   }
 
   Future<void> _selectDate(BuildContext context) async {
@@ -107,17 +218,27 @@ class _EditProfilePageState extends State<EditProfilePage> {
     try {
       // Username değiştiyse kontrol et
       final newUsername = _userNameController.text.trim();
-      if (newUsername != widget.user.userName) {
-        // Backend'de username kontrolü yapılacak
-        // Şimdilik sadece devam ediyoruz
+      
+      // Profil fotoğrafını base64'e çevir
+      String? profilePhotoBase64;
+      String? profilePhotoMimeType;
+      
+      if (_selectedProfilePhoto != null) {
+        profilePhotoBase64 = await _convertImageToBase64();
+        profilePhotoMimeType = _selectedProfilePhoto!.mimeType ?? 'image/jpeg';
+      } else if (_currentProfilePhotoBytes == null && widget.user.profilePhotoData != null) {
+        // Fotoğraf silinmişse, boş string gönder (backend'e null göndermek için)
+        // Backend'e null göndermek için field'ı göndermeyiz
       }
 
-      // Tüm alanlar zorunlu olduğu için null kontrolü yapmıyoruz
+      // Update request - tüm alanları gönder (backend partial update destekliyor)
       final updateRequest = UserUpdateRequestDto(
         userName: newUsername,
         name: _nameController.text.trim(),
         surname: _surnameController.text.trim(),
         birthdate: _birthdateController.text.trim(),
+        profilePhotoBase64: profilePhotoBase64,
+        profilePhotoMimeType: profilePhotoMimeType,
       );
 
       await _authService.updateMe(updateRequest);
@@ -201,37 +322,48 @@ class _EditProfilePageState extends State<EditProfilePage> {
               const SizedBox(height: AppSpacing.xLarge),
 
               // Profile Picture Section
-              Stack(
-                children: [
-                  Container(
-                    width: 120,
-                    height: 120,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: AppColors.border,
-                        width: 2,
+              GestureDetector(
+                onTap: _showPhotoSourceDialog,
+                child: Stack(
+                  children: [
+                    Container(
+                      width: 120,
+                      height: 120,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: AppColors.border,
+                          width: 2,
+                        ),
+                        color: AppColors.surface,
                       ),
-                      color: AppColors.surface,
+                      child: _selectedProfilePhoto != null
+                          ? ClipOval(
+                              child: Image.file(
+                                File(_selectedProfilePhoto!.path),
+                                width: 120,
+                                height: 120,
+                                fit: BoxFit.cover,
+                              ),
+                            )
+                          : _currentProfilePhotoBytes != null
+                              ? ClipOval(
+                                  child: Image.memory(
+                                    _currentProfilePhotoBytes!,
+                                    width: 120,
+                                    height: 120,
+                                    fit: BoxFit.cover,
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.person_outline_rounded,
+                                  size: 80,
+                                  color: AppColors.primary,
+                                ),
                     ),
-                    child: const Icon(
-                      Icons.person_outline_rounded,
-                      size: 80,
-                      color: AppColors.primary,
-                    ),
-                  ),
-                  Positioned(
-                    bottom: 0,
-                    right: 0,
-                    child: GestureDetector(
-                      onTap: () {
-                        // TODO: Implement photo picker
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Photo picker will be implemented soon'),
-                          ),
-                        );
-                      },
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
                       child: Container(
                         width: 36,
                         height: 36,
@@ -250,8 +382,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
                         ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
 
               const SizedBox(height: AppSpacing.small),

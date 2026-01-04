@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
@@ -29,6 +31,8 @@ class _AddReviewPageState extends State<AddReviewPage> {
   bool _isCollaborative = false;
   bool _isLoading = false;
   final int _maxCharacters = 500;
+  final ImagePicker _imagePicker = ImagePicker();
+  List<XFile> _selectedImages = [];
 
   @override
   void initState() {
@@ -42,6 +46,170 @@ class _AddReviewPageState extends State<AddReviewPage> {
   void dispose() {
     _reviewController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final XFile? image = await _imagePicker.pickImage(
+        source: source,
+        imageQuality: 85, // Kaliteyi biraz düşürerek dosya boyutunu küçült
+        maxWidth: 1920,
+        maxHeight: 1920,
+      );
+
+      if (image != null) {
+        setState(() {
+          _selectedImages.add(image);
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to pick image: ${e.toString()}'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    }
+  }
+
+  void _removeImage(int index) {
+    setState(() {
+      _selectedImages.removeAt(index);
+    });
+  }
+
+  void _showImageSourceDialog() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library, color: AppColors.primary),
+              title: const Text('Choose from Gallery'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickImage(ImageSource.gallery);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt, color: AppColors.primary),
+              title: const Text('Take a Photo'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickImage(ImageSource.camera);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<List<ReviewMediaRequestDto>> _convertImagesToMediaList() async {
+    final List<ReviewMediaRequestDto> mediaList = [];
+
+    for (final imageFile in _selectedImages) {
+      try {
+        final file = File(imageFile.path);
+        final bytes = await file.readAsBytes();
+        final mimeType = imageFile.mimeType ?? 'image/jpeg';
+
+        mediaList.add(
+          ReviewMediaRequestDto(
+            imageData: bytes,
+            mimeType: mimeType,
+          ),
+        );
+      } catch (e) {
+        print('Error converting image ${imageFile.path}: $e');
+        // Hata olsa bile devam et, diğer fotoğrafları yükle
+      }
+    }
+
+    return mediaList;
+  }
+
+  void _showSuccessDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: Container(
+            padding: const EdgeInsets.all(AppSpacing.xLarge),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Success Icon
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: AppColors.success.withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.check_circle,
+                    color: AppColors.success,
+                    size: 48,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xLarge),
+                
+                // Success Title
+                Text(
+                  'Review Posted!',
+                  style: AppTextStyles.heading2.copyWith(
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: AppSpacing.medium),
+                
+                // Success Message
+                Text(
+                  'Your review has been successfully posted and is now visible to other users.',
+                  style: AppTextStyles.body.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: AppSpacing.xLarge),
+                
+                // OK Button
+                SizedBox(
+                  width: double.infinity,
+                  child: AppButton(
+                    text: 'OK',
+                    onPressed: () {
+                      Navigator.of(context).pop(); // Dialog'u kapat
+                      Navigator.pop(context, true); // AddReviewPage'i kapat ve true döndür
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _submitReview() async {
@@ -75,6 +243,12 @@ class _AddReviewPageState extends State<AddReviewPage> {
         throw Exception('Failed to get Firebase ID token');
       }
 
+      // Fotoğrafları media list formatına çevir
+      List<ReviewMediaRequestDto>? mediaList;
+      if (_selectedImages.isNotEmpty) {
+        mediaList = await _convertImagesToMediaList();
+      }
+
       // Review oluştur
       final request = CreateReviewRequestDto(
         productId: widget.product.id,
@@ -84,6 +258,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
         description: _reviewController.text,
         isCollaborative: _isCollaborative,
         rating: _selectedRating,
+        mediaList: mediaList,
       );
 
       print('📝 AddReviewPage - Creating review:');
@@ -98,14 +273,12 @@ class _AddReviewPageState extends State<AddReviewPage> {
       print('   Review ID: ${createdReview.id}');
       print('   Rating: ${createdReview.rating}');
 
+      setState(() {
+        _isLoading = false;
+      });
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Review posted successfully!'),
-            backgroundColor: AppColors.success,
-          ),
-        );
-        Navigator.pop(context, true); // true döndürerek ReviewPage'e güncelleme yapıldığını bildir
+        _showSuccessDialog();
       }
     } catch (e) {
       setState(() {
@@ -306,33 +479,103 @@ class _AddReviewPageState extends State<AddReviewPage> {
               ),
               const SizedBox(height: AppSpacing.xLarge),
 
-              // Add a Photo (Optional)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(AppSpacing.xxLarge),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: AppColors.border,
-                    width: 2,
-                    style: BorderStyle.solid,
+              // Add Photos Section
+              Text(
+                'Add Photos (Optional)',
+                style: AppTextStyles.heading3,
+              ),
+              const SizedBox(height: AppSpacing.medium),
+              
+              // Selected Images Grid
+              if (_selectedImages.isNotEmpty)
+                Container(
+                  height: 120,
+                  margin: const EdgeInsets.only(bottom: AppSpacing.medium),
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _selectedImages.length,
+                    itemBuilder: (context, index) {
+                      return Container(
+                        width: 120,
+                        height: 120,
+                        margin: const EdgeInsets.only(right: AppSpacing.medium),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: AppColors.border,
+                            width: 1,
+                          ),
+                        ),
+                        child: Stack(
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Image.file(
+                                File(_selectedImages[index].path),
+                                width: 120,
+                                height: 120,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                            Positioned(
+                              top: 4,
+                              right: 4,
+                              child: GestureDetector(
+                                onTap: () => _removeImage(index),
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: const BoxDecoration(
+                                    color: AppColors.error,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.close,
+                                    color: Colors.white,
+                                    size: 16,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
                   ),
-                  borderRadius: BorderRadius.circular(16),
                 ),
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.camera_alt,
-                      size: 48,
-                      color: AppColors.textSecondary,
+
+              // Add Photo Button
+              GestureDetector(
+                onTap: _showImageSourceDialog,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(AppSpacing.xxLarge),
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: AppColors.border,
+                      width: 2,
+                      style: BorderStyle.solid,
                     ),
-                    const SizedBox(height: AppSpacing.medium),
-                    Text(
-                      'Add a Photo (Optional)',
-                      style: AppTextStyles.bodyMedium.copyWith(
-                        color: AppColors.textSecondary,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(
+                    children: [
+                      Icon(
+                        _selectedImages.isEmpty ? Icons.camera_alt : Icons.add_photo_alternate,
+                        size: 48,
+                        color: AppColors.primary,
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: AppSpacing.medium),
+                      Text(
+                        _selectedImages.isEmpty
+                            ? 'Add a Photo (Optional)'
+                            : 'Add More Photos',
+                        style: AppTextStyles.bodyMedium.copyWith(
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(height: AppSpacing.xxLarge),

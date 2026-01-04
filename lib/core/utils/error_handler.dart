@@ -100,11 +100,17 @@ class ErrorHandler {
           return serverMessage ?? 'Invalid request. Please check your input.';
         case 401:
           // 401 is usually an authentication error
-          if (serverMessage != null && 
-              (serverMessage.toLowerCase().contains('credential') ||
-               serverMessage.toLowerCase().contains('password') ||
-               serverMessage.toLowerCase().contains('email'))) {
-            return 'Incorrect email or password.';
+          if (serverMessage != null) {
+            final messageLower = serverMessage.toLowerCase();
+            if (messageLower.contains('no_such_account') ||
+                messageLower.contains('no such account')) {
+              return 'Unable to create account. Please try again or contact support.';
+            }
+            if (messageLower.contains('credential') ||
+                messageLower.contains('password') ||
+                messageLower.contains('email')) {
+              return 'Incorrect email or password.';
+            }
           }
           return 'Your session has expired. Please login again.';
         case 403:

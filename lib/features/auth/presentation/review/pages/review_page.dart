@@ -215,7 +215,7 @@ class _ReviewPageState extends State<ReviewPage> {
 
               /// PRODUCT IMAGE SECTION with Hero animation
               Hero(
-                tag: 'product_image_${_currentProduct.imageURL}',
+                tag: 'product_image_${_currentProduct.id}_${_currentProduct.imageURL}',
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(16),
                   child: Image.network(

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
@@ -355,15 +356,22 @@ class _SettingsPageState extends State<SettingsPage> {
         children: [
           const SizedBox(height: AppSpacing.xxLarge),
 
-          // Avatar
+          // Avatar - Profil fotoğrafı varsa göster
           CircleAvatar(
             radius: 45,
             backgroundColor: AppColors.background,
-            child: const Icon(
-              Icons.person_outline_rounded,
-              size: 50,
-              color: AppColors.primary,
-            ),
+            backgroundImage: _user!.profilePhotoData != null && _user!.profilePhotoData!.isNotEmpty
+                ? MemoryImage(
+                    base64Decode(_user!.profilePhotoData!),
+                  )
+                : null,
+            child: _user!.profilePhotoData == null || _user!.profilePhotoData!.isEmpty
+                ? const Icon(
+                    Icons.person_outline_rounded,
+                    size: 50,
+                    color: AppColors.primary,
+                  )
+                : null,
           ),
 
           const SizedBox(height: AppSpacing.large),

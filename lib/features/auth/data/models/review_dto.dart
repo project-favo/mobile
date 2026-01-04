@@ -73,11 +73,15 @@ class ReviewMediaDto {
   final String id;
   final String mimeType;
   final String uploadDate;
+  final String? url; // Backend'den direkt URL geliyorsa
+  final String? imageUrl; // Alternatif field adı
 
   ReviewMediaDto({
     required this.id,
     required this.mimeType,
     required this.uploadDate,
+    this.url,
+    this.imageUrl,
   });
 
   factory ReviewMediaDto.fromJson(Map<String, dynamic> json) {
@@ -85,6 +89,8 @@ class ReviewMediaDto {
       id: json['id']?.toString() ?? '',
       mimeType: json['mimeType']?.toString() ?? '',
       uploadDate: json['uploadDate']?.toString() ?? '',
+      url: json['url']?.toString(),
+      imageUrl: json['imageUrl']?.toString(),
     );
   }
 
@@ -93,7 +99,21 @@ class ReviewMediaDto {
       'id': id,
       'mimeType': mimeType,
       'uploadDate': uploadDate,
+      if (url != null) 'url': url,
+      if (imageUrl != null) 'imageUrl': imageUrl,
     };
+  }
+
+  /// Media URL'ini döndürür - önce url/imageUrl, yoksa id'den oluşturur
+  String getMediaUrl(String baseUrl) {
+    if (url != null && url!.isNotEmpty) {
+      return url!;
+    }
+    if (imageUrl != null && imageUrl!.isNotEmpty) {
+      return imageUrl!;
+    }
+    // Fallback: id'den URL oluştur
+    return '$baseUrl/api/media/$id';
   }
 }
 

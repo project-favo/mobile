@@ -81,7 +81,7 @@ class _ProductCardState extends State<ProductCard> {
           children: [
             // Ürün resmi with Hero animation
             Hero(
-              tag: 'product_image_${widget.imageUrl}',
+              tag: 'product_image_${widget.productId}_${widget.imageUrl}',
               child: Container(
                 height: AppSpacing.productImageHeight,
                 width: double.infinity,

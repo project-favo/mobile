@@ -6,6 +6,8 @@ class UserResponseDto {
   final String? surname;
   final String? birthdate;
   final String? profileImageUrl;
+  final String? profilePhotoData; // Base64 encoded profil fotoğrafı
+  final String? profilePhotoMimeType; // MIME type (örn: "image/jpeg")
 
   UserResponseDto({
     required this.id,
@@ -15,6 +17,8 @@ class UserResponseDto {
     this.surname,
     this.birthdate,
     this.profileImageUrl,
+    this.profilePhotoData,
+    this.profilePhotoMimeType,
   });
 
   factory UserResponseDto.fromJson(Map<String, dynamic> json) {
@@ -26,6 +30,8 @@ class UserResponseDto {
       surname: json['surname']?.toString(),
       birthdate: json['birthdate']?.toString(),
       profileImageUrl: json['profileImageUrl']?.toString(),
+      profilePhotoData: json['profilePhotoData']?.toString(),
+      profilePhotoMimeType: json['profilePhotoMimeType']?.toString(),
     );
   }
 
@@ -38,6 +44,8 @@ class UserResponseDto {
       'surname': surname,
       'birthdate': birthdate,
       'profileImageUrl': profileImageUrl,
+      'profilePhotoData': profilePhotoData,
+      'profilePhotoMimeType': profilePhotoMimeType,
     };
   }
 }

@@ -1,4 +1,7 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../../routes/app_routes.dart';
 import '../../../core/widgets/app_input.dart';
 import '../../../core/widgets/app_button.dart';
@@ -32,6 +35,8 @@ class _RegisterPageState extends State<RegisterPage> {
   bool _isLoading = false;
   DateTime? _selectedDate;
   String? _registerError; // Backend'den gelen registration error
+  final ImagePicker _imagePicker = ImagePicker();
+  XFile? _selectedProfilePhoto;
 
   @override
   void dispose() {
@@ -99,6 +104,100 @@ class _RegisterPageState extends State<RegisterPage> {
     return null;
   }
 
+  Future<void> _pickProfilePhoto(ImageSource source) async {
+    try {
+      final XFile? image = await _imagePicker.pickImage(
+        source: source,
+        imageQuality: 85,
+        maxWidth: 800,
+        maxHeight: 800,
+      );
+
+      if (image != null) {
+        setState(() {
+          _selectedProfilePhoto = image;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to pick image: ${e.toString()}'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    }
+  }
+
+  void _showPhotoSourceDialog() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library, color: AppColors.primary),
+              title: const Text('Choose from Gallery'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickProfilePhoto(ImageSource.gallery);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt, color: AppColors.primary),
+              title: const Text('Take a Photo'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickProfilePhoto(ImageSource.camera);
+              },
+            ),
+            if (_selectedProfilePhoto != null)
+              ListTile(
+                leading: const Icon(Icons.delete, color: AppColors.error),
+                title: const Text('Remove Photo'),
+                onTap: () {
+                  Navigator.pop(context);
+                  setState(() {
+                    _selectedProfilePhoto = null;
+                  });
+                },
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<String?> _convertImageToBase64() async {
+    if (_selectedProfilePhoto == null) return null;
+    
+    try {
+      final file = File(_selectedProfilePhoto!.path);
+      final bytes = await file.readAsBytes();
+      final base64String = base64Encode(bytes);
+      final mimeType = _selectedProfilePhoto!.mimeType ?? 'image/jpeg';
+      // Data URI formatında döndür: "data:image/jpeg;base64,..."
+      return 'data:$mimeType;base64,$base64String';
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to process image: ${e.toString()}'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+      return null;
+    }
+  }
+
   Future<void> _selectDate(BuildContext context) async {
     final DateTime? picked = await showDatePicker(
       context: context,
@@ -139,6 +238,15 @@ class _RegisterPageState extends State<RegisterPage> {
     setState(() => _isLoading = true);
 
     try {
+      // Profil fotoğrafını base64'e çevir
+      String? profilePhotoBase64;
+      String? profilePhotoMimeType;
+      
+      if (_selectedProfilePhoto != null) {
+        profilePhotoBase64 = await _convertImageToBase64();
+        profilePhotoMimeType = _selectedProfilePhoto!.mimeType ?? 'image/jpeg';
+      }
+
       // Firebase Auth ile kayıt ol ve backend'e istek gönder
       await _authService.registerWithEmailAndPassword(
         email: _email.text.trim(),
@@ -147,6 +255,8 @@ class _RegisterPageState extends State<RegisterPage> {
         name: _name.text.trim(),
         surname: _surname.text.trim(),
         birthdate: _birthdate.text.trim(),
+        profilePhotoBase64: profilePhotoBase64,
+        profilePhotoMimeType: profilePhotoMimeType,
       );
 
       // Başarılı kayıt - direkt login'e yönlendir (SnackBar yok)
@@ -212,6 +322,76 @@ class _RegisterPageState extends State<RegisterPage> {
                     style: AppTextStyles.bodySecondary,
                   ),
                   const SizedBox(height: 32),
+
+                  // Profile Photo Section
+                  Center(
+                    child: GestureDetector(
+                      onTap: _showPhotoSourceDialog,
+                      child: Stack(
+                        children: [
+                          Container(
+                            width: 100,
+                            height: 100,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: AppColors.border,
+                                width: 2,
+                              ),
+                              color: AppColors.surface,
+                            ),
+                            child: _selectedProfilePhoto != null
+                                ? ClipOval(
+                                    child: Image.file(
+                                      File(_selectedProfilePhoto!.path),
+                                      width: 100,
+                                      height: 100,
+                                      fit: BoxFit.cover,
+                                    ),
+                                  )
+                                : const Icon(
+                                    Icons.person_outline_rounded,
+                                    size: 60,
+                                    color: AppColors.primary,
+                                  ),
+                          ),
+                          Positioned(
+                            bottom: 0,
+                            right: 0,
+                            child: Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: AppColors.primary,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: AppColors.surface,
+                                  width: 2,
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons.camera_alt,
+                                size: 18,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Center(
+                    child: Text(
+                      _selectedProfilePhoto != null
+                          ? 'Tap to change photo'
+                          : 'Tap to add profile photo (optional)',
+                      style: AppTextStyles.bodySecondary.copyWith(
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
 
                   AppInput(
                     controller: _userName,

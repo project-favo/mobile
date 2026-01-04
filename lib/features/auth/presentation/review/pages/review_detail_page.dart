@@ -1,12 +1,15 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:dio/dio.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/config/api_config.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/utils/session_helper.dart';
+import '../../../../../core/network/api_client.dart';
 import '../../../data/models/review_dto.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/repositories/interaction_repository.dart';
@@ -30,6 +33,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
   final InteractionRepository _interactionRepository = InteractionRepository();
   final ReviewRepository _reviewRepository = ReviewRepository();
   final SessionHelper _sessionHelper = SessionHelper();
+  final ApiClient _apiClient = ApiClient();
   late ReviewDto _currentReview;
 
   @override
@@ -65,9 +69,75 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
     }
   }
 
-  /// Media URL'ini oluşturur
-  String _getMediaUrl(String mediaId) {
-    return '${ApiConfig.baseUrl}/api/media/$mediaId';
+  /// Media image'ı authentication header ile yükler ve Uint8List olarak döndürür
+  /// Dio kullanarak cookie'lerin de gönderilmesini sağlar
+  Future<Uint8List?> _loadMediaImage(String mediaUrl) async {
+    try {
+      // Token'ı al - ensureSession kullanarak güncel token'ı garanti et
+      final firebaseIdToken = await _sessionHelper.ensureSession();
+      
+      if (firebaseIdToken == null) {
+        if (kDebugMode) {
+          debugPrint('⚠️ No token available for media request');
+        }
+        return null;
+      }
+
+      // ApiClient'i kullanarak token'ı set et (cookie'ler otomatik gönderilir)
+      _apiClient.setAuthToken(firebaseIdToken);
+
+      if (kDebugMode) {
+        debugPrint('🖼️ Loading media from: $mediaUrl');
+        debugPrint('   Token length: ${firebaseIdToken.length}');
+      }
+
+      // Media URL'den path'i çıkar (baseUrl zaten ApiClient'te var)
+      final uri = Uri.parse(mediaUrl);
+      String path = uri.path;
+      if (uri.query.isNotEmpty) {
+        path = '$path?${uri.query}';
+      }
+
+      // Dio ile binary response al
+      final response = await _apiClient.dio.get(
+        path,
+        options: Options(
+          responseType: ResponseType.bytes,
+          headers: {
+            'Accept': 'image/*',
+          },
+        ),
+      ).timeout(
+        const Duration(seconds: 10),
+      );
+
+      if (response.statusCode == 200 && response.data != null) {
+        final bytes = response.data as List<int>;
+        if (kDebugMode) {
+          debugPrint('✅ Media loaded successfully: ${bytes.length} bytes');
+        }
+        return Uint8List.fromList(bytes);
+      } else {
+        if (kDebugMode) {
+          debugPrint('❌ Media load failed: Status ${response.statusCode}');
+        }
+        return null;
+      }
+    } on DioException catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Dio error loading media: ${e.message}');
+        if (e.response != null) {
+          debugPrint('   Status: ${e.response?.statusCode}');
+          debugPrint('   Response: ${e.response?.data}');
+        }
+      }
+      return null;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Error loading media: $e');
+      }
+      return null;
+    }
   }
 
   /// Tarih formatını düzenler
@@ -401,25 +471,132 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                         const SizedBox(width: AppSpacing.medium),
                     itemBuilder: (context, index) {
                       final media = _currentReview.mediaList[index];
-                      return ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.network(
-                          _getMediaUrl(media.id),
-                          width: 120,
-                          height: 120,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
+                      // Backend'den direkt URL geliyorsa onu kullan, yoksa id'den oluştur
+                      final mediaUrl = media.getMediaUrl(ApiConfig.baseUrl);
+                      if (kDebugMode) {
+                        debugPrint('🖼️ Media URL: $mediaUrl (ID: ${media.id}, MimeType: ${media.mimeType})');
+                        debugPrint('   Direct URL from backend: ${media.url ?? media.imageUrl ?? "none"}');
+                      }
+                      
+                      // Eğer backend'den direkt URL geliyorsa, Image.network kullan
+                      if (media.url != null && media.url!.isNotEmpty) {
+                        return ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            media.url!,
+                            width: 120,
+                            height: 120,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) {
+                              if (kDebugMode) {
+                                debugPrint('❌ Image load error for ${media.url}: $error');
+                              }
+                              return Container(
+                                width: 120,
+                                height: 120,
+                                decoration: BoxDecoration(
+                                  color: AppColors.textSecondary.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(
+                                  Icons.image_not_supported,
+                                  color: AppColors.textSecondary,
+                                ),
+                              );
+                            },
+                          ),
+                        );
+                      }
+                      
+                      if (media.imageUrl != null && media.imageUrl!.isNotEmpty) {
+                        return ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            media.imageUrl!,
+                            width: 120,
+                            height: 120,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) {
+                              if (kDebugMode) {
+                                debugPrint('❌ Image load error for ${media.imageUrl}: $error');
+                              }
+                              return Container(
+                                width: 120,
+                                height: 120,
+                                decoration: BoxDecoration(
+                                  color: AppColors.textSecondary.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(
+                                  Icons.image_not_supported,
+                                  color: AppColors.textSecondary,
+                                ),
+                              );
+                            },
+                          ),
+                        );
+                      }
+                      
+                      // Backend'den URL gelmiyorsa, authentication ile yükle
+                      return FutureBuilder<Uint8List?>(
+                        future: _loadMediaImage(mediaUrl),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState == ConnectionState.waiting) {
                             return Container(
                               width: 120,
                               height: 120,
-                              color: AppColors.textSecondary.withOpacity(0.1),
+                              decoration: BoxDecoration(
+                                color: AppColors.textSecondary.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Center(
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                            );
+                          }
+                          
+                          if (snapshot.hasError || snapshot.data == null) {
+                            if (kDebugMode) {
+                              debugPrint('❌ Image load error for $mediaUrl: ${snapshot.error}');
+                            }
+                            return Container(
+                              width: 120,
+                              height: 120,
+                              decoration: BoxDecoration(
+                                color: AppColors.textSecondary.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
                               child: const Icon(
                                 Icons.image_not_supported,
                                 color: AppColors.textSecondary,
                               ),
                             );
-                          },
-                        ),
+                          }
+                          
+                          return ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.memory(
+                              snapshot.data!,
+                              width: 120,
+                              height: 120,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Container(
+                                  width: 120,
+                                  height: 120,
+                                  color: AppColors.textSecondary.withOpacity(0.1),
+                                  child: const Icon(
+                                    Icons.image_not_supported,
+                                    color: AppColors.textSecondary,
+                                  ),
+                                );
+                              },
+                            ),
+                          );
+                        },
                       );
                     },
                   ),
