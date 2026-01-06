@@ -7,6 +7,7 @@ import '../../../core/widgets/app_input.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/error_handler.dart';
 import '../data/services/auth_service.dart';
 
@@ -198,6 +199,80 @@ class _RegisterPageState extends State<RegisterPage> {
     }
   }
 
+  void _showSuccessDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: Container(
+            padding: const EdgeInsets.all(AppSpacing.xLarge),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Success Icon
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: AppColors.success.withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.check_circle,
+                    color: AppColors.success,
+                    size: 48,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xLarge),
+                
+                // Success Title
+                Text(
+                  'Success!',
+                  style: AppTextStyles.heading2.copyWith(
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: AppSpacing.medium),
+                
+                // Success Message
+                Text(
+                  'Your account has been successfully created. You can log in to continue.',
+                  style: AppTextStyles.body.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: AppSpacing.xLarge),
+                
+                // Login Button
+                SizedBox(
+                  width: double.infinity,
+                  child: AppButton(
+                    text: 'Log in',
+                    onPressed: () {
+                      Navigator.of(context).pop(); // Dialog'u kapat
+                      Navigator.pushReplacementNamed(context, AppRoutes.login);
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _selectDate(BuildContext context) async {
     final DateTime? picked = await showDatePicker(
       context: context,
@@ -259,9 +334,10 @@ class _RegisterPageState extends State<RegisterPage> {
         profilePhotoMimeType: profilePhotoMimeType,
       );
 
-      // Başarılı kayıt - direkt login'e yönlendir (SnackBar yok)
+      // Başarılı kayıt - profesyonel başarı dialog'u göster
       if (mounted) {
-        Navigator.pushReplacementNamed(context, AppRoutes.login);
+        setState(() => _isLoading = false);
+        _showSuccessDialog();
       }
     } catch (e) {
       if (mounted) {
