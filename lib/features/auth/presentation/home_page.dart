@@ -29,21 +29,160 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _currentIndex = 0;
-  int _selectedCategoryIndex = 0; // Seçili kategori index'i
+  int _selectedCategoryIndex = -1; // -1 means "All", 0+ means selected category
   final TagRepository _tagRepository = TagRepository();
   final ProductRepository _productRepository = ProductRepository();
   final InteractionRepository _interactionRepository = InteractionRepository();
   final SessionHelper _sessionHelper = SessionHelper();
   
   List<TagDto> _tags = [];
-  List<ProductDto> _products = [];
+  List<ProductDto> _allProducts = []; // Tüm ürünler (filtrelenmemiş)
+  List<ProductDto> _filteredProducts = []; // Filtrelenmiş ürünler
   bool _isLoading = true;
+  bool _isFiltering = false; // Kategori filtreleme yapılırken
   String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+  }
+
+  /// Kategoriye göre ürünleri filtreler
+  /// Seçilen tag'in tüm leaf tag'lerindeki product'ları toplar
+  Future<void> _filterProductsByCategory(String tagId, int categoryIndex) async {
+    setState(() {
+      _selectedCategoryIndex = categoryIndex;
+      _isFiltering = true;
+      _filteredProducts = []; // Filtreleme başlarken listeyi temizle
+    });
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        throw Exception('User not authenticated. Please login first.');
+      }
+
+      final firebaseIdToken = await _sessionHelper.ensureSession();
+      if (firebaseIdToken == null) {
+        throw Exception('Failed to get Firebase ID token');
+      }
+
+      if (kDebugMode) {
+        debugPrint('HomePage - Filtering by category: $tagId');
+      }
+
+      // Önce direkt olarak bu tag'e bağlı product'ları al ve hemen göster (hızlı feedback)
+      final directProducts = await _productRepository.getProductsByTagId(
+        tagId,
+        firebaseIdToken: firebaseIdToken,
+      ).catchError((e) {
+        if (kDebugMode) {
+          debugPrint('HomePage - Failed to get direct products: $e');
+        }
+        return <ProductDto>[];
+      });
+
+      // Direkt product'ları hemen göster (kullanıcı hızlı feedback alsın)
+      if (directProducts.isNotEmpty) {
+        setState(() {
+          _filteredProducts = directProducts;
+          // _isFiltering hala true, arka planda leaf tag'lerden product'ları toplayacağız
+        });
+      }
+
+      // Arka planda leaf tag'lerden product'ları topla (non-blocking)
+      _tagRepository.getAllLeafTagIds(tagId, firebaseIdToken).then((leafTagIds) {
+        if (leafTagIds.isEmpty) {
+          // Leaf tag yoksa, direkt product'ları göster
+          setState(() {
+            _isFiltering = false;
+          });
+          return;
+        }
+
+        if (kDebugMode) {
+          debugPrint('HomePage - Found ${leafTagIds.length} leaf tags, fetching products...');
+        }
+
+        // PARALLEL: Her leaf tag için product'ları aynı anda topla
+        Future.wait(
+          leafTagIds.map((leafTagId) => 
+            _productRepository.getProductsByTagId(
+              leafTagId,
+              firebaseIdToken: firebaseIdToken,
+            ).catchError((e) {
+              if (kDebugMode) {
+                debugPrint('Failed to get products for tag $leafTagId: $e');
+              }
+              return <ProductDto>[];
+            })
+          ),
+        ).then((leafProductsResults) {
+          // Tüm product'ları topla (direkt + leaf tag'lerden)
+          final allFilteredProducts = <ProductDto>[];
+          allFilteredProducts.addAll(directProducts);
+          
+          for (final products in leafProductsResults) {
+            allFilteredProducts.addAll(products);
+          }
+
+          // Duplicate product'ları kaldır
+          final uniqueProducts = <String, ProductDto>{};
+          for (final product in allFilteredProducts) {
+            uniqueProducts[product.id] = product;
+          }
+
+          if (mounted) {
+            setState(() {
+              _filteredProducts = uniqueProducts.values.toList();
+              _isFiltering = false;
+            });
+
+            if (kDebugMode) {
+              debugPrint('HomePage - Total filtered products count: ${_filteredProducts.length}');
+            }
+          }
+        }).catchError((e) {
+          if (kDebugMode) {
+            debugPrint('HomePage - Error fetching leaf products: $e');
+          }
+          if (mounted) {
+            setState(() {
+              _isFiltering = false;
+            });
+          }
+        });
+      }).catchError((e) {
+        if (kDebugMode) {
+          debugPrint('HomePage - Failed to get leaf tags: $e');
+        }
+        // Leaf tag'ler alınamazsa, direkt product'ları göster
+        if (mounted) {
+          setState(() {
+            _isFiltering = false;
+          });
+        }
+      });
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('HomePage - Error filtering products: $e');
+      }
+      setState(() {
+        _isFiltering = false;
+        _filteredProducts = []; // Hata durumunda boş liste
+      });
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to filter products: ${ErrorHandler.getUserFriendlyMessage(e)}'),
+            backgroundColor: AppColors.error,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
   }
 
   /// Product'ın like durumunu ve rating'ini backend'den yeniden çeker
@@ -63,10 +202,16 @@ class _HomePageState extends State<HomePage> {
       }
 
       // Product listesinde bu product'ı bul ve güncelle
-      final index = _products.indexWhere((p) => p.id == productId);
-      if (index != -1) {
+      final allIndex = _allProducts.indexWhere((p) => p.id == productId);
+      final filteredIndex = _filteredProducts.indexWhere((p) => p.id == productId);
+      
+      if (allIndex != -1) {
         setState(() {
-          _products[index] = updatedProduct;
+          _allProducts[allIndex] = updatedProduct;
+          // Eğer filtrelenmiş listede de varsa güncelle
+          if (filteredIndex != -1) {
+            _filteredProducts[filteredIndex] = updatedProduct;
+          }
         });
       }
     } catch (e) {
@@ -103,7 +248,9 @@ class _HomePageState extends State<HomePage> {
       
       setState(() {
         _tags = tags;
-        _products = products;
+        _allProducts = products;
+        _filteredProducts = products; // Başlangıçta tüm ürünleri göster
+        _selectedCategoryIndex = -1; // "Tümü" seçili
         _isLoading = false;
       });
     } catch (e) {
@@ -116,7 +263,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading && _products.isEmpty) {
+    if (_isLoading && _allProducts.isEmpty) {
       return Scaffold(
         backgroundColor: AppColors.background,
         appBar: AppBar(
@@ -234,8 +381,8 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
-    /// TOP 10 PRODUCTS - Use first 10 products from backend
-    final top10Products = _products.take(10).toList();
+    /// TOP 10 PRODUCTS - Use first 10 products from filtered products
+    final top10Products = _filteredProducts.take(10).toList();
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -305,39 +452,65 @@ class _HomePageState extends State<HomePage> {
               height: AppSpacing.categoryChipHeight,
               child: ListView(
                 scrollDirection: Axis.horizontal,
-                children: _tags.asMap().entries.map<Widget>((entry) {
-                  final index = entry.key;
-                  final tag = entry.value;
-                  return _CategoryChip(
-                    title: tag.name,
-                    selected: index == _selectedCategoryIndex,
+                children: [
+                  // "Tümü" seçeneği
+                  _CategoryChip(
+                    title: 'All',
+                    selected: _selectedCategoryIndex == -1,
                     onTap: () {
                       setState(() {
-                        _selectedCategoryIndex = index;
+                        _selectedCategoryIndex = -1;
+                        _filteredProducts = _allProducts;
                       });
-                      // TODO: Kategoriye göre ürünleri filtrele
                     },
-                  );
-                }).toList(),
+                  ),
+                  // Kategoriler
+                  ..._tags.asMap().entries.map<Widget>((entry) {
+                    final index = entry.key;
+                    final tag = entry.value;
+                    return _CategoryChip(
+                      title: tag.name,
+                      selected: index == _selectedCategoryIndex,
+                      onTap: () => _filterProductsByCategory(tag.id, index),
+                    );
+                  }).toList(),
+                ],
               ),
             ),
 
             const SizedBox(height: AppSpacing.xxLarge),
 
             /// PRODUCT GRID - sabit kart oranları için GridView
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                crossAxisSpacing: AppSpacing.xLarge,
-                mainAxisSpacing: AppSpacing.xLarge,
-                // Genişlik / yükseklik oranı; kartları biraz daha alçalt
-                childAspectRatio: 0.6,
-              ),
-              itemCount: _products.length,
-              itemBuilder: (context, index) {
-                final product = _products[index];
+            _isFiltering
+                ? const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(AppSpacing.xxLarge),
+                      child: CircularProgressIndicator(),
+                    ),
+                  )
+                : _filteredProducts.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(AppSpacing.xxLarge),
+                          child: Text(
+                            'No products found in this category',
+                            style: AppTextStyles.bodySecondary,
+                          ),
+                        ),
+                      )
+                    : GridView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: AppSpacing.xLarge,
+                          mainAxisSpacing: AppSpacing.xLarge,
+                          // Genişlik / yükseklik oranı; kartları biraz daha alçalt
+                          childAspectRatio: 0.6,
+                        ),
+                        itemCount: _filteredProducts.length,
+                        itemBuilder: (context, index) {
+                          final product = _filteredProducts[index];
                 return ProductCard(
                   key: ValueKey('product_${product.id}_${product.isLiked}_${product.averageRating}'), // Like ve rating durumu değiştiğinde widget'ı yenile
                   productId: product.id,
@@ -357,10 +530,16 @@ class _HomePageState extends State<HomePage> {
                     );
                     // ReviewPage'den dönen güncellenmiş product varsa, listeyi güncelle
                     if (updatedProduct != null) {
-                      final index = _products.indexWhere((p) => p.id == updatedProduct.id);
-                      if (index != -1) {
+                      final allIndex = _allProducts.indexWhere((p) => p.id == updatedProduct.id);
+                      final filteredIndex = _filteredProducts.indexWhere((p) => p.id == updatedProduct.id);
+                      
+                      if (allIndex != -1) {
                         setState(() {
-                          _products[index] = updatedProduct; // Rating ve like durumu güncellenmiş product'ı kullan
+                          _allProducts[allIndex] = updatedProduct;
+                          // Eğer filtrelenmiş listede de varsa güncelle
+                          if (filteredIndex != -1) {
+                            _filteredProducts[filteredIndex] = updatedProduct;
+                          }
                         });
                       }
                     } else {
@@ -381,13 +560,21 @@ class _HomePageState extends State<HomePage> {
                     }
                     
                     // Optimistic update - UI'ı hemen güncelle
-                    final currentIndex = _products.indexWhere((p) => p.id == product.id);
-                    if (currentIndex != -1) {
-                      final currentLikeStatus = _products[currentIndex].isLiked ?? false;
+                    final allIndex = _allProducts.indexWhere((p) => p.id == product.id);
+                    final filteredIndex = _filteredProducts.indexWhere((p) => p.id == product.id);
+                    
+                    if (allIndex != -1) {
+                      final currentLikeStatus = _allProducts[allIndex].isLiked ?? false;
                       setState(() {
-                        _products[currentIndex] = _products[currentIndex].copyWith(
+                        _allProducts[allIndex] = _allProducts[allIndex].copyWith(
                           isLiked: !currentLikeStatus,
                         );
+                        // Eğer filtrelenmiş listede de varsa güncelle
+                        if (filteredIndex != -1) {
+                          _filteredProducts[filteredIndex] = _filteredProducts[filteredIndex].copyWith(
+                            isLiked: !currentLikeStatus,
+                          );
+                        }
                       });
                     }
                     
@@ -409,20 +596,32 @@ class _HomePageState extends State<HomePage> {
                       }
                       
                       // Backend'den gelen gerçek durumu güncelle (sadece like durumu için)
-                      if (currentIndex != -1) {
+                      if (allIndex != -1) {
                         setState(() {
-                          _products[currentIndex] = _products[currentIndex].copyWith(
+                          _allProducts[allIndex] = _allProducts[allIndex].copyWith(
                             isLiked: newLikeStatus,
                           );
+                          // Eğer filtrelenmiş listede de varsa güncelle
+                          if (filteredIndex != -1) {
+                            _filteredProducts[filteredIndex] = _filteredProducts[filteredIndex].copyWith(
+                              isLiked: newLikeStatus,
+                            );
+                          }
                         });
                       }
                     } catch (e) {
                       // Hata durumunda optimistic update'i geri al
-                      if (currentIndex != -1) {
+                      if (allIndex != -1) {
                         setState(() {
-                          _products[currentIndex] = _products[currentIndex].copyWith(
+                          _allProducts[allIndex] = _allProducts[allIndex].copyWith(
                             isLiked: product.isLiked,
                           );
+                          // Eğer filtrelenmiş listede de varsa güncelle
+                          if (filteredIndex != -1) {
+                            _filteredProducts[filteredIndex] = _filteredProducts[filteredIndex].copyWith(
+                              isLiked: product.isLiked,
+                            );
+                          }
                         });
                       }
                       
