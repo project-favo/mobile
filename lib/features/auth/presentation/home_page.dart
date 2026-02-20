@@ -12,6 +12,7 @@ import '../../../core/widgets/skeleton_loader.dart';
 import '../../../core/routes/custom_page_transitions.dart';
 import '../widgets/product_card.dart';
 import '../widgets/top_product_card.dart';
+import 'search_page.dart';
 import 'profile/pages/profile_page.dart';
 import 'review/pages/review_page.dart';
 import '../data/repositories/tag_repository.dart';
@@ -30,17 +31,69 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   int _currentIndex = 0;
   int _selectedCategoryIndex = -1; // -1 means "All", 0+ means selected category
+  int _selectedSubCategoryIndex = -1; // -1 means none
   final TagRepository _tagRepository = TagRepository();
   final ProductRepository _productRepository = ProductRepository();
   final InteractionRepository _interactionRepository = InteractionRepository();
   final SessionHelper _sessionHelper = SessionHelper();
   
   List<TagDto> _tags = [];
+  List<TagDto> _subTags = [];
   List<ProductDto> _allProducts = []; // Tüm ürünler (filtrelenmemiş)
   List<ProductDto> _filteredProducts = []; // Filtrelenmiş ürünler
   bool _isLoading = true;
   bool _isFiltering = false; // Kategori filtreleme yapılırken
+  bool _isLoadingSubTags = false;
   String? _errorMessage;
+
+  Route _noAnimationRoute(Widget page) {
+    return PageRouteBuilder(
+      pageBuilder: (_, __, ___) => page,
+      transitionDuration: Duration.zero,
+      reverseTransitionDuration: Duration.zero,
+    );
+  }
+
+  BottomNavigationBar _buildBottomNavigationBar() {
+    return BottomNavigationBar(
+      type: BottomNavigationBarType.fixed,
+      currentIndex: _currentIndex,
+      selectedItemColor: AppColors.primary,
+      unselectedItemColor: AppColors.textSecondary,
+      showSelectedLabels: false,
+      showUnselectedLabels: false,
+      onTap: (index) {
+        if (index == 1) {
+          Navigator.pushReplacement(
+            context,
+            _noAnimationRoute(const SearchPage()),
+          );
+          return;
+        }
+
+        if (index == 4) {
+          Navigator.pushReplacement(
+            context,
+            _noAnimationRoute(const ProfilePage()),
+          );
+          return;
+        }
+
+        setState(() {
+          _currentIndex = index;
+        });
+      },
+      items: const [
+        BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+        BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
+        BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add'),
+        BottomNavigationBarItem(
+            icon: Icon(Icons.favorite_border), label: 'Favorites'),
+        BottomNavigationBarItem(
+            icon: Icon(Icons.person_outline), label: 'Profile'),
+      ],
+    );
+  }
 
   @override
   void initState() {
@@ -185,6 +238,47 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Future<void> _onRootCategoryTap(TagDto rootTag, int rootIndex) async {
+    setState(() {
+      _selectedCategoryIndex = rootIndex;
+      _selectedSubCategoryIndex = -1;
+      _subTags = [];
+      _isLoadingSubTags = true;
+    });
+
+    try {
+      final token = await _sessionHelper.ensureSession();
+      if (token == null) {
+        throw Exception('Failed to get Firebase ID token');
+      }
+
+      final childrenResponse = await _tagRepository.getTagChildren(rootTag.id, token);
+      final children = childrenResponse.children;
+
+      if (children.isEmpty) {
+        setState(() {
+          _isLoadingSubTags = false;
+        });
+        await _filterProductsByCategory(rootTag.id, rootIndex);
+        return;
+      }
+
+      setState(() {
+        _subTags = children;
+        _selectedSubCategoryIndex = 0;
+        _isLoadingSubTags = false;
+      });
+
+      await _filterProductsByCategory(children.first.id, rootIndex);
+    } catch (_) {
+      setState(() {
+        _isLoadingSubTags = false;
+        _subTags = [];
+      });
+      await _filterProductsByCategory(rootTag.id, rootIndex);
+    }
+  }
+
   /// Product'ın like durumunu ve rating'ini backend'den yeniden çeker
   Future<void> _refreshProductLikeStatus(String productId) async {
     try {
@@ -322,6 +416,7 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
         ),
+        bottomNavigationBar: _buildBottomNavigationBar(),
       );
     }
 
@@ -378,6 +473,7 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
         ),
+        bottomNavigationBar: _buildBottomNavigationBar(),
       );
     }
 
@@ -460,6 +556,8 @@ class _HomePageState extends State<HomePage> {
                     onTap: () {
                       setState(() {
                         _selectedCategoryIndex = -1;
+                        _selectedSubCategoryIndex = -1;
+                        _subTags = [];
                         _filteredProducts = _allProducts;
                       });
                     },
@@ -471,12 +569,49 @@ class _HomePageState extends State<HomePage> {
                     return _CategoryChip(
                       title: tag.name,
                       selected: index == _selectedCategoryIndex,
-                      onTap: () => _filterProductsByCategory(tag.id, index),
+                      onTap: () => _onRootCategoryTap(tag, index),
                     );
-                  }).toList(),
+                  }),
                 ],
               ),
             ),
+
+            if (_selectedCategoryIndex != -1) ...[
+              const SizedBox(height: AppSpacing.large),
+              if (_isLoadingSubTags)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: AppSpacing.small),
+                  child: SizedBox(
+                    height: 18,
+                    width: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              else if (_subTags.isNotEmpty)
+                SizedBox(
+                  height: AppSpacing.categoryChipHeight,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: _subTags.asMap().entries.map<Widget>((entry) {
+                      final subIndex = entry.key;
+                      final subTag = entry.value;
+                      return _CategoryChip(
+                        title: subTag.name,
+                        selected: subIndex == _selectedSubCategoryIndex,
+                        onTap: () async {
+                          setState(() {
+                            _selectedSubCategoryIndex = subIndex;
+                          });
+                          await _filterProductsByCategory(
+                            subTag.id,
+                            _selectedCategoryIndex,
+                          );
+                        },
+                      );
+                    }).toList(),
+                  ),
+                ),
+            ],
 
             const SizedBox(height: AppSpacing.xxLarge),
 
@@ -644,37 +779,7 @@ class _HomePageState extends State<HomePage> {
       ),
       ),
       /// BOTTOM NAV
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        selectedItemColor: AppColors.primary,
-        unselectedItemColor: AppColors.textSecondary,
-        showSelectedLabels: false,
-        showUnselectedLabels: false,
-        onTap: (index) {
-          if (index == 4) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => const ProfilePage(),
-              ),
-            );
-            return;
-          }
-
-          setState(() {
-            _currentIndex = index;
-          });
-        },
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
-          BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.favorite_border), label: 'Favorites'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline), label: 'Profile'),
-        ],
-      ),
+      bottomNavigationBar: _buildBottomNavigationBar(),
     );
   }
 }

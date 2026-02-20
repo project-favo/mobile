@@ -64,6 +64,34 @@ class TagRepository {
     }
   }
 
+  /// Searches tags from GET /api/tags/search?name={query}
+  /// Public endpoint, auth not required
+  Future<List<TagDto>> searchTags(String query) async {
+    try {
+      final response = await _apiClient.dio.get(
+        '/api/tags/search',
+        queryParameters: {'name': query},
+      );
+
+      if (response.data is List) {
+        return (response.data as List)
+            .map((json) => TagDto.fromJson(json as Map<String, dynamic>))
+            .toList();
+      }
+
+      return [];
+    } on DioException catch (e) {
+      if (e.response != null) {
+        final errorData = e.response?.data;
+        final errorMessage = errorData is Map
+            ? (errorData['message'] ?? errorData['error'] ?? 'Failed to search tags')
+            : errorData?.toString() ?? 'Failed to search tags';
+        throw Exception(errorMessage);
+      }
+      throw Exception('Network error: ${e.message}');
+    }
+  }
+
   /// Fetches tag children from GET /api/tags/{id}/children
   /// Returns tag with children or products if leaf
   /// Requires authentication - Firebase ID token must be provided

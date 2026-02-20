@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/theme/app_spacing.dart';
@@ -57,11 +58,17 @@ class _OnboardingPageState extends State<OnboardingPage> {
   }
 
   void _skipToEnd() {
+    _markOnboardingCompleted();
     _pageController.animateToPage(
       _pages.length - 1,
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
     );
+  }
+
+  Future<void> _markOnboardingCompleted() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('onboarding_completed', true);
   }
 
   @override
@@ -238,7 +245,9 @@ class _OnboardingPageState extends State<OnboardingPage> {
                           // Login/Register buttons
                           AppButton(
                             text: 'Create Account',
-                            onPressed: () {
+                            onPressed: () async {
+                              await _markOnboardingCompleted();
+                              if (!context.mounted) return;
                               Navigator.pushNamed(
                                 context,
                                 AppRoutes.register,
@@ -259,7 +268,9 @@ class _OnboardingPageState extends State<OnboardingPage> {
                                 ),
                               ),
                               GestureDetector(
-                                onTap: () {
+                                onTap: () async {
+                                  await _markOnboardingCompleted();
+                                  if (!context.mounted) return;
                                   Navigator.pushNamed(
                                     context,
                                     AppRoutes.login,

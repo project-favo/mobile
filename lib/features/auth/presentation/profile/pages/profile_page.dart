@@ -5,6 +5,8 @@ import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../auth/data/services/auth_service.dart';
 import '../../../../auth/data/models/user_response_dto.dart';
+import '../../home_page.dart';
+import '../../search_page.dart';
 import 'settings_page.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -20,6 +22,45 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
   UserResponseDto? _user;
   bool _isLoading = true;
   String? _errorMessage;
+
+  Route _noAnimationRoute(Widget page) {
+    return PageRouteBuilder(
+      pageBuilder: (_, __, ___) => page,
+      transitionDuration: Duration.zero,
+      reverseTransitionDuration: Duration.zero,
+    );
+  }
+
+  BottomNavigationBar _buildBottomNavigationBar() {
+    return BottomNavigationBar(
+      type: BottomNavigationBarType.fixed,
+      currentIndex: 4,
+      selectedItemColor: AppColors.primary,
+      unselectedItemColor: AppColors.textSecondary,
+      showSelectedLabels: false,
+      showUnselectedLabels: false,
+      onTap: (index) {
+        if (index == 4) return;
+        if (index == 0) {
+          Navigator.pushReplacement(context, _noAnimationRoute(const HomePage()));
+          return;
+        }
+        if (index == 1) {
+          Navigator.pushReplacement(context, _noAnimationRoute(const SearchPage()));
+          return;
+        }
+      },
+      items: const [
+        BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+        BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
+        BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add'),
+        BottomNavigationBarItem(
+            icon: Icon(Icons.favorite_border), label: 'Favorites'),
+        BottomNavigationBarItem(
+            icon: Icon(Icons.person_outline), label: 'Profile'),
+      ],
+    );
+  }
 
   @override
   void initState() {
@@ -62,6 +103,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
       appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
+          automaticallyImplyLeading: false,
           title: const Text(
             'Profile',
             style: AppTextStyles.HomeHeader,
@@ -71,6 +113,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
         body: const Center(
           child: CircularProgressIndicator(),
         ),
+        bottomNavigationBar: _buildBottomNavigationBar(),
       );
     }
 
@@ -80,6 +123,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
+          automaticallyImplyLeading: false,
           title: const Text(
             'Profile',
             style: AppTextStyles.HomeHeader,
@@ -103,6 +147,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
             ],
           ),
         ),
+        bottomNavigationBar: _buildBottomNavigationBar(),
       );
     }
 
@@ -111,6 +156,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        automaticallyImplyLeading: false,
         title: const Text(
           'Profile',
           style: AppTextStyles.HomeHeader,
@@ -308,27 +354,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
           ],
         ),
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 4, // Profile tab is selected
-        selectedItemColor: AppColors.primary,
-        unselectedItemColor: AppColors.textSecondary,
-        showSelectedLabels: false,
-        showUnselectedLabels: false,
-        onTap: (index) {
-          if (index != 4) {
-            Navigator.pop(context);
-          }
-        },
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
-          BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.favorite_border), label: 'Favorites'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline), label: 'Profile'),
-        ],
-      ),
+      bottomNavigationBar: _buildBottomNavigationBar(),
     );
   }
 }
