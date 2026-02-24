@@ -37,6 +37,8 @@ class _ReviewPageState extends State<ReviewPage> {
   List<ReviewDto> _reviews = [];
   bool _isLoadingReviews = true;
   String? _errorMessage;
+  int _likeCount = 0;
+  bool _isLoadingLikeCount = false;
 
   @override
   void initState() {
@@ -44,6 +46,27 @@ class _ReviewPageState extends State<ReviewPage> {
     _currentProduct = widget.product;
     _loadReviews();
     _refreshProductData(); // Product'ı backend'den yeniden yükle (rating ve like durumu için)
+    _loadLikeCount();
+  }
+
+  Future<void> _loadLikeCount() async {
+    setState(() {
+      _isLoadingLikeCount = true;
+    });
+
+    try {
+      final count = await _interactionRepository.getProductLikeCount(_currentProduct.id);
+      if (!mounted) return;
+      setState(() {
+        _likeCount = count;
+        _isLoadingLikeCount = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingLikeCount = false;
+      });
+    }
   }
 
   /// Product'ı backend'den yeniden yükler (rating ve like durumu için)
@@ -65,6 +88,7 @@ class _ReviewPageState extends State<ReviewPage> {
       setState(() {
         _currentProduct = updatedProduct;
       });
+      await _loadLikeCount();
     } catch (e) {
       if (kDebugMode) {
         debugPrint('Failed to refresh product data: $e');
@@ -170,6 +194,7 @@ class _ReviewPageState extends State<ReviewPage> {
           isLiked: newLikeStatus,
         );
       });
+      await _loadLikeCount();
     } catch (e) {
       // Hata durumunda optimistic update'i geri al
       setState(() {
@@ -343,7 +368,7 @@ class _ReviewPageState extends State<ReviewPage> {
                         ],
                       ),
                       const SizedBox(height: 4),
-                      // Review count
+                      // Review count + like count
                       Row(
                         children: [
                           Icon(
@@ -354,6 +379,19 @@ class _ReviewPageState extends State<ReviewPage> {
                           const SizedBox(width: 4),
                           Text(
                             '${_reviews.length} review${_reviews.length != 1 ? 's' : ''}',
+                            style: AppTextStyles.bodySmall.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Icon(
+                            Icons.favorite,
+                            size: 14,
+                            color: AppColors.primary,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _isLoadingLikeCount ? '...' : '$_likeCount likes',
                             style: AppTextStyles.bodySmall.copyWith(
                               color: AppColors.textSecondary,
                             ),

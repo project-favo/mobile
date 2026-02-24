@@ -8,6 +8,7 @@ class ProductDto {
   final TagDto tag;
   final double? averageRating;
   final bool? isLiked;
+  final DateTime? createdAt;
 
   ProductDto({
     required this.id,
@@ -17,6 +18,7 @@ class ProductDto {
     required this.tag,
     this.averageRating,
     this.isLiked,
+    this.createdAt,
   });
 
   factory ProductDto.fromJson(Map<String, dynamic> json) {
@@ -32,6 +34,9 @@ class ProductDto {
               : double.tryParse(json['averageRating'].toString()))
           : null,
       isLiked: json['isLiked'] as bool?,
+      createdAt: json['createdAt'] != null
+          ? DateTime.tryParse(json['createdAt'].toString())
+          : null,
     );
   }
 
@@ -44,6 +49,7 @@ class ProductDto {
       'tag': tag.toJson(),
       'averageRating': averageRating,
       'isLiked': isLiked,
+      'createdAt': createdAt?.toIso8601String(),
     };
   }
 
@@ -56,6 +62,7 @@ class ProductDto {
     TagDto? tag,
     double? averageRating,
     bool? isLiked,
+    DateTime? createdAt,
   }) {
     return ProductDto(
       id: id ?? this.id,
@@ -67,6 +74,7 @@ class ProductDto {
       averageRating: averageRating != null ? averageRating : this.averageRating,
       // isLiked için: eğer null değilse (false dahil) kullan, null ise this.isLiked kullan
       isLiked: isLiked != null ? isLiked : this.isLiked,
+      createdAt: createdAt ?? this.createdAt,
     );
   }
 }

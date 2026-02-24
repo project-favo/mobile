@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../../../../core/network/api_client.dart';
+import '../models/product_dto.dart';
 
 class InteractionRepository {
   final ApiClient _apiClient = ApiClient();
@@ -274,6 +275,53 @@ class InteractionRepository {
         final errorMessage = errorData is Map
             ? (errorData['message'] ?? errorData['error'] ?? 'Failed to get user rating')
             : errorData?.toString() ?? 'Failed to get user rating';
+        throw Exception(errorMessage);
+      }
+      throw Exception('Network error: ${e.message}');
+    }
+  }
+
+  /// Kullanıcının wishlist'ini (beğendiği ürünler) getirir
+  /// GET /api/interactions/me/wishlist?page=0&size=20
+  Future<List<ProductDto>> getMyWishlist(
+    String firebaseIdToken, {
+    int page = 0,
+    int size = 20,
+  }) async {
+    try {
+      _apiClient.setAuthToken(firebaseIdToken);
+      final response = await _apiClient.dio.get(
+        '/api/interactions/me/wishlist',
+        queryParameters: {
+          'page': page,
+          'size': size,
+        },
+      );
+
+      if (response.data is Map && response.data['content'] is List) {
+        final content = response.data['content'] as List;
+        final products = content
+            .map((json) => ProductDto.fromJson(json as Map<String, dynamic>))
+            .toList();
+
+        if (kDebugMode) {
+          debugPrint('📋 Wishlist - Toplam ${products.length} ürün');
+          for (var i = 0; i < products.length; i++) {
+            final p = products[i];
+            debugPrint('   [$i] id=${p.id} name=${p.name} createdAt=${p.createdAt} (raw: ${(content[i] as Map).containsKey("createdAt") ? (content[i] as Map)["createdAt"] : "yok"} )');
+          }
+        }
+
+        return products;
+      }
+
+      return [];
+    } on DioException catch (e) {
+      if (e.response != null) {
+        final errorData = e.response?.data;
+        final errorMessage = errorData is Map
+            ? (errorData['message'] ?? errorData['error'] ?? 'Failed to fetch wishlist')
+            : errorData?.toString() ?? 'Failed to fetch wishlist';
         throw Exception(errorMessage);
       }
       throw Exception('Network error: ${e.message}');
