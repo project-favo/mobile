@@ -219,17 +219,10 @@ class _HomePageState extends State<HomePage> {
         debugPrint('HomePage - Product refreshed: ${updatedProduct.name}, Rating: ${updatedProduct.averageRating}, Liked: ${updatedProduct.isLiked}');
       }
 
-      // Product listesinde bu product'ı bul ve güncelle
-      final allIndex = _allProducts.indexWhere((p) => p.id == productId);
       final filteredIndex = _filteredProducts.indexWhere((p) => p.id == productId);
-      
-      if (allIndex != -1) {
+      if (filteredIndex != -1) {
         setState(() {
-          _allProducts[allIndex] = updatedProduct;
-          // Eğer filtrelenmiş listede de varsa güncelle
-          if (filteredIndex != -1) {
-            _filteredProducts[filteredIndex] = updatedProduct;
-          }
+          _filteredProducts[filteredIndex] = updatedProduct;
         });
       }
     } catch (e) {
@@ -615,28 +608,18 @@ class _HomePageState extends State<HomePage> {
                                         await Navigator.push<ProductDto>(
                                       context,
                                       SlideRightRoute(
-                                        page:
-                                            ReviewPage(product: product),
+                                        page: ReviewPage(product: product),
                                       ),
                                     );
                                     if (updatedProduct != null) {
-                                      final allIndex =
-                                          _allProducts.indexWhere(
-                                        (p) => p.id == updatedProduct.id,
-                                      );
                                       final filteredIndex =
                                           _filteredProducts.indexWhere(
-                                        (p) =>
-                                            p.id == updatedProduct.id,
+                                        (p) => p.id == updatedProduct.id,
                                       );
-                                      if (allIndex != -1) {
+                                      if (filteredIndex != -1) {
                                         setState(() {
-                                          _allProducts[allIndex] =
+                                          _filteredProducts[filteredIndex] =
                                               updatedProduct;
-                                          if (filteredIndex != -1) {
-                                            _filteredProducts[
-                                                filteredIndex] = updatedProduct;
-                                          }
                                         });
                                       }
                                     } else {
@@ -661,33 +644,21 @@ class _HomePageState extends State<HomePage> {
                                       );
                                       return;
                                     }
-                                    final allIndex =
-                                        _allProducts.indexWhere(
-                                      (p) => p.id == product.id,
-                                    );
                                     final filteredIndex =
                                         _filteredProducts.indexWhere(
                                       (p) => p.id == product.id,
                                     );
-                                    if (allIndex != -1) {
+                                    if (filteredIndex != -1) {
                                       final currentLikeStatus =
-                                          _allProducts[allIndex]
+                                          _filteredProducts[filteredIndex]
                                                   .isLiked ??
                                               false;
                                       setState(() {
-                                        _allProducts[allIndex] =
-                                            _allProducts[allIndex]
+                                        _filteredProducts[filteredIndex] =
+                                            _filteredProducts[filteredIndex]
                                                 .copyWith(
                                           isLiked: !currentLikeStatus,
                                         );
-                                        if (filteredIndex != -1) {
-                                          _filteredProducts[filteredIndex] =
-                                              _filteredProducts[
-                                                      filteredIndex]
-                                                  .copyWith(
-                                            isLiked: !currentLikeStatus,
-                                          );
-                                        }
                                       });
                                     }
                                     try {
@@ -710,41 +681,23 @@ class _HomePageState extends State<HomePage> {
                                           'HomePage - Like toggled: Product ${product.id}, New status: $newLikeStatus',
                                         );
                                       }
-                                      if (allIndex != -1) {
+                                      if (filteredIndex != -1) {
                                         setState(() {
-                                          _allProducts[allIndex] =
-                                              _allProducts[allIndex]
+                                          _filteredProducts[filteredIndex] =
+                                              _filteredProducts[filteredIndex]
                                                   .copyWith(
                                             isLiked: newLikeStatus,
                                           );
-                                          if (filteredIndex != -1) {
-                                            _filteredProducts[
-                                                    filteredIndex] =
-                                                _filteredProducts[
-                                                        filteredIndex]
-                                                    .copyWith(
-                                              isLiked: newLikeStatus,
-                                            );
-                                          }
                                         });
                                       }
                                     } catch (e) {
-                                      if (allIndex != -1) {
+                                      if (filteredIndex != -1) {
                                         setState(() {
-                                          _allProducts[allIndex] =
-                                              _allProducts[allIndex]
+                                          _filteredProducts[filteredIndex] =
+                                              _filteredProducts[filteredIndex]
                                                   .copyWith(
                                             isLiked: product.isLiked,
                                           );
-                                          if (filteredIndex != -1) {
-                                            _filteredProducts[
-                                                    filteredIndex] =
-                                                _filteredProducts[
-                                                        filteredIndex]
-                                                    .copyWith(
-                                              isLiked: product.isLiked,
-                                            );
-                                          }
                                         });
                                       }
                                       if (mounted) {

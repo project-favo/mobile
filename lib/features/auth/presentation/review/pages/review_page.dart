@@ -38,7 +38,7 @@ class _ReviewPageState extends State<ReviewPage> {
   bool _isLoadingReviews = true;
   String? _errorMessage;
   int _likeCount = 0;
-  bool _isLoadingLikeCount = false;
+  bool _hasLoadedLikeCount = false;
 
   @override
   void initState() {
@@ -46,25 +46,21 @@ class _ReviewPageState extends State<ReviewPage> {
     _currentProduct = widget.product;
     _loadReviews();
     _refreshProductData(); // Product'ı backend'den yeniden yükle (rating ve like durumu için)
-    _loadLikeCount();
   }
 
   Future<void> _loadLikeCount() async {
-    setState(() {
-      _isLoadingLikeCount = true;
-    });
-
     try {
       final count = await _interactionRepository.getProductLikeCount(_currentProduct.id);
       if (!mounted) return;
       setState(() {
         _likeCount = count;
-        _isLoadingLikeCount = false;
+        _hasLoadedLikeCount = true;
       });
     } catch (_) {
+      // Hata durumunda mevcut değeri koru ama loading state'ten çık
       if (!mounted) return;
       setState(() {
-        _isLoadingLikeCount = false;
+        _hasLoadedLikeCount = true;
       });
     }
   }
@@ -389,13 +385,15 @@ class _ReviewPageState extends State<ReviewPage> {
                             size: 14,
                             color: AppColors.primary,
                           ),
-                          const SizedBox(width: 4),
-                          Text(
-                            _isLoadingLikeCount ? '...' : '$_likeCount likes',
-                            style: AppTextStyles.bodySmall.copyWith(
-                              color: AppColors.textSecondary,
+                          if (_hasLoadedLikeCount) ...[
+                            const SizedBox(width: 4),
+                            Text(
+                              '$_likeCount likes',
+                              style: AppTextStyles.bodySmall.copyWith(
+                                color: AppColors.textSecondary,
+                              ),
                             ),
-                          ),
+                          ],
                         ],
                       ),
                     ],

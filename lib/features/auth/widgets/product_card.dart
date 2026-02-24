@@ -239,7 +239,7 @@ class _ProductCardState extends State<ProductCard> {
                 const SizedBox(width: 4),
                 Text(
                   _isLoadingReviewCount
-                      ? '...'
+                      ? 'Reviews'
                       : '${_reviewCount ?? 0} Reviews',
                   style: AppTextStyles.bodySmall.copyWith(
                     color: AppColors.textSecondary,
