@@ -496,14 +496,19 @@ class _HomePageState extends State<HomePage> {
               if (_selectedCategoryIndex != -1) ...[
                 const SizedBox(height: AppSpacing.large),
                 if (_isLoadingSubTags)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(
-                      vertical: AppSpacing.small,
-                    ),
-                    child: SizedBox(
-                      height: 18,
-                      width: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                  // Alt kategori skeleton'ları: ana chip'lerle aynı hizada, shimmer'lı
+                  SizedBox(
+                    height: AppSpacing.categoryChipHeight,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: 4,
+                      separatorBuilder: (_, __) =>
+                          const SizedBox(width: AppSpacing.large),
+                      itemBuilder: (context, index) => const SkeletonLoader(
+                        width: 70,
+                        height: AppSpacing.categoryChipHeight - 8,
+                        borderRadius: BorderRadius.all(Radius.circular(20)),
+                      ),
                     ),
                   )
                 else if (_subTags.isNotEmpty)
@@ -515,6 +520,7 @@ class _HomePageState extends State<HomePage> {
                         _CategoryChip(
                           title: 'All',
                           selected: _selectedSubCategoryIndex == -1,
+                          isSubCategory: true,
                           onTap: () async {
                             final rootTag = _tags[_selectedCategoryIndex];
                             setState(() {
@@ -532,6 +538,7 @@ class _HomePageState extends State<HomePage> {
                           return _CategoryChip(
                             title: subTag.name,
                             selected: subIndex == _selectedSubCategoryIndex,
+                            isSubCategory: true,
                             onTap: () async {
                               setState(() {
                                 _selectedSubCategoryIndex = subIndex;
@@ -549,11 +556,20 @@ class _HomePageState extends State<HomePage> {
               ],
               const SizedBox(height: AppSpacing.xxLarge),
               _isFiltering
-                  ? const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(AppSpacing.xxLarge),
-                        child: CircularProgressIndicator(),
+                  // Kategori / sayfa değişirken, gerçek grid yapısına benzeyen skeleton grid göster
+                  ? GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        crossAxisSpacing: AppSpacing.xLarge,
+                        mainAxisSpacing: AppSpacing.xLarge,
+                        childAspectRatio: 0.6,
                       ),
+                      itemCount: 4,
+                      itemBuilder: (context, index) =>
+                          const ProductCardSkeleton(),
                     )
                   : _filteredProducts.isEmpty
                       ? Center(
@@ -808,27 +824,42 @@ class _HomePageState extends State<HomePage> {
 class _CategoryChip extends StatelessWidget {
   final String title;
   final bool selected;
+  final bool isSubCategory;
   final VoidCallback? onTap;
 
   const _CategoryChip({
     required this.title,
     this.selected = false,
+    this.isSubCategory = false,
     this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final decoration =
+        AppChipStyles.categoryChipDecoration(selected: selected);
+
+    final textStyle =
+        AppChipStyles.categoryChipText(selected: selected).copyWith(
+      fontSize: isSubCategory ? 12 : null,
+    );
+
+    final horizontalPadding =
+        isSubCategory ? AppSpacing.large : AppSpacing.xLarge;
+
     return Padding(
       padding: const EdgeInsets.only(right: AppSpacing.large),
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+          padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
           alignment: Alignment.center,
-          decoration: AppChipStyles.categoryChipDecoration(selected: selected),
+          decoration: decoration,
           child: Text(
             title,
-            style: AppChipStyles.categoryChipText(selected: selected),
+            style: textStyle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ),
       ),
