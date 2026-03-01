@@ -18,14 +18,7 @@ class AuthRepository {
       );
       return UserResponseDto.fromJson(response.data);
     } on DioException catch (e) {
-      if (e.response != null) {
-        final errorData = e.response?.data;
-        final errorMessage = errorData is Map
-            ? (errorData['message'] ?? errorData['error'] ?? 'Login failed')
-            : errorData?.toString() ?? 'Login failed';
-        throw Exception(errorMessage);
-      }
-      throw Exception('Network error: ${e.message}');
+      rethrow;
     }
   }
 

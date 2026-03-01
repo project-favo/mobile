@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/user_response_dto.dart';
 import '../models/user_update_request_dto.dart';
@@ -31,6 +32,10 @@ class AuthService {
       return userDto;
     } on FirebaseAuthException catch (e) {
       throw _handleFirebaseError(e);
+    } on DioException catch (e) {
+      rethrow;
+    } on Exception catch (e) {
+      rethrow;
     } catch (e) {
       throw Exception(e.toString());
     }
