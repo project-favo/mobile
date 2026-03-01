@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -43,11 +44,14 @@ class _HomePageState extends State<HomePage> {
   List<ProductDto> _filteredProducts = []; // Current page products
   int _currentPage = 0;
   int _totalPages = 0;
+  int _totalElements = 0;
   String? _activeCategoryPathPrefix;
   bool _isLoading = true;
-  bool _isFiltering = false; // Kategori filtreleme yapılırken
+  bool _isFiltering = false;
+  bool _isLoadingMore = false; // Infinite scroll: sonraki sayfa yüklenirken
   bool _isLoadingSubTags = false;
   String? _errorMessage;
+  final ScrollController _scrollController = ScrollController();
 
   Route _noAnimationRoute(Widget page) {
     return PageRouteBuilder(
@@ -102,54 +106,74 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _loadData();
+    _scrollController.addListener(_onScroll);
   }
 
-  /// Kategoriye göre ürünleri filtreler
-  /// Yeni backend search/pagination mantığı:
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  /// Infinite scroll: listenere yaklaşınca sonraki sayfayı yükle
+  void _onScroll() {
+    if (_isFiltering || _isLoadingMore || _filteredProducts.isEmpty) return;
+    if (_currentPage + 1 >= _totalPages) return;
+    final pos = _scrollController.position;
+    if (pos.pixels >= pos.maxScrollExtent - 200) {
+      _loadMoreProducts();
+    }
+  }
+
+  Future<void> _loadMoreProducts() async {
+    if (_isLoadingMore || _currentPage + 1 >= _totalPages) return;
+    setState(() {
+      _isLoadingMore = true;
+    });
+    await _loadProductsPage(_currentPage + 1, append: true);
+    if (mounted) {
+      setState(() {
+        _isLoadingMore = false;
+      });
+    }
+  }
+
+  /// Ürün listesi artık token olmadan da çalışır (backend 200 döner).
   /// - All: /api/products/home?page=X&size=Y
   /// - Category: /api/products/search?categoryPathPrefix=...&page=X&size=Y
-  Future<void> _loadProductsPage(int page) async {
+  /// [append]: true ise gelen sayfa mevcut listeye eklenir (infinite scroll)
+  Future<void> _loadProductsPage(int page, {bool append = false}) async {
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        throw Exception('User not authenticated. Please login first.');
-      }
-
       final firebaseIdToken = await _sessionHelper.ensureSession();
-      if (firebaseIdToken == null) {
-        throw Exception('Failed to get Firebase ID token');
-      }
-
-      if (kDebugMode) {
-        debugPrint(
-            'HomePage - Loading page $page, categoryPathPrefix=$_activeCategoryPathPrefix');
-      }
 
       final result = _activeCategoryPathPrefix == null
           ? await _productRepository.getHomeFeed(
               page: page,
-              size: 20,
+              size: 10,
               firebaseIdToken: firebaseIdToken,
             )
           : await _productRepository.searchProducts(
               categoryPathPrefix: _activeCategoryPathPrefix!,
               page: page,
-              size: 20,
+              size: 10,
               firebaseIdToken: firebaseIdToken,
             );
 
       if (!mounted) return;
 
       setState(() {
-        _filteredProducts = result.content;
+        if (append && page > 0) {
+          _filteredProducts = [..._filteredProducts, ...result.content];
+        } else {
+          _filteredProducts = result.content;
+        }
         _currentPage = result.number;
         _totalPages = result.totalPages;
+        _totalElements = result.totalElements;
         _isFiltering = false;
       });
     } catch (e) {
-      if (kDebugMode) {
-        debugPrint('HomePage - Error loading products page: $e');
-      }
       if (!mounted) return;
       setState(() {
         _isFiltering = false;
@@ -177,28 +201,25 @@ class _HomePageState extends State<HomePage> {
       _activeCategoryPathPrefix = rootTag.categoryPath;
     });
 
-    try {
-      final token = await _sessionHelper.ensureSession();
-      if (token == null) {
-        throw Exception('Failed to get Firebase ID token');
+    // Önce ürünleri yükle (kullanıcı hemen sonuç görsün), alt kategoriler arka planda gelsin
+    final token = await _sessionHelper.ensureSession();
+    unawaited(Future(() async {
+      try {
+        final childrenResponse =
+            await _tagRepository.getTagChildren(rootTag.id, token);
+        if (!mounted) return;
+        setState(() {
+          _subTags = childrenResponse.children;
+          _isLoadingSubTags = false;
+        });
+      } catch (_) {
+        if (!mounted) return;
+        setState(() {
+          _isLoadingSubTags = false;
+          _subTags = [];
+        });
       }
-
-      final childrenResponse =
-          await _tagRepository.getTagChildren(rootTag.id, token);
-
-      if (!mounted) return;
-
-      setState(() {
-        _subTags = childrenResponse.children;
-        _isLoadingSubTags = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _isLoadingSubTags = false;
-        _subTags = [];
-      });
-    }
+    }));
 
     await _loadProductsPage(0);
   }
@@ -215,21 +236,13 @@ class _HomePageState extends State<HomePage> {
         firebaseIdToken: token,
       );
 
-      if (kDebugMode) {
-        debugPrint('HomePage - Product refreshed: ${updatedProduct.name}, Rating: ${updatedProduct.averageRating}, Liked: ${updatedProduct.isLiked}');
-      }
-
       final filteredIndex = _filteredProducts.indexWhere((p) => p.id == productId);
       if (filteredIndex != -1) {
         setState(() {
           _filteredProducts[filteredIndex] = updatedProduct;
         });
       }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('Failed to refresh product like status: $e');
-      }
-    }
+    } catch (_) {}
   }
 
   Future<void> _loadData() async {
@@ -239,42 +252,43 @@ class _HomePageState extends State<HomePage> {
     });
 
     try {
-      // Get Firebase ID token for authentication (required for tag endpoints)
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        throw Exception('User not authenticated. Please login first.');
-      }
-
-
-      // Ensure backend session is established (only if needed)
+      // Token opsiyonel: ürün listesi ve kategori artık token olmadan da 200 döner
       final firebaseIdToken = await _sessionHelper.ensureSession();
-      if (firebaseIdToken == null) {
-        throw Exception('Failed to get Firebase ID token');
+
+      List<TagDto> tags = [];
+      try {
+        tags = await _tagRepository.getRootTags(firebaseIdToken);
+      } catch (_) {
+        // Tags 401 verebilir; kategorileri boş bırak, ürünler yine yüklensin
       }
 
-      // Fetch tags (requires authentication)
-      final tags = await _tagRepository.getRootTags(firebaseIdToken);
-      _tags = tags;
-      _activeCategoryPathPrefix = null;
+      if (!mounted) return;
+      setState(() {
+        _tags = tags;
+        _activeCategoryPathPrefix = null;
+        _selectedCategoryIndex = -1;
+      });
+
       await _loadProductsPage(0);
 
       if (mounted) {
         setState(() {
-          _selectedCategoryIndex = -1; // "All" selected
           _isLoading = false;
         });
       }
     } catch (e) {
-      setState(() {
-        _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
+          _isLoading = false;
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading && _allProducts.isEmpty) {
+    if (_isLoading && _filteredProducts.isEmpty) {
       return Scaffold(
         backgroundColor: AppColors.background,
         appBar: AppBar(
@@ -427,8 +441,11 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
       body: CustomRefreshIndicator(
-        onRefresh: _loadData,
+        onRefresh: () async {
+          await _loadData();
+        },
         child: SingleChildScrollView(
+          controller: _scrollController,
           padding: const EdgeInsets.all(AppSpacing.xLarge),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -676,11 +693,6 @@ class _HomePageState extends State<HomePage> {
                                         token,
                                         product.id,
                                       );
-                                      if (kDebugMode) {
-                                        debugPrint(
-                                          'HomePage - Like toggled: Product ${product.id}, New status: $newLikeStatus',
-                                        );
-                                      }
                                       if (filteredIndex != -1) {
                                         setState(() {
                                           _filteredProducts[filteredIndex] =
@@ -720,47 +732,22 @@ class _HomePageState extends State<HomePage> {
                                 );
                               },
                             ),
-                            const SizedBox(height: AppSpacing.large),
-                            if (_totalPages > 1)
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  IconButton(
-                                    onPressed: _currentPage > 0 &&
-                                            !_isFiltering
-                                        ? () async {
-                                            setState(() {
-                                              _isFiltering = true;
-                                            });
-                                            await _loadProductsPage(
-                                              _currentPage - 1,
-                                            );
-                                          }
-                                        : null,
-                                    icon: const Icon(Icons.chevron_left),
-                                  ),
-                                  Text(
-                                    'Page ${_currentPage + 1} of $_totalPages',
-                                    style:
-                                        AppTextStyles.bodySecondary,
-                                  ),
-                                  IconButton(
-                                    onPressed: _currentPage <
-                                                _totalPages - 1 &&
-                                            !_isFiltering
-                                        ? () async {
-                                            setState(() {
-                                              _isFiltering = true;
-                                            });
-                                            await _loadProductsPage(
-                                              _currentPage + 1,
-                                            );
-                                          }
-                                        : null,
-                                    icon:
-                                        const Icon(Icons.chevron_right),
-                                  ),
-                                ],
+                            if (_isLoadingMore)
+                              const Padding(
+                                padding: EdgeInsets.all(AppSpacing.large),
+                                child: SizedBox(
+                                  height: 32,
+                                  width: 32,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                              )
+                            else if (_totalElements > _filteredProducts.length)
+                              Padding(
+                                padding: const EdgeInsets.all(AppSpacing.small),
+                                child: Text(
+                                  '${_filteredProducts.length} / $_totalElements',
+                                  style: AppTextStyles.bodySecondary,
+                                ),
                               ),
                           ],
                         ),

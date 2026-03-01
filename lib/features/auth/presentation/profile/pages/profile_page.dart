@@ -8,11 +8,14 @@ import '../../../../../core/utils/session_helper.dart';
 import '../../../../auth/data/services/auth_service.dart';
 import '../../../../auth/data/models/user_response_dto.dart';
 import '../../../data/models/product_dto.dart';
+import '../../../data/models/review_dto.dart';
 import '../../../data/repositories/interaction_repository.dart';
+import '../../../data/repositories/review_repository.dart';
 import '../../../widgets/product_card.dart';
 import '../../home_page.dart';
 import '../../search_page.dart';
 import '../../review/pages/review_page.dart';
+import '../../../../../core/routes/custom_page_transitions.dart';
 import 'settings_page.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -26,6 +29,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
   late TabController _tabController;
   final AuthService _authService = AuthService();
   final InteractionRepository _interactionRepository = InteractionRepository();
+  final ReviewRepository _reviewRepository = ReviewRepository();
   final SessionHelper _sessionHelper = SessionHelper();
   UserResponseDto? _user;
   bool _isLoading = true;
@@ -34,6 +38,9 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
   List<ProductDto> _wishlistProductsOriginalOrder = [];
   bool _isLoadingWishlist = false;
   String? _wishlistError;
+  List<ReviewDto> _myReviews = [];
+  bool _isLoadingMyReviews = false;
+  String? _myReviewsError;
   String _selectedDateSort = 'Newest';
 
   Route _noAnimationRoute(Widget page) {
@@ -80,12 +87,149 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _loadUserData();
+    // Profil açılır açılmaz My Reviews'ı yükle (ilk sekme)
+    _loadMyReviews();
     _tabController.addListener(() {
       if (_tabController.index == 1 && _wishlistProducts.isEmpty && !_isLoadingWishlist) {
         _loadWishlist();
       }
-      setState(() {}); // Tab değişince alt içerik değişsin
+      setState(() {});
     });
+  }
+
+  Future<void> _loadMyReviews() async {
+    setState(() {
+      _isLoadingMyReviews = true;
+      _myReviewsError = null;
+    });
+
+    try {
+      final token = await _sessionHelper.ensureSession();
+      if (token == null) {
+        throw Exception('Please log in to see your reviews.');
+      }
+
+      final reviews = await _reviewRepository.getMyReviews(token);
+      if (mounted) {
+        setState(() {
+          _myReviews = reviews;
+          _isLoadingMyReviews = false;
+        });
+        _sortMyReviews();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _myReviewsError = ErrorHandler.getUserFriendlyMessage(e);
+          _isLoadingMyReviews = false;
+        });
+      }
+    }
+  }
+
+  Widget _buildMyReviewsTab() {
+    if (_isLoadingMyReviews) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_myReviewsError != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.xLarge),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _myReviewsError!,
+                style: AppTextStyles.body,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: AppSpacing.large),
+              TextButton(
+                onPressed: _loadMyReviews,
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (_myReviews.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(AppSpacing.xLarge),
+          child: Text(
+            'Henüz yorum yok',
+            style: AppTextStyles.bodySecondary,
+          ),
+        ),
+      );
+    }
+    return ListView.separated(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+      itemCount: _myReviews.length,
+      separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.medium),
+      itemBuilder: (context, index) {
+        final review = _myReviews[index];
+        return InkWell(
+          onTap: () {
+            // Sayfa hemen açılsın; ürün ReviewPage içinde yüklenecek
+            Navigator.push(
+              context,
+              SlideRightRoute(
+                page: ReviewPage(
+                  productId: review.productId,
+                  productName: review.productName,
+                ),
+              ),
+            );
+          },
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.all(AppSpacing.large),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  review.productName,
+                  style: AppTextStyles.heading3,
+                ),
+                const SizedBox(height: AppSpacing.small),
+                Text(
+                  review.title,
+                  style: AppTextStyles.bodyMedium,
+                ),
+                if (review.description != null && review.description!.isNotEmpty) ...[
+                  const SizedBox(height: AppSpacing.small),
+                  Text(
+                    review.description!,
+                    style: AppTextStyles.bodySecondary,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+                const SizedBox(height: AppSpacing.small),
+                Row(
+                  children: [
+                    Icon(Icons.star, size: 16, color: AppColors.primary),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${review.rating} / 5',
+                      style: AppTextStyles.bodySecondary,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _loadUserData() async {
@@ -127,13 +271,15 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
       }
 
       final products = await _interactionRepository.getMyWishlist(token);
+      if (!mounted) return;
       setState(() {
-        _wishlistProducts = products;
+        _wishlistProducts = List.from(products);
         _wishlistProductsOriginalOrder = List.from(products);
         _isLoadingWishlist = false;
       });
       _sortWishlist();
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _wishlistError = ErrorHandler.getUserFriendlyMessage(e);
         _isLoadingWishlist = false;
@@ -251,7 +397,8 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
 
     final hasAnyDate = _wishlistProducts.any((p) => p.createdAt != null);
     if (hasAnyDate) {
-      _wishlistProducts.sort((a, b) {
+      final sorted = List<ProductDto>.from(_wishlistProducts);
+      sorted.sort((a, b) {
         final da = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
         final db = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
         if (_selectedDateSort == 'Newest') {
@@ -259,14 +406,29 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
         }
         return da.compareTo(db);
       });
+      _wishlistProducts = sorted;
     } else {
-      // Backend createdAt dönmüyorsa: API sırası = Newest (en yeni önce), Oldest = ters çevir
       if (_selectedDateSort == 'Newest') {
         _wishlistProducts = List.from(_wishlistProductsOriginalOrder);
       } else {
         _wishlistProducts = _wishlistProductsOriginalOrder.reversed.toList();
       }
     }
+    setState(() {});
+  }
+
+  void _sortMyReviews() {
+    if (_myReviews.isEmpty) return;
+    final sorted = List<ReviewDto>.from(_myReviews);
+    sorted.sort((a, b) {
+      final da = DateTime.tryParse(a.createdAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final db = DateTime.tryParse(b.createdAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
+      if (_selectedDateSort == 'Newest') {
+        return db.compareTo(da);
+      }
+      return da.compareTo(db);
+    });
+    _myReviews = sorted;
     setState(() {});
   }
 
@@ -457,22 +619,20 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                     value: _selectedDateSort,
                     onChanged: (value) {
                       if (value == null) return;
-                      setState(() {
-                        _selectedDateSort = value;
+                      setState(() => _selectedDateSort = value);
+                      if (_tabController.index == 0) {
+                        _sortMyReviews();
+                      } else {
                         _sortWishlist();
-                      });
+                      }
                     },
                   ),
                 ],
               ),
             ),
             const SizedBox(height: AppSpacing.xxLarge),
-            // Tab içeriği (yükseklik kısıtı yok, tümü scroll edilebilir)
             if (_tabController.index == 0)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: AppSpacing.large),
-                child: Center(child: Text('My Reviews content')),
-              )
+              _buildMyReviewsTab()
             else
               _buildWishlistTab(),
             const SizedBox(height: AppSpacing.xxLarge),

@@ -46,6 +46,7 @@ class _ProductCardState extends State<ProductCard> {
   }
 
   Future<void> _loadReviewCount() async {
+    if (!mounted) return;
     setState(() {
       _isLoadingReviewCount = true;
     });
@@ -56,11 +57,13 @@ class _ProductCardState extends State<ProductCard> {
         widget.productId,
         firebaseIdToken: null,
       );
+      if (!mounted) return;
       setState(() {
         _reviewCount = reviews.length;
         _isLoadingReviewCount = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _reviewCount = 0;
         _isLoadingReviewCount = false;

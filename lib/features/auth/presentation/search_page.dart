@@ -74,48 +74,54 @@ class _SearchPageState extends State<SearchPage> {
     });
 
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        throw Exception('User not authenticated. Please login first.');
-      }
-
+      // Token opsiyonel: kategoriler ve ürün listesi token olmadan da döner
       final token = await _sessionHelper.ensureSession();
-      if (token == null) {
-        throw Exception('Failed to get Firebase ID token');
-      }
       _firebaseIdToken = token;
 
-      final results = await Future.wait([
-        _productRepository.getAllProducts(firebaseIdToken: token),
-        _tagRepository.getRootTags(token),
-      ]);
+      // Önce sadece kategorileri yükle → ekran hemen açılsın
+      List<TagDto> rootTags = [];
+      try {
+        rootTags = await _tagRepository.getRootTags(token);
+      } catch (_) {}
 
-      final products = results[0] as List<ProductDto>;
-      final rootTags = results[1] as List<TagDto>;
-
+      if (!mounted) return;
       setState(() {
-        _allProducts = products;
-        _searchResults = [];
         _rootCategories = rootTags;
         _currentCategories = rootTags;
         _isLoading = false;
       });
+
+      // Ürünleri arka planda yükle (tümünü değil, ilk sayfa – hız için)
+      try {
+        final result = await _productRepository.getHomeFeed(
+          page: 0,
+          size: 30,
+          firebaseIdToken: token,
+        );
+        if (!mounted) return;
+        setState(() {
+          _allProducts = result.content;
+        });
+      } catch (_) {
+        // Ürünler yüklenemezse arama boş kalır, kategoriler çalışır
+      }
     } catch (e) {
-      setState(() {
-        _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
+          _isLoading = false;
+        });
+      }
     }
   }
 
   Future<void> _openCategory(TagDto category) async {
-    if (_firebaseIdToken == null) return;
     setState(() {
       _isLoadingCategories = true;
     });
 
     try {
-      final response = await _tagRepository.getTagChildren(category.id, _firebaseIdToken!);
+      final response = await _tagRepository.getTagChildren(category.id, _firebaseIdToken);
       if (response.children.isNotEmpty) {
         setState(() {
           _categoryHistory.add(_currentCategories);

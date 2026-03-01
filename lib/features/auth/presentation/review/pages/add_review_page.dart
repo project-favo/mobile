@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
@@ -130,8 +131,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
           ),
         );
       } catch (e) {
-        print('Error converting image ${imageFile.path}: $e');
-        // Hata olsa bile devam et, diğer fotoğrafları yükle
+        if (kDebugMode) debugPrint('Error converting image ${imageFile.path}: $e');
       }
     }
 
@@ -261,17 +261,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
         mediaList: mediaList,
       );
 
-      print('📝 AddReviewPage - Creating review:');
-      print('   Product ID: ${widget.product.id}');
-      print('   Rating: $_selectedRating');
-      print('   Title: ${request.title}');
-      print('   Description: ${request.description}');
-      
-      final createdReview = await _reviewRepository.createReview(firebaseIdToken, request);
-      
-      print('✅ Review created successfully:');
-      print('   Review ID: ${createdReview.id}');
-      print('   Rating: ${createdReview.rating}');
+      await _reviewRepository.createReview(firebaseIdToken, request);
 
       setState(() {
         _isLoading = false;

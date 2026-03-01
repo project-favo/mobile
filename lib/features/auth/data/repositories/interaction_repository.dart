@@ -188,24 +188,12 @@ class InteractionRepository {
   /// Returns: { "averageRating": 4.5, "productId": 123 }
   Future<double> getProductAverageRating(String productId) async {
     try {
-      print('⭐ ========== getProductAverageRating START ==========');
-      print('   Product ID: $productId');
-      
       final response = await _apiClient.dio.get('/api/interactions/product/$productId/average-rating');
-      
-      print('   Response Status Code: ${response.statusCode}');
-      print('   Response Data: ${response.data}');
-      
+
       if (response.data is Map) {
         final ratingValue = response.data['averageRating'];
-        print('   Raw Rating Value: $ratingValue (type: ${ratingValue.runtimeType})');
-        
-        if (ratingValue == null) {
-          print('⚠️ Rating value is null, returning 0.0');
-          return 0.0;
-        }
-        
-        // Rating değerini double'a çevir
+        if (ratingValue == null) return 0.0;
+
         double rating;
         if (ratingValue is num) {
           rating = ratingValue.toDouble();
@@ -214,16 +202,8 @@ class InteractionRepository {
         } else {
           rating = 0.0;
         }
-        
-        // Rating 0-5 arası olmalı
-        final finalRating = rating.clamp(0.0, 5.0);
-        print('✅ Final Rating: $finalRating');
-        print('⭐ ========== getProductAverageRating END ==========');
-        return finalRating;
+        return rating.clamp(0.0, 5.0);
       }
-      
-      print('⚠️ Response is not a Map, returning 0.0');
-      print('⭐ ========== getProductAverageRating END ==========');
       return 0.0;
     } on DioException catch (e) {
       // 404 veya diğer hatalar için 0.0 döndür (rating yoksa)
@@ -300,16 +280,26 @@ class InteractionRepository {
 
       if (response.data is Map && response.data['content'] is List) {
         final content = response.data['content'] as List;
-        final products = content
-            .map((json) => ProductDto.fromJson(json as Map<String, dynamic>))
-            .toList();
+        final products = <ProductDto>[];
+        for (final raw in content) {
+          final item = raw as Map<String, dynamic>;
+          ProductDto product;
+          DateTime? date;
 
-        if (kDebugMode) {
-          debugPrint('📋 Wishlist - Toplam ${products.length} ürün');
-          for (var i = 0; i < products.length; i++) {
-            final p = products[i];
-            debugPrint('   [$i] id=${p.id} name=${p.name} createdAt=${p.createdAt} (raw: ${(content[i] as Map).containsKey("createdAt") ? (content[i] as Map)["createdAt"] : "yok"} )');
+          // API'den likedAt (beğenme tarihi) gelir; yoksa diğer tarih alanlarına bakılır
+          if (item['product'] != null && item['product'] is Map) {
+            product = ProductDto.fromJson(item['product'] as Map<String, dynamic>);
+            final dateStr = item['likedAt']?.toString() ?? item['addedAt']?.toString() ?? item['createdAt']?.toString() ?? item['created_at']?.toString();
+            if (dateStr != null) date = DateTime.tryParse(dateStr);
+          } else {
+            product = ProductDto.fromJson(item);
+            date = item['likedAt'] != null ? DateTime.tryParse(item['likedAt'].toString()) : product.createdAt;
           }
+
+          if (date != null) {
+            product = product.copyWith(createdAt: date);
+          }
+          products.add(product);
         }
 
         return products;

@@ -57,6 +57,38 @@ class ProductRepository {
     }
   }
 
+  /// Same as search but no rating/like (fast). For compare list.
+  Future<ProductSearchResultDto> searchProductsRaw({
+    required String categoryPathPrefix,
+    required int page,
+    int size = 50,
+  }) async {
+    try {
+      final response = await _apiClient.dio.get(
+        '/api/products/search',
+        queryParameters: {
+          'categoryPathPrefix': categoryPathPrefix,
+          'page': page,
+          'size': size,
+        },
+      );
+      return ProductSearchResultDto.fromJson(
+        response.data as Map<String, dynamic>,
+      );
+    } on DioException catch (e) {
+      if (e.response != null) {
+        final errorData = e.response?.data;
+        final errorMessage = errorData is Map
+            ? (errorData['message'] ??
+                errorData['error'] ??
+                'Failed to search products')
+            : errorData?.toString() ?? 'Failed to search products';
+        throw Exception(errorMessage);
+      }
+      throw Exception('Network error: ${e.message}');
+    }
+  }
+
   /// Paginated category/search from
   /// GET /api/products/search?categoryPathPrefix=...&page={page}&size={size}
   Future<ProductSearchResultDto> searchProducts({
@@ -158,6 +190,29 @@ class ProductRepository {
     );
   }
 
+  /// Fetches all products from GET /api/products (no rating/like enrichment).
+  /// Use for compare list so the page loads fast.
+  Future<List<ProductDto>> getAllProductsRaw() async {
+    try {
+      final response = await _apiClient.dio.get('/api/products');
+      if (response.data is List) {
+        return (response.data as List)
+            .map((json) => ProductDto.fromJson(json as Map<String, dynamic>))
+            .toList();
+      }
+      return [];
+    } on DioException catch (e) {
+      if (e.response != null) {
+        final errorData = e.response?.data;
+        final errorMessage = errorData is Map
+            ? (errorData['message'] ?? errorData['error'] ?? 'Failed to fetch products')
+            : errorData?.toString() ?? 'Failed to fetch products';
+        throw Exception(errorMessage);
+      }
+      throw Exception('Network error: ${e.message}');
+    }
+  }
+
   /// Fetches all products from GET /api/products
   /// Optionally includes average rating and like status for each product
   Future<List<ProductDto>> getAllProducts({String? firebaseIdToken}) async {
@@ -197,19 +252,10 @@ class ProductRepository {
               final double avgRating = results[0] as double? ?? 0.0;
               final bool isLikedStatus = results[1] as bool? ?? false;
 
-              print('📦 ProductRepository - Product ${product.id} (${product.name}):');
-              print('   avgRating from backend: $avgRating');
-              print('   isLikedStatus: $isLikedStatus');
-
-              // copyWith kullanarak yeni DTO oluştur
-              final updatedProduct = product.copyWith(
+              return product.copyWith(
                 averageRating: avgRating,
                 isLiked: isLikedStatus,
               );
-              
-              print('   Updated product averageRating: ${updatedProduct.averageRating}');
-              
-              return updatedProduct;
             } catch (e) {
               if (kDebugMode) {
                 debugPrint('Error processing product ${product.id}: $e');

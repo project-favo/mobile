@@ -5,6 +5,32 @@ import '../models/review_dto.dart';
 class ReviewRepository {
   final ApiClient _apiClient = ApiClient();
 
+  /// Giriş yapan kullanıcının kendi yorumları - GET /api/reviews/me
+  /// Token zorunlu.
+  Future<List<ReviewDto>> getMyReviews(String firebaseIdToken) async {
+    try {
+      _apiClient.setAuthToken(firebaseIdToken);
+      final response = await _apiClient.dio.get('/api/reviews/me');
+
+      if (response.data is List) {
+        return (response.data as List)
+            .map((json) => ReviewDto.fromJson(json as Map<String, dynamic>))
+            .toList();
+      }
+
+      return [];
+    } on DioException catch (e) {
+      if (e.response != null) {
+        final errorData = e.response?.data;
+        final errorMessage = errorData is Map
+            ? (errorData['message'] ?? errorData['error'] ?? 'Failed to fetch my reviews')
+            : errorData?.toString() ?? 'Failed to fetch my reviews';
+        throw Exception(errorMessage);
+      }
+      throw Exception('Network error: ${e.message}');
+    }
+  }
+
   /// Product'a göre review'ları getirir
   /// GET /api/reviews/product/{productId}
   Future<List<ReviewDto>> getReviewsByProductId(
@@ -98,23 +124,12 @@ class ReviewRepository {
     CreateReviewRequestDto request,
   ) async {
     try {
-      print('📤 ReviewRepository - createReview START');
-      print('   Request: ${request.toJson()}');
-      
       _apiClient.setAuthToken(firebaseIdToken);
       final response = await _apiClient.dio.post(
         '/api/reviews',
         data: request.toJson(),
       );
-      
-      print('   Response Status Code: ${response.statusCode}');
-      print('   Response Data: ${response.data}');
-      
-      final review = ReviewDto.fromJson(response.data as Map<String, dynamic>);
-      print('✅ Review created: ID=${review.id}, Rating=${review.rating}');
-      print('📤 ReviewRepository - createReview END');
-      
-      return review;
+      return ReviewDto.fromJson(response.data as Map<String, dynamic>);
     } on DioException catch (e) {
       if (e.response != null) {
         final errorData = e.response?.data;

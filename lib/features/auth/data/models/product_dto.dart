@@ -34,8 +34,8 @@ class ProductDto {
               : double.tryParse(json['averageRating'].toString()))
           : null,
       isLiked: json['isLiked'] as bool?,
-      createdAt: json['createdAt'] != null
-          ? DateTime.tryParse(json['createdAt'].toString())
+      createdAt: (json['createdAt'] ?? json['created_at']) != null
+          ? DateTime.tryParse((json['createdAt'] ?? json['created_at']).toString())
           : null,
     );
   }

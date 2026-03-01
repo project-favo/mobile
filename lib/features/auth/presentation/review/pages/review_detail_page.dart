@@ -62,11 +62,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
       setState(() {
         _currentReview = updatedReview;
       });
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('Failed to refresh review: $e');
-      }
-    }
+    } catch (_) {}
   }
 
   /// Media image'ı authentication header ile yükler ve Uint8List olarak döndürür
@@ -76,20 +72,9 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
       // Token'ı al - ensureSession kullanarak güncel token'ı garanti et
       final firebaseIdToken = await _sessionHelper.ensureSession();
       
-      if (firebaseIdToken == null) {
-        if (kDebugMode) {
-          debugPrint('⚠️ No token available for media request');
-        }
-        return null;
-      }
+      if (firebaseIdToken == null) return null;
 
-      // ApiClient'i kullanarak token'ı set et (cookie'ler otomatik gönderilir)
       _apiClient.setAuthToken(firebaseIdToken);
-
-      if (kDebugMode) {
-        debugPrint('🖼️ Loading media from: $mediaUrl');
-        debugPrint('   Token length: ${firebaseIdToken.length}');
-      }
 
       // Media URL'den path'i çıkar (baseUrl zaten ApiClient'te var)
       final uri = Uri.parse(mediaUrl);
@@ -113,29 +98,12 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
 
       if (response.statusCode == 200 && response.data != null) {
         final bytes = response.data as List<int>;
-        if (kDebugMode) {
-          debugPrint('✅ Media loaded successfully: ${bytes.length} bytes');
-        }
         return Uint8List.fromList(bytes);
-      } else {
-        if (kDebugMode) {
-          debugPrint('❌ Media load failed: Status ${response.statusCode}');
-        }
-        return null;
-      }
-    } on DioException catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Dio error loading media: ${e.message}');
-        if (e.response != null) {
-          debugPrint('   Status: ${e.response?.statusCode}');
-          debugPrint('   Response: ${e.response?.data}');
-        }
       }
       return null;
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Error loading media: $e');
-      }
+    } on DioException catch (_) {
+      return null;
+    } catch (_) {
       return null;
     }
   }
@@ -473,11 +441,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                       final media = _currentReview.mediaList[index];
                       // Backend'den direkt URL geliyorsa onu kullan, yoksa id'den oluştur
                       final mediaUrl = media.getMediaUrl(ApiConfig.baseUrl);
-                      if (kDebugMode) {
-                        debugPrint('🖼️ Media URL: $mediaUrl (ID: ${media.id}, MimeType: ${media.mimeType})');
-                        debugPrint('   Direct URL from backend: ${media.url ?? media.imageUrl ?? "none"}');
-                      }
-                      
+
                       // Eğer backend'den direkt URL geliyorsa, Image.network kullan
                       if (media.url != null && media.url!.isNotEmpty) {
                         return ClipRRect(
@@ -488,9 +452,6 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                             height: 120,
                             fit: BoxFit.cover,
                             errorBuilder: (context, error, stackTrace) {
-                              if (kDebugMode) {
-                                debugPrint('❌ Image load error for ${media.url}: $error');
-                              }
                               return Container(
                                 width: 120,
                                 height: 120,
@@ -517,9 +478,6 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                             height: 120,
                             fit: BoxFit.cover,
                             errorBuilder: (context, error, stackTrace) {
-                              if (kDebugMode) {
-                                debugPrint('❌ Image load error for ${media.imageUrl}: $error');
-                              }
                               return Container(
                                 width: 120,
                                 height: 120,
@@ -559,9 +517,6 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                           }
                           
                           if (snapshot.hasError || snapshot.data == null) {
-                            if (kDebugMode) {
-                              debugPrint('❌ Image load error for $mediaUrl: ${snapshot.error}');
-                            }
                             return Container(
                               width: 120,
                               height: 120,
@@ -686,7 +641,6 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                 ),
                 TextButton.icon(
                   onPressed: () {
-                    // TODO: Report functionality
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('Report functionality coming soon'),

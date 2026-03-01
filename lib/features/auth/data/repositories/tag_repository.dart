@@ -39,10 +39,12 @@ class TagRepository {
   final ApiClient _apiClient = ApiClient();
 
   /// Fetches root tags from GET /api/tags/roots
-  /// Requires authentication - Firebase ID token must be provided
-  Future<List<TagDto>> getRootTags(String firebaseIdToken) async {
+  /// Token optional: backend may allow public access
+  Future<List<TagDto>> getRootTags([String? firebaseIdToken]) async {
     try {
-      _apiClient.setAuthToken(firebaseIdToken);
+      if (firebaseIdToken != null) {
+        _apiClient.setAuthToken(firebaseIdToken);
+      }
       final response = await _apiClient.dio.get('/api/tags/roots');
       
       if (response.data is List) {
@@ -93,11 +95,12 @@ class TagRepository {
   }
 
   /// Fetches tag children from GET /api/tags/{id}/children
-  /// Returns tag with children or products if leaf
-  /// Requires authentication - Firebase ID token must be provided
-  Future<TagChildrenResponse> getTagChildren(String tagId, String firebaseIdToken) async {
+  /// Token optional: backend may allow public access
+  Future<TagChildrenResponse> getTagChildren(String tagId, [String? firebaseIdToken]) async {
     try {
-      _apiClient.setAuthToken(firebaseIdToken);
+      if (firebaseIdToken != null) {
+        _apiClient.setAuthToken(firebaseIdToken);
+      }
       final response = await _apiClient.dio.get('/api/tags/$tagId/children');
       
       if (response.data is Map) {

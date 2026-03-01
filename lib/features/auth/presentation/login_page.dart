@@ -104,10 +104,7 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  void _onForgotPassword() {
-    // TODO: Forgot password ekranı/aksiyonu eklenebilir
-    // SnackBar yerine dialog veya başka bir sayfa açılabilir
-  }
+  void _onForgotPassword() {}
 
   @override
 Widget build(BuildContext context) {

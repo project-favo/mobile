@@ -13,16 +13,22 @@ import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/models/review_dto.dart';
+import '../../../data/models/tag_dto.dart';
 import '../../../data/repositories/interaction_repository.dart';
 import '../../../data/repositories/review_repository.dart';
 import '../../../data/repositories/product_repository.dart';
 import 'add_review_page.dart';
 import 'review_detail_page.dart';
+import 'compare_product_select_page.dart';
 
 class ReviewPage extends StatefulWidget {
-  final ProductDto product;
+  /// Tam product verilirse doğrudan kullanılır.
+  /// Sadece [productId] (ve isteğe bağlı [productName]) verilirse sayfa hemen açılır, ürün arka planda yüklenir.
+  final ProductDto? product;
+  final String? productId;
+  final String? productName;
 
-  const ReviewPage({super.key, required this.product});
+  const ReviewPage({super.key, this.product, this.productId, this.productName});
 
   @override
   State<ReviewPage> createState() => _ReviewPageState();
@@ -34,6 +40,7 @@ class _ReviewPageState extends State<ReviewPage> {
   final ProductRepository _productRepository = ProductRepository();
   final SessionHelper _sessionHelper = SessionHelper();
   late ProductDto _currentProduct;
+  bool _isLoadingProduct = false; // productId ile açıldıysa ürün yüklenene kadar
   List<ReviewDto> _reviews = [];
   bool _isLoadingReviews = true;
   String? _errorMessage;
@@ -43,9 +50,47 @@ class _ReviewPageState extends State<ReviewPage> {
   @override
   void initState() {
     super.initState();
-    _currentProduct = widget.product;
+    if (widget.product != null) {
+      _currentProduct = widget.product!;
+      _loadReviews();
+      _refreshProductData();
+      return;
+    }
+    // productId ile açıldı: placeholder ile hemen göster, arka planda ürünü yükle
+    _currentProduct = _placeholderProduct(widget.productId!, widget.productName ?? '');
+    _isLoadingProduct = true;
     _loadReviews();
-    _refreshProductData(); // Product'ı backend'den yeniden yükle (rating ve like durumu için)
+    _loadProductById();
+  }
+
+  ProductDto _placeholderProduct(String id, String name) {
+    return ProductDto(
+      id: id,
+      name: name.isNotEmpty ? name : '...',
+      imageURL: '',
+      tag: TagDto(id: '', name: ''),
+    );
+  }
+
+  Future<void> _loadProductById() async {
+    try {
+      final token = await _sessionHelper.getTokenAndSetHeader();
+      final product = await _productRepository.getProductById(
+        widget.productId!,
+        firebaseIdToken: token,
+      );
+      if (!mounted) return;
+      setState(() {
+        _currentProduct = product;
+        _isLoadingProduct = false;
+      });
+      await _loadLikeCount();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingProduct = false;
+      });
+    }
   }
 
   Future<void> _loadLikeCount() async {
@@ -77,19 +122,11 @@ class _ReviewPageState extends State<ReviewPage> {
         firebaseIdToken: token,
       );
 
-      if (kDebugMode) {
-        debugPrint('ReviewPage - Product refreshed: ${updatedProduct.name}, Rating: ${updatedProduct.averageRating}, Liked: ${updatedProduct.isLiked}');
-      }
-
       setState(() {
         _currentProduct = updatedProduct;
       });
       await _loadLikeCount();
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('Failed to refresh product data: $e');
-      }
-    }
+    } catch (_) {}
   }
 
   Future<void> _loadReviews() async {
@@ -180,10 +217,6 @@ class _ReviewPageState extends State<ReviewPage> {
         _currentProduct.id,
       );
 
-      if (kDebugMode) {
-        debugPrint('ReviewPage - Like toggled: Product ${_currentProduct.id}, New status: $newLikeStatus');
-      }
-
       // Backend'den gelen gerçek durumu güncelle (arka planda, kullanıcı fark etmez)
       setState(() {
         _currentProduct = _currentProduct.copyWith(
@@ -219,6 +252,25 @@ class _ReviewPageState extends State<ReviewPage> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: const IconThemeData(color: AppColors.primary),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: TextButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => CompareProductSelectPage(product1: _currentProduct),
+                  ),
+                );
+              },
+                child: const Text(
+                'COMPARE',
+                style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+        ],
       ),
       body: CustomRefreshIndicator(
         onRefresh: () async {
