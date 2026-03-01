@@ -340,6 +340,28 @@ class ProductRepository {
     }
   }
 
+  /// Same tag products without rating/like (fast). For compare 2nd product list.
+  Future<List<ProductDto>> getProductsByTagIdRaw(String tagId) async {
+    try {
+      final response = await _apiClient.dio.get('/api/products/tag/$tagId');
+      if (response.data is List) {
+        return (response.data as List)
+            .map((json) => ProductDto.fromJson(json as Map<String, dynamic>))
+            .toList();
+      }
+      return [];
+    } on DioException catch (e) {
+      if (e.response != null) {
+        final errorData = e.response?.data;
+        final errorMessage = errorData is Map
+            ? (errorData['message'] ?? errorData['error'] ?? 'Failed to fetch products')
+            : errorData?.toString() ?? 'Failed to fetch products';
+        throw Exception(errorMessage);
+      }
+      throw Exception('Network error: ${e.message}');
+    }
+  }
+
   /// Fetches products by tag ID from GET /api/products/tag/{tagId}
   Future<List<ProductDto>> getProductsByTagId(String tagId, {String? firebaseIdToken}) async {
     try {

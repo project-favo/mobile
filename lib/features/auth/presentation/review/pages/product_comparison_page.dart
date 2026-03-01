@@ -36,7 +36,10 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
   }
 
   Future<void> _loadReviews() async {
-    final token = await _sessionHelper.ensureSession();
+    String? token;
+    try {
+      token = await _sessionHelper.getTokenAndSetHeader();
+    } catch (_) {}
     try {
       final results = await Future.wait([
         _reviewRepository.getReviewsByProductId(widget.product1.id, firebaseIdToken: token),

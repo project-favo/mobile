@@ -14,9 +14,11 @@ class ApiClient {
   bool _initialized = false;
 
   void initialize({String? baseUrl, String? authToken}) {
-    // Initialize cookie jar for session management
-    _cookieJar = CookieJar();
-    
+    // CookieManager is not supported on web (dio_cookie_manager throws in web env)
+    if (!kIsWeb) {
+      _cookieJar = CookieJar();
+    }
+
     _dio = Dio(
       BaseOptions(
         baseUrl: baseUrl ?? ApiConfig.baseUrl,
@@ -30,8 +32,10 @@ class ApiClient {
       ),
     );
 
-    // Add cookie manager to handle session cookies
-    _dio!.interceptors.add(CookieManager(_cookieJar!));
+    // Add cookie manager only on non-web platforms (mobile, desktop)
+    if (!kIsWeb && _cookieJar != null) {
+      _dio!.interceptors.add(CookieManager(_cookieJar!));
+    }
 
     // Log interceptor only in debug mode (not in production)
     if (kDebugMode) {
