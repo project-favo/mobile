@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
+import '../../../../../core/utils/session_helper.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/repositories/product_repository.dart';
 import 'product_comparison_page.dart';
 
-/// Compare: select 2nd product. Only products in the same category are shown
-/// (e.g. smartphone → only other smartphones). One fast API call, no rating/like.
+/// Compare: 2. ürünü seç. Aynı üst kategorideki tüm ürünler listelenir
+/// (örn. Lenovo laptop → tüm laptoplara, Fiction kitap → tüm kitaplara). categoryPathPrefix ile search.
 class CompareProductSelectPage extends StatefulWidget {
   final ProductDto product1;
 
@@ -20,9 +21,11 @@ class CompareProductSelectPage extends StatefulWidget {
 
 class _CompareProductSelectPageState extends State<CompareProductSelectPage> {
   final ProductRepository _productRepository = ProductRepository();
+  final SessionHelper _sessionHelper = SessionHelper();
   final TextEditingController _searchController = TextEditingController();
   List<ProductDto> _products = [];
   bool _isLoadingProducts = true;
+  bool _isSelectingProduct = false;
   String? _errorMessage;
   String _searchQuery = '';
 
@@ -46,7 +49,8 @@ class _CompareProductSelectPageState extends State<CompareProductSelectPage> {
     _loadProducts();
   }
 
-  /// Aynı kategorideki tüm ürünler: search API ile categoryPathPrefix kullanılıyor (sadece kategori, isim yok).
+  /// Üst kategoriye göre ürünler: Lenovo laptop → tüm laptoplara, Fiction → tüm kitaplara açılır.
+  /// categoryPath'ten prefix alınır: "Books.Fiction" → "Books", "Electronics.Laptops.Lenovo" → "Electronics.Laptops".
   Future<void> _loadProducts() async {
     if (!mounted) return;
     setState(() {
@@ -54,7 +58,8 @@ class _CompareProductSelectPageState extends State<CompareProductSelectPage> {
       _errorMessage = null;
     });
     try {
-      final prefix = widget.product1.tag.categoryPath ?? widget.product1.tag.name;
+      final path = widget.product1.tag.categoryPath ?? widget.product1.tag.name;
+      final prefix = path.contains('.') ? path.substring(0, path.lastIndexOf('.')) : path;
       if (prefix.isEmpty) {
         if (!mounted) return;
         setState(() {
@@ -94,16 +99,35 @@ class _CompareProductSelectPageState extends State<CompareProductSelectPage> {
     }
   }
 
-  void _onProductSelected(ProductDto product2) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ProductComparisonPage(
-          product1: widget.product1,
-          product2: product2,
+  /// Seçilen 2. ürünün rating bilgisini almak için getProductById ile tam detay çekilir, sonra karşılaştırma sayfasına gidilir.
+  Future<void> _onProductSelected(ProductDto product2) async {
+    if (_isSelectingProduct) return;
+    setState(() => _isSelectingProduct = true);
+    try {
+      final token = await _sessionHelper.getTokenAndSetHeader();
+      final product2WithRating = await _productRepository.getProductById(
+        product2.id,
+        firebaseIdToken: token,
+      );
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ProductComparisonPage(
+            product1: widget.product1,
+            product2: product2WithRating,
+          ),
         ),
-      ),
-    );
+      );
+      if (!mounted) return;
+      setState(() => _isSelectingProduct = false);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isSelectingProduct = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not load product: ${e.toString()}')),
+      );
+    }
   }
 
   @override
@@ -115,7 +139,7 @@ class _CompareProductSelectPageState extends State<CompareProductSelectPage> {
         elevation: 0,
         iconTheme: const IconThemeData(color: AppColors.primary),
         title: Text(
-          'Select 2nd Product',
+          'Compare with...',
           style: AppTextStyles.heading3.copyWith(
             color: AppColors.textPrimary,
             fontWeight: FontWeight.bold,
@@ -123,10 +147,12 @@ class _CompareProductSelectPageState extends State<CompareProductSelectPage> {
           ),
         ),
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      body: Stack(
         children: [
-          Padding(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
             padding: const EdgeInsets.all(AppSpacing.xLarge),
             child: TextField(
               controller: _searchController,
@@ -171,12 +197,15 @@ class _CompareProductSelectPageState extends State<CompareProductSelectPage> {
                       )
                     : _filteredProducts.isEmpty
                         ? Center(
-                            child: Text(
-                              _searchQuery.trim().isEmpty
-                                  ? 'No other products to compare.'
-                                  : 'No products match "$_searchQuery".',
-                              style: AppTextStyles.body.copyWith(color: AppColors.textSecondary),
-                              textAlign: TextAlign.center,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+                              child: Text(
+                                _searchQuery.trim().isEmpty
+                                    ? 'No other products in this category to compare.'
+                                    : 'No products match "$_searchQuery".',
+                                style: AppTextStyles.body.copyWith(color: AppColors.textSecondary),
+                                textAlign: TextAlign.center,
+                              ),
                             ),
                           )
                         : ListView.separated(
@@ -250,7 +279,16 @@ class _CompareProductSelectPageState extends State<CompareProductSelectPage> {
                               );
                             },
                           ),
-          ),
+            ),
+          ],
+        ),
+          if (_isSelectingProduct)
+            Container(
+              color: Colors.black26,
+              child: const Center(
+                child: CircularProgressIndicator(color: AppColors.primary),
+              ),
+            ),
         ],
       ),
     );
