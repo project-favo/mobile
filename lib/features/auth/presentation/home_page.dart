@@ -13,6 +13,8 @@ import '../../../core/widgets/skeleton_loader.dart';
 import '../../../core/routes/custom_page_transitions.dart';
 import '../widgets/product_card.dart';
 import '../widgets/top_product_card.dart';
+import 'messages/conversation_list_page.dart';
+import '../data/repositories/message_repository.dart';
 import 'search_page.dart';
 import 'profile/pages/profile_page.dart';
 import 'review/pages/review_page.dart';
@@ -37,6 +39,7 @@ class _HomePageState extends State<HomePage> {
   final ProductRepository _productRepository = ProductRepository();
   final InteractionRepository _interactionRepository = InteractionRepository();
   final SessionHelper _sessionHelper = SessionHelper();
+  final MessageRepository _messageRepository = MessageRepository();
   
   List<TagDto> _tags = [];
   List<TagDto> _subTags = [];
@@ -52,6 +55,7 @@ class _HomePageState extends State<HomePage> {
   bool _isLoadingSubTags = false;
   String? _errorMessage;
   final ScrollController _scrollController = ScrollController();
+  int _unreadMessageCount = 0;
 
   Route _noAnimationRoute(Widget page) {
     return PageRouteBuilder(
@@ -106,6 +110,7 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _loadData();
+    _loadUnreadCount();
     _scrollController.addListener(_onScroll);
   }
 
@@ -114,6 +119,26 @@ class _HomePageState extends State<HomePage> {
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadUnreadCount() async {
+    try {
+      final token = await _sessionHelper.ensureSession();
+      if (token == null) return;
+      final page = await _messageRepository.getConversations(page: 0, size: 50);
+      if (!mounted) return;
+      final convCountWithUnread =
+          page.content.where((c) => c.unreadCount > 0).length;
+      setState(() {
+        _unreadMessageCount = convCountWithUnread;
+      });
+    } catch (_) {
+      // Sessiyon/yetki hatalarında badge'i sadece sıfır bırak
+      if (!mounted) return;
+      setState(() {
+        _unreadMessageCount = 0;
+      });
+    }
   }
 
   /// Infinite scroll: listenere yaklaşınca sonraki sayfayı yükle
@@ -433,10 +458,56 @@ class _HomePageState extends State<HomePage> {
         ),
         centerTitle: true,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.chat_bubble),
-            color: AppColors.primary,
-            onPressed: () {},
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.chat_bubble),
+                  color: AppColors.primary,
+                  onPressed: () async {
+                    final result = await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const ConversationListPage(),
+                      ),
+                    );
+                    if (result == true) {
+                      await _loadUnreadCount();
+                    } else {
+                      // Yine de olası yeni mesajlar için refresh et
+                      unawaited(_loadUnreadCount());
+                    }
+                  },
+                ),
+                if (_unreadMessageCount > 0)
+                  Positioned(
+                    right: 4,
+                    top: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        _unreadMessageCount > 9
+                            ? '9+'
+                            : _unreadMessageCount.toString(),
+                        style: AppTextStyles.bodySecondary.copyWith(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ],
       ),
