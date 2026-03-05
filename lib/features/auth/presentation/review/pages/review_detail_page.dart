@@ -14,6 +14,7 @@ import '../../../data/models/review_dto.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/repositories/interaction_repository.dart';
 import '../../../data/repositories/review_repository.dart';
+import '../../../data/repositories/message_repository.dart';
 
 class ReviewDetailPage extends StatefulWidget {
   final ReviewDto review;
@@ -35,12 +36,21 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
   final SessionHelper _sessionHelper = SessionHelper();
   final ApiClient _apiClient = ApiClient();
   late ReviewDto _currentReview;
+  final MessageRepository _messageRepository = MessageRepository();
 
   @override
   void initState() {
     super.initState();
     _currentReview = widget.review;
     _refreshReview();
+  }
+
+  bool get _canShowChatIcon {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return false;
+    // ownerId backend user id, elimizde birebir karşılığı yok; username ile basic kontrol yapıyoruz
+    return _currentReview.ownerUserName.toLowerCase() !=
+        (user.email ?? '').split('@').first.toLowerCase();
   }
 
   /// Review'ı backend'den yeniden yükler (like durumu için)
@@ -106,6 +116,119 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
     } catch (_) {
       return null;
     }
+  }
+
+  Future<void> _onChatIconTap() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please login to send messages'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+      return;
+    }
+
+    final controller = TextEditingController();
+    bool isSending = false;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: AppSpacing.xLarge,
+            right: AppSpacing.xLarge,
+            top: AppSpacing.large,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + AppSpacing.large,
+          ),
+          child: StatefulBuilder(
+            builder: (context, setState) {
+              Future<void> send() async {
+                final text = controller.text.trim();
+                if (text.isEmpty || isSending) return;
+                setState(() => isSending = true);
+                try {
+                  final token = await _sessionHelper.ensureSession();
+                  if (token == null) {
+                    throw Exception('Failed to get Firebase ID token');
+                  }
+                  await _messageRepository.sendMessage(
+                    recipientId: int.tryParse(_currentReview.ownerId),
+                    content: text,
+                  );
+                  if (mounted) {
+                    Navigator.of(context).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content:
+                            Text('Message sent to @${_currentReview.ownerUserName}'),
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    final msg = ErrorHandler.getUserFriendlyMessage(e);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(msg),
+                        backgroundColor: AppColors.error,
+                      ),
+                    );
+                  }
+                  setState(() => isSending = false);
+                }
+              }
+
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Message @${_currentReview.ownerUserName}',
+                    style: AppTextStyles.heading3,
+                  ),
+                  const SizedBox(height: AppSpacing.medium),
+                  TextField(
+                    controller: controller,
+                    maxLines: 3,
+                    maxLength: 1000,
+                    decoration: const InputDecoration(
+                      hintText: 'Write your message...',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.medium),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: ElevatedButton(
+                      onPressed: isSending ? null : send,
+                      child: isSending
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text('Send'),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
   }
 
   /// Tarih formatını düzenler
@@ -276,6 +399,14 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
           style: AppTextStyles.heading2,
         ),
         centerTitle: false,
+        actions: [
+          if (_canShowChatIcon)
+            IconButton(
+              icon: const Icon(Icons.chat_bubble_outline),
+              color: AppColors.primary,
+              onPressed: _onChatIconTap,
+            ),
+        ],
       ),
       body: Column(
         children: [

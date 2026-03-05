@@ -16,6 +16,8 @@ import '../../../data/models/tag_dto.dart';
 import '../../../data/repositories/interaction_repository.dart';
 import '../../../data/repositories/review_repository.dart';
 import '../../../data/repositories/product_repository.dart';
+import '../../../data/repositories/message_repository.dart';
+import '../../../data/services/auth_service.dart';
 import 'add_review_page.dart';
 import 'review_detail_page.dart';
 import 'compare_product_select_page.dart';
@@ -38,6 +40,8 @@ class _ReviewPageState extends State<ReviewPage> {
   final ReviewRepository _reviewRepository = ReviewRepository();
   final ProductRepository _productRepository = ProductRepository();
   final SessionHelper _sessionHelper = SessionHelper();
+  final MessageRepository _messageRepository = MessageRepository();
+  String? _currentUsername;
   late ProductDto _currentProduct;
   bool _isLoadingProduct = false; // productId ile açıldıysa ürün yüklenene kadar
   List<ReviewDto> _reviews = [];
@@ -109,6 +113,118 @@ class _ReviewPageState extends State<ReviewPage> {
     }
   }
 
+  Future<void> _onChatIconTap(ReviewDto review) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please login to send messages'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+      return;
+    }
+
+    final controller = TextEditingController();
+    bool isSending = false;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: AppSpacing.xLarge,
+            right: AppSpacing.xLarge,
+            top: AppSpacing.large,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + AppSpacing.large,
+          ),
+          child: StatefulBuilder(
+            builder: (context, setState) {
+              Future<void> send() async {
+                final text = controller.text.trim();
+                if (text.isEmpty || isSending) return;
+                setState(() => isSending = true);
+                try {
+                  final token = await _sessionHelper.ensureSession();
+                  if (token == null) {
+                    throw Exception('Failed to get Firebase ID token');
+                  }
+                  await _messageRepository.sendMessage(
+                    recipientId: int.tryParse(review.ownerId),
+                    content: text,
+                  );
+                  if (mounted) {
+                    Navigator.of(context).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Message sent to @${review.ownerUserName}'),
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    final msg = ErrorHandler.getUserFriendlyMessage(e);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(msg),
+                        backgroundColor: AppColors.error,
+                      ),
+                    );
+                  }
+                  setState(() => isSending = false);
+                }
+              }
+
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Message @${review.ownerUserName}',
+                    style: AppTextStyles.heading3,
+                  ),
+                  const SizedBox(height: AppSpacing.medium),
+                  TextField(
+                    controller: controller,
+                    maxLines: 3,
+                    maxLength: 1000,
+                    decoration: const InputDecoration(
+                      hintText: 'Write your message...',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.medium),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: ElevatedButton(
+                      onPressed: isSending ? null : send,
+                      child: isSending
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text('Send'),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
   /// Product'ı backend'den yeniden yükler (rating ve like durumu için)
   Future<void> _refreshProductData() async {
     try {
@@ -162,6 +278,13 @@ class _ReviewPageState extends State<ReviewPage> {
       if (firebaseIdToken == null) {
         throw Exception('Failed to get Firebase ID token');
       }
+
+      // Mevcut kullanıcının backend username'ini al (kendi review'larını tespit için)
+      try {
+        final authService = AuthService();
+        final me = await authService.getMe();
+        _currentUsername = me.userName;
+      } catch (_) {}
 
       // Review'ları çek
       final reviews = await _reviewRepository.getReviewsByProductId(
@@ -545,6 +668,10 @@ class _ReviewPageState extends State<ReviewPage> {
                         isSponsored: review.isCollaborative,
                         likeCount: review.likeCount,
                         isLiked: review.isLikedByCurrentUser,
+                        showChatIcon: _currentUsername != null &&
+                            review.ownerUserName.toLowerCase() !=
+                                _currentUsername!.toLowerCase(),
+                        onChatTap: () => _onChatIconTap(review),
                         onTap: () async {
                           // Review detail'den dönüldüğünde review listesini yenile
                           final result = await Navigator.push(
