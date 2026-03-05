@@ -446,7 +446,9 @@ class _SearchPageState extends State<SearchPage> {
         showUnselectedLabels: false,
         onTap: (index) {
           if (index == 1) return;
-          if (index == 0) {
+          // 0: Add (+) → şimdilik hiçbir yere gitme / placeholder
+          if (index == 0) return;
+          if (index == 2) {
             Navigator.pushReplacement(context, _noAnimationRoute(const HomePage()));
             return;
           }
@@ -456,9 +458,18 @@ class _SearchPageState extends State<SearchPage> {
           }
         },
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.add),
+            label: 'Add',
+          ),
           BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
-          BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add'),
+          BottomNavigationBarItem(
+            icon: Icon(
+              Icons.home,
+              size: 32,
+            ),
+            label: 'Home',
+          ),
           BottomNavigationBarItem(icon: Icon(Icons.favorite_border), label: 'Favorites'),
           BottomNavigationBarItem(icon: Icon(Icons.person_outline), label: 'Profile'),
         ],

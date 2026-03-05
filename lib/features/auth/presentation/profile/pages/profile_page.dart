@@ -61,19 +61,30 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
       showUnselectedLabels: false,
       onTap: (index) {
         if (index == 4) return;
-        if (index == 0) {
-          Navigator.pushReplacement(context, _noAnimationRoute(const HomePage()));
-          return;
-        }
+        // 0: Add (+) → şimdilik hiçbir yere gitme / placeholder
+        if (index == 0) return;
         if (index == 1) {
           Navigator.pushReplacement(context, _noAnimationRoute(const SearchPage()));
           return;
         }
+        if (index == 2) {
+          Navigator.pushReplacement(context, _noAnimationRoute(const HomePage()));
+          return;
+        }
       },
       items: const [
-        BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.add),
+          label: 'Add',
+        ),
         BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
-        BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add'),
+        BottomNavigationBarItem(
+          icon: Icon(
+            Icons.home,
+            size: 32,
+          ),
+          label: 'Home',
+        ),
         BottomNavigationBarItem(
             icon: Icon(Icons.favorite_border), label: 'Favorites'),
         BottomNavigationBarItem(

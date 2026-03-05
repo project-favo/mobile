@@ -32,7 +32,8 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  int _currentIndex = 0;
+  // BottomNavigationBar index mapping:
+  // 0: add (+), 1: search, 2: home, 3: favorites, 4: profile
   int _selectedCategoryIndex = -1; // -1 means "All", 0+ means selected category
   int _selectedSubCategoryIndex = -1; // -1 means none
   final TagRepository _tagRepository = TagRepository();
@@ -68,12 +69,18 @@ class _HomePageState extends State<HomePage> {
   BottomNavigationBar _buildBottomNavigationBar() {
     return BottomNavigationBar(
       type: BottomNavigationBarType.fixed,
-      currentIndex: _currentIndex,
+      // Home sayfasındayken her zaman Home (index 2) seçili görünsün
+      currentIndex: 2,
       selectedItemColor: AppColors.primary,
       unselectedItemColor: AppColors.textSecondary,
       showSelectedLabels: false,
       showUnselectedLabels: false,
       onTap: (index) {
+        // 0: Add (+) → şimdilik hiçbir yere gitme / placeholder
+        if (index == 0) {
+          return;
+        }
+        // 1: Search
         if (index == 1) {
           Navigator.pushReplacement(
             context,
@@ -81,7 +88,11 @@ class _HomePageState extends State<HomePage> {
           );
           return;
         }
-
+        // 2: Home (zaten buradayız) → hiçbir şey yapma
+        if (index == 2) {
+          return;
+        }
+        // 4: Profile
         if (index == 4) {
           Navigator.pushReplacement(
             context,
@@ -89,15 +100,20 @@ class _HomePageState extends State<HomePage> {
           );
           return;
         }
-
-        setState(() {
-          _currentIndex = index;
-        });
       },
       items: const [
-        BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.add),
+          label: 'Add',
+        ),
         BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
-        BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add'),
+        BottomNavigationBarItem(
+          icon: Icon(
+            Icons.home,
+            size: 32,
+          ),
+          label: 'Home',
+        ),
         BottomNavigationBarItem(
             icon: Icon(Icons.favorite_border), label: 'Favorites'),
         BottomNavigationBarItem(
@@ -320,6 +336,13 @@ class _HomePageState extends State<HomePage> {
           backgroundColor: Colors.transparent,
           elevation: 0,
           automaticallyImplyLeading: false, // Geri butonu olmasın
+          leading: IconButton(
+            icon: const Icon(Icons.smart_toy_outlined),
+            color: AppColors.primary,
+            onPressed: () {
+              // Chatbot henüz yok; şimdilik hiçbir aksiyon yok
+            },
+          ),
           title: Text(
             'FAVO',
             style: AppTextStyles.HomeHeader.copyWith(
@@ -383,6 +406,13 @@ class _HomePageState extends State<HomePage> {
           backgroundColor: Colors.transparent,
           elevation: 0,
           automaticallyImplyLeading: false, // Geri butonu olmasın
+          leading: IconButton(
+            icon: const Icon(Icons.smart_toy_outlined),
+            color: AppColors.primary,
+            onPressed: () {
+              // Chatbot henüz yok; şimdilik hiçbir aksiyon yok
+            },
+          ),
           title: Text(
             'FAVO',
             style: AppTextStyles.HomeHeader.copyWith(
@@ -442,6 +472,13 @@ class _HomePageState extends State<HomePage> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         automaticallyImplyLeading: false,
+        leading: IconButton(
+          icon: const Icon(Icons.smart_toy_outlined),
+          color: AppColors.primary,
+          onPressed: () {
+            // Chatbot henüz yok; şimdilik hiçbir aksiyon yok
+          },
+        ),
         title: Text(
           'FAVO',
           style: AppTextStyles.HomeHeader.copyWith(
@@ -805,11 +842,17 @@ class _HomePageState extends State<HomePage> {
                             ),
                             if (_isLoadingMore)
                               const Padding(
-                                padding: EdgeInsets.all(AppSpacing.large),
-                                child: SizedBox(
-                                  height: 32,
-                                  width: 32,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                padding: EdgeInsets.symmetric(
+                                  vertical: AppSpacing.large,
+                                ),
+                                child: Center(
+                                  child: SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 1.8,
+                                    ),
+                                  ),
                                 ),
                               )
                             else if (_totalElements > _filteredProducts.length)

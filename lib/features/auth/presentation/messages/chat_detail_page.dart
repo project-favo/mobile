@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -34,6 +35,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   List<MessageDto> _messages = [];
   int? _currentUserId;
   StompClient? _stompClient;
+  Timer? _pollTimer;
 
   @override
   void initState() {
@@ -55,6 +57,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       } catch (_) {}
       _connectStomp(token);
       await _loadMessages();
+      _startPolling();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -141,7 +144,31 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     _controller.dispose();
     _scrollController.dispose();
     _stompClient?.deactivate();
+    _pollTimer?.cancel();
     super.dispose();
+  }
+
+  void _startPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      _refreshMessagesSilently();
+    });
+  }
+
+  Future<void> _refreshMessagesSilently() async {
+    try {
+      final page = await _messageRepository.getConversationMessages(
+        conversationId: widget.conversation.id,
+        page: 0,
+        size: 50,
+      );
+      if (!mounted) return;
+      setState(() {
+        _messages = page.content;
+      });
+    } catch (_) {
+      // Sessizce yut; real-time için sadece best-effort polling
+    }
   }
 
   void _connectStomp(String token) {
