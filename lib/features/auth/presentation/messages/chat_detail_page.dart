@@ -1,9 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:stomp_dart_client/stomp.dart';
-import 'package:stomp_dart_client/stomp_config.dart';
-import 'package:stomp_dart_client/stomp_frame.dart';
+import 'package:stomp_dart_client/stomp_dart_client.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_spacing.dart';
@@ -156,7 +154,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     }
 
     _stompClient = StompClient(
-      config: StompConfig.SockJS(
+      config: StompConfig(
         url: '$wsBase/ws',
         stompConnectHeaders: {'Authorization': 'Bearer $token'},
         webSocketConnectHeaders: {'Authorization': 'Bearer $token'},
