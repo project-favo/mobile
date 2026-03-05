@@ -90,12 +90,12 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
           ),
         ),
       ),
-      body: SingleChildScrollView(
+      body: Padding(
         padding: const EdgeInsets.all(AppSpacing.xLarge),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // İki kart aynı yükseklikte (IntrinsicHeight)
+            // Ürün kartları sabit kalsın
             IntrinsicHeight(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -111,38 +111,61 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
               ),
             ),
             const SizedBox(height: AppSpacing.xxLarge),
-            SizedBox(
-              width: double.infinity,
-              child: Center(
-                child: Text(
-                  'Reviews',
-                  style: AppTextStyles.heading3.copyWith(color: AppColors.textPrimary),
-                ),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.large),
-            if (_loadingReviews)
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(AppSpacing.xxLarge),
-                  child: CircularProgressIndicator(color: AppColors.primary),
-                ),
-              )
-            else
-              IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(child: _buildReviewsSection(_reviews1, widget.product1)),
-                    Container(
-                      width: 3,
-                      margin: const EdgeInsets.symmetric(horizontal: 4),
-                      color: AppColors.textSecondary.withOpacity(0.5),
+            // Sadece review kısmı scroll olsun
+            Expanded(
+              child: _loadingReviews
+                  ? const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(AppSpacing.xxLarge),
+                        child: CircularProgressIndicator(color: AppColors.primary),
+                      ),
+                    )
+                  : SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SizedBox(
+                            width: double.infinity,
+                            child: Center(
+                              child: Text(
+                                'Reviews',
+                                style: AppTextStyles.heading3.copyWith(
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.large),
+                          IntrinsicHeight(
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Expanded(
+                                  child: _buildReviewsSection(
+                                    _reviews1,
+                                    widget.product1,
+                                  ),
+                                ),
+                                Container(
+                                  width: 3,
+                                  margin:
+                                      const EdgeInsets.symmetric(horizontal: 4),
+                                  color: AppColors.textSecondary
+                                      .withOpacity(0.5),
+                                ),
+                                Expanded(
+                                  child: _buildReviewsSection(
+                                    _reviews2,
+                                    widget.product2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    Expanded(child: _buildReviewsSection(_reviews2, widget.product2)),
-                  ],
-                ),
-              ),
+            ),
           ],
         ),
       ),
@@ -151,9 +174,10 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
 
   Widget _buildProductCard(ProductDto p, bool isWinner) {
     final rating = _rating(p);
-    final cardColor = isWinner
-        ? Colors.green.shade50
-        : Colors.red.shade50;
+    final baseColor = isWinner ? AppColors.success : AppColors.error;
+    final cardColor = baseColor.withOpacity(0.06);
+    final borderColor = baseColor.withOpacity(0.35);
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -170,7 +194,7 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
             color: cardColor,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isWinner ? Colors.green.shade200 : Colors.red.shade200,
+              color: borderColor,
               width: 1,
             ),
             boxShadow: [
@@ -185,17 +209,22 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.network(
-                  p.imageURL,
-                  height: 140,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
-                    height: 140,
-                    color: AppColors.textSecondary.withOpacity(0.1),
-                    child: const Icon(Icons.image_not_supported, color: AppColors.textSecondary, size: 40),
+              AspectRatio(
+                aspectRatio: 3 / 4,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.network(
+                    p.imageURL,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Container(
+                      color: AppColors.textSecondary.withOpacity(0.08),
+                      child: const Icon(
+                        Icons.image_not_supported,
+                        color: AppColors.textSecondary,
+                        size: 40,
+                      ),
+                    ),
                   ),
                 ),
               ),

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../widgets/review_card.dart';
 import '../../../../../core/theme/app_colors.dart';
@@ -256,6 +255,13 @@ class _ReviewPageState extends State<ReviewPage> {
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: TextButton(
+              style: TextButton.styleFrom(
+                backgroundColor: AppColors.primary.withOpacity(0.06),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
               onPressed: () {
                 Navigator.push(
                   context,
@@ -264,9 +270,24 @@ class _ReviewPageState extends State<ReviewPage> {
                   ),
                 );
               },
-                child: const Text(
-                'COMPARE',
-                style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  Icon(
+                    Icons.compare_arrows_outlined,
+                    size: 18,
+                    color: AppColors.primary,
+                  ),
+                  SizedBox(width: 6),
+                  Text(
+                    'Compare',
+                    style: TextStyle(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
