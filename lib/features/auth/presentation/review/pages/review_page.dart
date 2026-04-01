@@ -50,6 +50,9 @@ class _ReviewPageState extends State<ReviewPage> {
   int _likeCount = 0;
   bool _hasLoadedLikeCount = false;
 
+  bool get _hasLoadedReviewSummary =>
+      !_isLoadingReviews && _hasLoadedLikeCount;
+
   @override
   void initState() {
     super.initState();
@@ -569,20 +572,32 @@ class _ReviewPageState extends State<ReviewPage> {
                             color: AppColors.textSecondary,
                           ),
                           const SizedBox(width: 4),
-                          Text(
-                            '${_reviews.length} review${_reviews.length != 1 ? 's' : ''}',
-                            style: AppTextStyles.bodySmall.copyWith(
-                              color: AppColors.textSecondary,
+                          if (!_hasLoadedReviewSummary) ...[
+                            const SkeletonLoader(
+                              width: 70,
+                              height: 12,
                             ),
-                          ),
+                          ] else ...[
+                            Text(
+                              '${_reviews.length} review${_reviews.length != 1 ? 's' : ''}',
+                              style: AppTextStyles.bodySmall.copyWith(
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
                           const SizedBox(width: 16),
                           Icon(
                             Icons.favorite,
                             size: 14,
                             color: AppColors.primary,
                           ),
-                          if (_hasLoadedLikeCount) ...[
-                            const SizedBox(width: 4),
+                          const SizedBox(width: 4),
+                          if (!_hasLoadedReviewSummary) ...[
+                            const SkeletonLoader(
+                              width: 50,
+                              height: 12,
+                            ),
+                          ] else ...[
                             Text(
                               '$_likeCount likes',
                               style: AppTextStyles.bodySmall.copyWith(

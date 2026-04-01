@@ -13,6 +13,7 @@ import '../../data/repositories/message_repository.dart';
 import '../../data/models/conversation_dto.dart';
 import '../../data/models/message_dto.dart';
 import '../../data/services/auth_service.dart';
+import '../../../../core/widgets/skeleton_loader.dart';
 
 class ChatDetailPage extends StatefulWidget {
   final ConversationDto conversation;
@@ -28,6 +29,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   final MessageRepository _messageRepository = MessageRepository();
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final FocusNode _inputFocusNode = FocusNode();
 
   bool _isLoading = true;
   bool _isSending = false;
@@ -41,6 +43,11 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   void initState() {
     super.initState();
     _init();
+    _inputFocusNode.addListener(() {
+      if (_inputFocusNode.hasFocus) {
+        _scrollToBottom();
+      }
+    });
   }
 
   Future<void> _init() async {
@@ -80,14 +87,11 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       );
       if (!mounted) return;
       setState(() {
+        // Backend'den gelen sırayı koru: eski mesajlar üstte, yeniler altta
         _messages = page.content;
         _isLoading = false;
       });
-      // En sona kaydır
-      await Future.delayed(const Duration(milliseconds: 100));
-      if (_scrollController.hasClients) {
-        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
-      }
+      _scrollToBottom();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -118,14 +122,9 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         }
         _isSending = false;
       });
-      await Future.delayed(const Duration(milliseconds: 100));
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      }
+      // Backend sırasını ve olası ekstra alanları eşitlemek için sessizce güncelle
+      _refreshMessagesSilently();
+      _scrollToBottom();
     } catch (e) {
       if (!mounted) return;
       final msg = ErrorHandler.getUserFriendlyMessage(e);
@@ -143,6 +142,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   void dispose() {
     _controller.dispose();
     _scrollController.dispose();
+    _inputFocusNode.dispose();
     _stompClient?.deactivate();
     _pollTimer?.cancel();
     super.dispose();
@@ -166,6 +166,8 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       setState(() {
         _messages = page.content;
       });
+      // Her sessiz yenilemeden sonra da en güncel mesaja kaydır
+      _scrollToBottom();
     } catch (_) {
       // Sessizce yut; real-time için sadece best-effort polling
     }
@@ -214,15 +216,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
               _messages = [..._messages, incoming];
             }
           });
-          Future.delayed(const Duration(milliseconds: 100), () {
-            if (_scrollController.hasClients) {
-              _scrollController.animateTo(
-                _scrollController.position.maxScrollExtent,
-                duration: const Duration(milliseconds: 200),
-                curve: Curves.easeOut,
-              );
-            }
-          });
+          _scrollToBottom();
         } catch (_) {
           // JSON parse hatası olursa görmezden gel
         }
@@ -233,6 +227,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
@@ -283,12 +278,40 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         ),
         centerTitle: true,
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: _isLoading
-                ? const Center(
-                    child: CircularProgressIndicator(color: AppColors.primary),
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () => FocusScope.of(context).unfocus(),
+        child: Column(
+          children: [
+            Expanded(
+              child: _isLoading
+                ? ListView.builder(
+                    padding: const EdgeInsets.all(AppSpacing.large),
+                    itemCount: 8,
+                    itemBuilder: (context, index) {
+                      final isMine = index.isEven;
+                      final maxWidth =
+                          MediaQuery.of(context).size.width * 0.7;
+                      return Align(
+                        alignment: isMine
+                            ? Alignment.centerRight
+                            : Alignment.centerLeft,
+                        child: Container(
+                          margin: EdgeInsets.only(
+                            bottom: AppSpacing.small,
+                            left: isMine ? 64 : 0,
+                            right: isMine ? 0 : 64,
+                          ),
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(maxWidth: maxWidth),
+                            child: const SkeletonLoader(
+                              width: double.infinity,
+                              height: 20,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   )
                 : _errorMessage != null
                     ? Center(
@@ -303,100 +326,116 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                           ),
                         ),
                       )
-                    : ListView.builder(
-                        controller: _scrollController,
+                    : Padding(
                         padding: const EdgeInsets.all(AppSpacing.large),
-                        itemCount: _messages.length,
-                        itemBuilder: (context, index) {
-                          final m = _messages[index];
-                          final isMine = _currentUserId != null &&
-                              m.senderId == _currentUserId;
-                          final align = isMine
-                              ? Alignment.centerRight
-                              : Alignment.centerLeft;
-                          final color =
-                              isMine ? AppColors.primary : AppColors.surface;
-                          final textColor = isMine
-                              ? Colors.white
-                              : AppColors.textPrimary;
-                          final maxWidth = MediaQuery.of(context).size.width *
-                              0.7; // WhatsApp benzeri genişlik
-                          return Align(
-                            alignment: align,
-                            child: Container(
-                              margin: EdgeInsets.only(
-                                bottom: AppSpacing.small,
-                                left: isMine ? 64 : 0,
-                                right: isMine ? 0 : 64,
-                              ),
-                              child: ConstrainedBox(
-                                constraints:
-                                    BoxConstraints(maxWidth: maxWidth),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: AppSpacing.large,
-                                    vertical: AppSpacing.medium,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: color,
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                  child: Text(
-                                    m.content,
-                                    style: AppTextStyles.body.copyWith(
-                                      color: textColor,
+                        child: ListView.builder(
+                          controller: _scrollController,
+                          itemCount: _messages.length,
+                          itemBuilder: (context, index) {
+                            final m = _messages[index];
+                            final isMine = _currentUserId != null &&
+                                m.senderId == _currentUserId;
+                            final align = isMine
+                                ? Alignment.centerRight
+                                : Alignment.centerLeft;
+                            final color =
+                                isMine ? AppColors.primary : AppColors.surface;
+                            final textColor = isMine
+                                ? Colors.white
+                                : AppColors.textPrimary;
+                            final maxWidth =
+                                MediaQuery.of(context).size.width *
+                                    0.7; // WhatsApp benzeri genişlik
+                            return Align(
+                              alignment: align,
+                              child: Container(
+                                margin: EdgeInsets.only(
+                                  bottom: AppSpacing.small,
+                                  left: isMine ? 64 : 0,
+                                  right: isMine ? 0 : 64,
+                                ),
+                                child: ConstrainedBox(
+                                  constraints:
+                                      BoxConstraints(maxWidth: maxWidth),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: AppSpacing.large,
+                                      vertical: AppSpacing.medium,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: color,
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                    child: Text(
+                                      m.content,
+                                      style: AppTextStyles.body.copyWith(
+                                        color: textColor,
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                          );
-                        },
+                            );
+                          },
+                        ),
                       ),
-          ),
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.large,
-                AppSpacing.medium,
-                AppSpacing.large,
-                AppSpacing.large,
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _controller,
-                      minLines: 1,
-                      maxLines: 3,
-                      decoration: const InputDecoration(
-                        hintText: 'Type a message...',
-                        border: OutlineInputBorder(),
+            ),
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.large,
+                  AppSpacing.medium,
+                  AppSpacing.large,
+                  AppSpacing.large,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _controller,
+                        focusNode: _inputFocusNode,
+                        minLines: 1,
+                        maxLines: 3,
+                        decoration: const InputDecoration(
+                          hintText: 'Type a message...',
+                          border: OutlineInputBorder(),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: AppSpacing.small),
-                  IconButton(
-                    icon: _isSending
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: AppColors.primary,
-                            ),
-                          )
-                        : const Icon(Icons.send, color: AppColors.primary),
-                    onPressed: _isSending ? null : _sendMessage,
-                  ),
-                ],
+                    const SizedBox(width: AppSpacing.small),
+                    IconButton(
+                      icon: _isSending
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.primary,
+                              ),
+                            )
+                          : const Icon(Icons.send, color: AppColors.primary),
+                      onPressed: _isSending ? null : _sendMessage,
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
+  }
+
+  void _scrollToBottom() {
+    if (!_scrollController.hasClients) return;
+    // Layout tamamen çizildikten hemen sonra en alta atla.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      _scrollController.jumpTo(
+        _scrollController.position.maxScrollExtent,
+      );
+    });
   }
 }
 

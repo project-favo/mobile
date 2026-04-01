@@ -8,6 +8,17 @@ import '../data/models/product_dto.dart';
 import '../data/repositories/review_repository.dart';
 import '../presentation/review/pages/review_page.dart';
 
+/// Basit, in-memory review count cache (sadece app çalışırken tutulur).
+class _TopReviewCountCache {
+  static final Map<String, int> _cache = {};
+
+  static int? get(String productId) => _cache[productId];
+
+  static void set(String productId, int count) {
+    _cache[productId] = count;
+  }
+}
+
 class TopProductList extends StatefulWidget {
   final ProductDto product;
   final int rank; // 1, 2, 3, etc.
@@ -24,7 +35,6 @@ class TopProductList extends StatefulWidget {
 
 class _TopProductListState extends State<TopProductList> {
   int? _reviewCount;
-  bool _isLoadingReviewCount = false;
 
   @override
   void initState() {
@@ -33,24 +43,21 @@ class _TopProductListState extends State<TopProductList> {
   }
 
   Future<void> _loadReviewCount() async {
-    setState(() {
-      _isLoadingReviewCount = true;
-    });
-
+    _reviewCount = _TopReviewCountCache.get(widget.product.id);
     try {
       final reviewRepository = ReviewRepository();
       final reviews = await reviewRepository.getReviewsByProductId(
         widget.product.id,
         firebaseIdToken: null,
       );
+      final count = reviews.length;
+      _TopReviewCountCache.set(widget.product.id, count);
       setState(() {
-        _reviewCount = reviews.length;
-        _isLoadingReviewCount = false;
+        _reviewCount = count;
       });
     } catch (e) {
       setState(() {
-        _reviewCount = 0;
-        _isLoadingReviewCount = false;
+        _reviewCount ??= 0;
       });
     }
   }
@@ -262,8 +269,8 @@ class _TopProductListState extends State<TopProductList> {
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        _isLoadingReviewCount
-                            ? '...'
+                        _reviewCount == null
+                            ? 'reviews'
                             : '${_reviewCount ?? 0} reviews',
                         style: AppTextStyles.bodySmall.copyWith(
                           color: Colors.white.withOpacity(0.9),

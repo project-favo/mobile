@@ -14,6 +14,7 @@ import '../../../core/routes/custom_page_transitions.dart';
 import '../widgets/product_card.dart';
 import '../widgets/top_product_card.dart';
 import 'messages/conversation_list_page.dart';
+import 'messages/ai_chat_page.dart';
 import '../data/repositories/message_repository.dart';
 import 'search_page.dart';
 import 'profile/pages/profile_page.dart';
@@ -44,7 +45,7 @@ class _HomePageState extends State<HomePage> {
   
   List<TagDto> _tags = [];
   List<TagDto> _subTags = [];
-  List<ProductDto> _allProducts = []; // Deprecated: kept for compatibility
+  final List<ProductDto> _allProducts = []; // Deprecated: kept for compatibility
   List<ProductDto> _filteredProducts = []; // Current page products
   int _currentPage = 0;
   int _totalPages = 0;
@@ -476,7 +477,12 @@ class _HomePageState extends State<HomePage> {
           icon: const Icon(Icons.smart_toy_outlined),
           color: AppColors.primary,
           onPressed: () {
-            // Chatbot henüz yok; şimdilik hiçbir aksiyon yok
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const AiChatPage(),
+              ),
+            );
           },
         ),
         title: Text(
@@ -501,7 +507,7 @@ class _HomePageState extends State<HomePage> {
               clipBehavior: Clip.none,
               children: [
                 IconButton(
-                  icon: const Icon(Icons.chat_bubble),
+                  icon: const Icon(Icons.chat_bubble_outline),
                   color: AppColors.primary,
                   onPressed: () async {
                     final result = await Navigator.push(
@@ -667,7 +673,7 @@ class _HomePageState extends State<HomePage> {
                               await _loadProductsPage(0);
                             },
                           );
-                        }).toList(),
+                        }),
                       ],
                     ),
                   ),

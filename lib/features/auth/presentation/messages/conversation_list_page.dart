@@ -4,6 +4,7 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/utils/error_handler.dart';
 import '../../../../core/utils/session_helper.dart';
+import '../../../../core/widgets/skeleton_loader.dart';
 import '../../data/repositories/message_repository.dart';
 import '../../data/models/conversation_dto.dart';
 import 'chat_detail_page.dart';
@@ -93,8 +94,56 @@ class _ConversationListPageState extends State<ConversationListPage> {
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.xLarge),
           child: _isLoading
-              ? const Center(
-                  child: CircularProgressIndicator(color: AppColors.primary),
+              ? ListView.separated(
+                  itemCount: 6,
+                  separatorBuilder: (_, __) =>
+                      const SizedBox(height: AppSpacing.medium),
+                  itemBuilder: (context, index) => Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.border),
+                      color: AppColors.surface,
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: AppSpacing.medium,
+                    ),
+                    child: Row(
+                      children: [
+                        const SkeletonLoader(
+                          width: 44,
+                          height: 44,
+                          borderRadius: BorderRadius.all(Radius.circular(22)),
+                        ),
+                        const SizedBox(width: AppSpacing.large),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: const [
+                              SkeletonLoader(width: 140, height: 16),
+                              SizedBox(height: 6),
+                              SkeletonLoader(width: 200, height: 14),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.large),
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: const [
+                            SkeletonLoader(width: 44, height: 14),
+                            SizedBox(height: 6),
+                            SkeletonLoader(
+                              width: 20,
+                              height: 20,
+                              borderRadius:
+                                  BorderRadius.all(Radius.circular(10)),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
                 )
               : _errorMessage != null
                   ? Center(

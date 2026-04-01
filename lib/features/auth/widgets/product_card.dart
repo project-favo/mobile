@@ -1,11 +1,21 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_icon_sizes.dart';
 import '../../../../core/theme/app_decorations.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../data/repositories/review_repository.dart';
+
+/// Basit, in-memory review count cache (sadece app çalışırken tutulur).
+class _ReviewCountCache {
+  static final Map<String, int> _cache = {};
+
+  static int? get(String productId) => _cache[productId];
+
+  static void set(String productId, int count) {
+    _cache[productId] = count;
+  }
+}
 
 class ProductCard extends StatefulWidget {
   final String imageUrl;
@@ -37,7 +47,6 @@ class ProductCard extends StatefulWidget {
 
 class _ProductCardState extends State<ProductCard> {
   int? _reviewCount;
-  bool _isLoadingReviewCount = false;
 
   @override
   void initState() {
@@ -46,11 +55,9 @@ class _ProductCardState extends State<ProductCard> {
   }
 
   Future<void> _loadReviewCount() async {
-    if (!mounted) return;
-    setState(() {
-      _isLoadingReviewCount = true;
-    });
-
+    // Basit cache: productId -> reviewCount, böylece liste yeniden
+    // yüklense bile sayı anında görünür, gidip gelmez.
+    _reviewCount = _ReviewCountCache.get(widget.productId);
     try {
       final reviewRepository = ReviewRepository();
       final reviews = await reviewRepository.getReviewsByProductId(
@@ -58,15 +65,15 @@ class _ProductCardState extends State<ProductCard> {
         firebaseIdToken: null,
       );
       if (!mounted) return;
+      final count = reviews.length;
+      _ReviewCountCache.set(widget.productId, count);
       setState(() {
-        _reviewCount = reviews.length;
-        _isLoadingReviewCount = false;
+        _reviewCount = count;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _reviewCount = 0;
-        _isLoadingReviewCount = false;
+        _reviewCount ??= 0;
       });
     }
   }
@@ -241,7 +248,7 @@ class _ProductCardState extends State<ProductCard> {
                 ),
                 const SizedBox(width: 4),
                 Text(
-                  _isLoadingReviewCount
+                  _reviewCount == null
                       ? 'Reviews'
                       : '${_reviewCount ?? 0} Reviews',
                   style: AppTextStyles.bodySmall.copyWith(

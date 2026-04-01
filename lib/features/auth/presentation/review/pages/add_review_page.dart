@@ -33,7 +33,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
   bool _isLoading = false;
   final int _maxCharacters = 500;
   final ImagePicker _imagePicker = ImagePicker();
-  List<XFile> _selectedImages = [];
+  final List<XFile> _selectedImages = [];
 
   @override
   void initState() {
@@ -289,6 +289,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
@@ -303,13 +304,21 @@ class _AddReviewPageState extends State<AddReviewPage> {
         ),
         centerTitle: true,
       ),
-      body: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(AppSpacing.xLarge),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () => FocusScope.of(context).unfocus(),
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            padding: EdgeInsets.only(
+              left: AppSpacing.xLarge,
+              right: AppSpacing.xLarge,
+              top: AppSpacing.xLarge,
+              bottom: AppSpacing.xLarge + MediaQuery.of(context).viewInsets.bottom,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               // Product Information Card
               Container(
                 padding: const EdgeInsets.all(AppSpacing.large),
@@ -462,7 +471,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
                           _isCollaborative = value;
                         });
                       },
-                      activeColor: AppColors.primary,
+                      activeThumbColor: AppColors.primary,
                     ),
                   ],
                 ),
@@ -576,7 +585,8 @@ class _AddReviewPageState extends State<AddReviewPage> {
                 onPressed: _submitReview,
                 isLoading: _isLoading,
               ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
