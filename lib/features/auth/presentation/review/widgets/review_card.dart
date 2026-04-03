@@ -12,6 +12,7 @@ class ReviewCard extends StatelessWidget {
   final bool isLiked;
   final VoidCallback? onLikeTap;
   final VoidCallback? onTap;
+  final VoidCallback? onUsernameTap;
   final bool showChatIcon;
   final VoidCallback? onChatTap;
 
@@ -25,6 +26,7 @@ class ReviewCard extends StatelessWidget {
     this.isLiked = false,
     this.onLikeTap,
     this.onTap,
+    this.onUsernameTap,
     this.showChatIcon = false,
     this.onChatTap,
   });
@@ -47,10 +49,16 @@ class ReviewCard extends StatelessWidget {
             /// USER + TAG
             Row(
               children: [
-                Text(
-                  username,
-                  style: AppTextStyles.bodyBold.copyWith(
-                    decoration: TextDecoration.none,
+                GestureDetector(
+                  onTap: onUsernameTap,
+                  child: Text(
+                    username,
+                    style: AppTextStyles.bodyBold.copyWith(
+                      decoration: onUsernameTap != null
+                          ? TextDecoration.underline
+                          : TextDecoration.none,
+                      decorationColor: AppColors.textPrimary,
+                    ),
                   ),
                 ),
                 if (isSponsored)
@@ -145,7 +153,7 @@ class ReviewCard extends StatelessWidget {
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.06),
+                            color: Colors.black.withValues(alpha: 0.06),
                             blurRadius: 4,
                             offset: const Offset(0, 2),
                           ),

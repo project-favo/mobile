@@ -45,7 +45,6 @@ class _HomePageState extends State<HomePage> {
   
   List<TagDto> _tags = [];
   List<TagDto> _subTags = [];
-  final List<ProductDto> _allProducts = []; // Deprecated: kept for compatibility
   List<ProductDto> _filteredProducts = []; // Current page products
   int _currentPage = 0;
   int _totalPages = 0;
@@ -336,29 +335,31 @@ class _HomePageState extends State<HomePage> {
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
-          automaticallyImplyLeading: false, // Geri butonu olmasın
-          leading: IconButton(
-            icon: const Icon(Icons.smart_toy_outlined),
-            color: AppColors.primary,
-            onPressed: () {
-              // Chatbot henüz yok; şimdilik hiçbir aksiyon yok
-            },
-          ),
-          title: Text(
-            'FAVO',
-            style: AppTextStyles.HomeHeader.copyWith(
-              fontWeight: FontWeight.w900,
-              letterSpacing: 2,
-              shadows: [
-                Shadow(
-                  color: AppColors.primary.withOpacity(0.3),
-                  offset: const Offset(0, 2),
-                  blurRadius: 4,
-                ),
-              ],
+          toolbarHeight: 70,
+          automaticallyImplyLeading: false,
+          leading: Center(
+            child: SkeletonLoader(
+              width: 36,
+              height: 36,
+              borderRadius: BorderRadius.circular(18),
             ),
           ),
+          title: SkeletonLoader(
+            width: 120,
+            height: 28,
+            borderRadius: BorderRadius.circular(8),
+          ),
           centerTitle: true,
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: SkeletonLoader(
+                width: 36,
+                height: 36,
+                borderRadius: BorderRadius.circular(18),
+              ),
+            ),
+          ],
         ),
         body: CustomRefreshIndicator(
           onRefresh: _loadData,
@@ -406,26 +407,27 @@ class _HomePageState extends State<HomePage> {
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
-          automaticallyImplyLeading: false, // Geri butonu olmasın
+          toolbarHeight: 70,
+          automaticallyImplyLeading: false,
           leading: IconButton(
-            icon: const Icon(Icons.smart_toy_outlined),
-            color: AppColors.primary,
-            onPressed: () {
-              // Chatbot henüz yok; şimdilik hiçbir aksiyon yok
-            },
-          ),
-          title: Text(
-            'FAVO',
-            style: AppTextStyles.HomeHeader.copyWith(
-              fontWeight: FontWeight.w900,
-              letterSpacing: 2,
-              shadows: [
-                Shadow(
-                  color: AppColors.primary.withOpacity(0.3),
-                  offset: const Offset(0, 2),
-                  blurRadius: 4,
+            icon: Center(
+              child: SizedBox(
+                width: 36,
+                height: 36,
+                child: Image.asset(
+                  'assets/images/Chatbot.png',
+                  fit: BoxFit.contain,
                 ),
-              ],
+              ),
+            ),
+            onPressed: () {},
+          ),
+          title: SizedBox(
+            height: 90,
+            width: 240,
+            child: Image.asset(
+              'assets/images/homepage_logo2.png',
+              fit: BoxFit.contain,
             ),
           ),
           centerTitle: true,
@@ -472,10 +474,19 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        toolbarHeight: 70,
         automaticallyImplyLeading: false,
         leading: IconButton(
-          icon: const Icon(Icons.smart_toy_outlined),
-          color: AppColors.primary,
+          icon: Center(
+            child: SizedBox(
+              width: 36,
+              height: 36,
+              child: Image.asset(
+                'assets/images/Chatbot.png',
+                fit: BoxFit.contain,
+              ),
+            ),
+          ),
           onPressed: () {
             Navigator.push(
               context,
@@ -485,18 +496,12 @@ class _HomePageState extends State<HomePage> {
             );
           },
         ),
-        title: Text(
-          'FAVO',
-          style: AppTextStyles.HomeHeader.copyWith(
-            fontWeight: FontWeight.w900,
-            letterSpacing: 2,
-            shadows: [
-              Shadow(
-                color: AppColors.primary.withOpacity(0.3),
-                offset: const Offset(0, 2),
-                blurRadius: 4,
-              ),
-            ],
+        title: SizedBox(
+          height: 90,
+          width: 240,
+          child: Image.asset(
+            'assets/images/homepage_logo2.png',
+            fit: BoxFit.contain,
           ),
         ),
         centerTitle: true,

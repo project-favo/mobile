@@ -9,11 +9,14 @@ class AppRoutes {
   static const login = '/login';
   static const register = '/register';
   static const home = '/home';
+  static const emailVerification = '/email-verification';
 
   static final Map<String, WidgetBuilder> routes = {
     onboarding: (_) => const OnboardingPage(),
     login: (_) => const LoginPage(),
     register: (_) => const RegisterPage(),
     home: (_) => const HomePage(),
+    // EmailVerificationPage email parametresi gerektiriyor;
+    // Navigator.push ile doğrudan kullan, route üzerinden değil.
   };
 }

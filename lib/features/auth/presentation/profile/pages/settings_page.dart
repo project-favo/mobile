@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
@@ -8,6 +7,8 @@ import '../../../../auth/data/services/auth_service.dart';
 import '../../../../auth/data/models/user_response_dto.dart';
 import '../widgets/profile_menu_item.dart';
 import '../../../../../routes/app_routes.dart';
+import '../../../../../core/widgets/profile_avatar.dart';
+import '../../../../../core/utils/resolve_media_url.dart';
 import 'edit_profile_page.dart';
 import 'change_password_page.dart';
 
@@ -357,21 +358,11 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: AppSpacing.xxLarge),
 
           // Avatar - Profil fotoğrafı varsa göster
-          CircleAvatar(
+          ProfileAvatar(
             radius: 45,
-            backgroundColor: AppColors.background,
-            backgroundImage: _user!.profilePhotoData != null && _user!.profilePhotoData!.isNotEmpty
-                ? MemoryImage(
-                    base64Decode(_user!.profilePhotoData!),
-                  )
-                : null,
-            child: _user!.profilePhotoData == null || _user!.profilePhotoData!.isEmpty
-                ? const Icon(
-                    Icons.person_outline_rounded,
-                    size: 50,
-                    color: AppColors.primary,
-                  )
-                : null,
+            imageUrl: _user!.profileImageUrl,
+            memoryBytes: decodeProfilePhotoBytes(_user!.profilePhotoData),
+            fallbackInitial: _user!.userName,
           ),
 
           const SizedBox(height: AppSpacing.large),

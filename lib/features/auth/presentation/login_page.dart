@@ -5,7 +5,9 @@ import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_input.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/error_handler.dart';
+import '../../../core/utils/exceptions.dart';
 import '../data/services/auth_service.dart';
+import 'email_verification_page.dart';
 
 
 class LoginPage extends StatefulWidget {
@@ -76,25 +78,31 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _isLoading = true);
 
     try {
-      // Firebase Auth ile giriş yap ve backend'e istek gönder
       await _authService.loginWithEmailAndPassword(
         email: _email.text.trim(),
         password: _password.text,
       );
 
-      // Başarılı giriş - direkt home'a yönlendir (SnackBar yok)
       if (mounted) {
         Navigator.pushReplacementNamed(context, AppRoutes.home);
+      }
+    } on EmailNotVerifiedException {
+      // E-posta doğrulanmamış → doğrulama sayfasına yönlendir
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => EmailVerificationPage(email: _email.text.trim()),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
         final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
-        // Backend error'u password field'ına set et
         setState(() {
           _authError = errorMessage;
           _isLoading = false;
         });
-        // Form'u yeniden validate et ki error gösterilsin
         _formKey.currentState?.validate();
       }
     } finally {

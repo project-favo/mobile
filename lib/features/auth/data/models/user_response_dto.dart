@@ -6,8 +6,10 @@ class UserResponseDto {
   final String? surname;
   final String? birthdate;
   final String? profileImageUrl;
-  final String? profilePhotoData; // Base64 encoded profil fotoğrafı
-  final String? profilePhotoMimeType; // MIME type (örn: "image/jpeg")
+  final String? profilePhotoData;
+  final String? profilePhotoMimeType;
+  // null → legacy (treat as verified), false → not verified, true → verified
+  final bool? emailVerified;
 
   UserResponseDto({
     required this.id,
@@ -19,7 +21,11 @@ class UserResponseDto {
     this.profileImageUrl,
     this.profilePhotoData,
     this.profilePhotoMimeType,
+    this.emailVerified,
   });
+
+  /// Backend: null → legacy (verified), false → not verified, true → verified
+  bool get isEmailVerified => emailVerified != false;
 
   factory UserResponseDto.fromJson(Map<String, dynamic> json) {
     return UserResponseDto(
@@ -32,6 +38,7 @@ class UserResponseDto {
       profileImageUrl: json['profileImageUrl']?.toString(),
       profilePhotoData: json['profilePhotoData']?.toString(),
       profilePhotoMimeType: json['profilePhotoMimeType']?.toString(),
+      emailVerified: json['emailVerified'] as bool?,
     );
   }
 
@@ -46,6 +53,7 @@ class UserResponseDto {
       'profileImageUrl': profileImageUrl,
       'profilePhotoData': profilePhotoData,
       'profilePhotoMimeType': profilePhotoMimeType,
+      'emailVerified': emailVerified,
     };
   }
 }

@@ -1,10 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:dio/dio.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/utils/session_helper.dart';
+import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/network/api_client.dart';
+import '../../../../../core/routes/custom_page_transitions.dart';
+import '../../data/services/auth_service.dart';
+import '../../data/models/product_dto.dart';
+import '../../data/models/tag_dto.dart';
+import '../review/pages/review_page.dart';
 
 class AiChatPage extends StatefulWidget {
   const AiChatPage({super.key});
@@ -13,15 +21,19 @@ class AiChatPage extends StatefulWidget {
   State<AiChatPage> createState() => _AiChatPageState();
 }
 
-class _AiChatPageState extends State<AiChatPage> {
+class _AiChatPageState extends State<AiChatPage>
+    with SingleTickerProviderStateMixin {
   final SessionHelper _sessionHelper = SessionHelper();
+  final AuthService _authService = AuthService();
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _inputFocusNode = FocusNode();
 
   bool _isSending = false;
+  late final AnimationController _logoController;
+  String? _userAvatarUrl;
+  String? _userInitial;
 
-  /// Basit mesaj modeli: role = 'user' veya 'assistant'
   final List<_AiMessage> _messages = [
     const _AiMessage(
       role: 'assistant',
@@ -33,6 +45,12 @@ class _AiChatPageState extends State<AiChatPage> {
   @override
   void initState() {
     super.initState();
+    _logoController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat(reverse: true);
+
+    _loadMe();
     _inputFocusNode.addListener(() {
       if (_inputFocusNode.hasFocus) {
         _scrollToBottom();
@@ -40,12 +58,29 @@ class _AiChatPageState extends State<AiChatPage> {
     });
   }
 
+  Future<void> _loadMe() async {
+    try {
+      final me = await _authService.getMe();
+      if (!mounted) return;
+      setState(() {
+        _userAvatarUrl = me.profileImageUrl;
+        _userInitial =
+            (me.userName.isNotEmpty) ? me.userName[0].toUpperCase() : '?';
+      });
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
+    _logoController.dispose();
     _controller.dispose();
     _scrollController.dispose();
     _inputFocusNode.dispose();
     super.dispose();
+  }
+
+  Future<Response<dynamic>> _callChatApi(String text) {
+    return ApiClient().dio.post('/api/chat', data: {'message': text});
   }
 
   Future<void> _sendMessage() async {
@@ -60,27 +95,40 @@ class _AiChatPageState extends State<AiChatPage> {
     _scrollToBottom();
 
     try {
-      // Token ve Authorization header
       final token = await _sessionHelper.ensureSession();
       if (token == null) {
         throw Exception('Please login to use the assistant.');
       }
 
-      final apiClient = ApiClient();
-      // ApiClient zaten initialize edilmiş olmalı; diğer yerlerde olduğu gibi kullanıyoruz
-      final response = await apiClient.dio.post(
-        '/api/chat',
-        data: {'message': text},
-      );
+      Response<dynamic> response;
+      try {
+        response = await _callChatApi(text);
+      } on DioException catch (e) {
+        if (e.response?.statusCode == 401) {
+          // Token expired — force refresh and retry once
+          final user = FirebaseAuth.instance.currentUser;
+          if (user == null) rethrow;
+          final newToken = await user.getIdToken(true);
+          if (newToken == null) rethrow;
+          ApiClient().setAuthToken(newToken);
+          response = await _callChatApi(text);
+        } else {
+          rethrow;
+        }
+      }
 
       final data = response.data;
       final replyText = (data is Map && data['reply'] is String)
           ? data['reply'] as String
           : 'Yanıt alınamadı, lütfen tekrar dener misin?';
 
+      final products = _parseProducts(data);
+
       if (!mounted) return;
       setState(() {
-        _messages.add(_AiMessage(role: 'assistant', text: replyText));
+        _messages.add(
+          _AiMessage(role: 'assistant', text: replyText, products: products),
+        );
         _isSending = false;
       });
       _scrollToBottom();
@@ -91,22 +139,104 @@ class _AiChatPageState extends State<AiChatPage> {
         _isSending = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(msg),
-          backgroundColor: AppColors.error,
+        SnackBar(content: Text(msg), backgroundColor: AppColors.error),
+      );
+    }
+  }
+
+  List<_AiProduct> _parseProducts(dynamic data) {
+    if (data is! Map) return [];
+    final raw = data['products'];
+    if (raw is! List || raw.isEmpty) return [];
+    final result = <_AiProduct>[];
+    for (final item in raw) {
+      if (item is! Map) continue;
+      result.add(
+        _AiProduct(
+          id: item['id']?.toString() ?? '',
+          name: item['name']?.toString() ?? '',
+          imageURL: item['imageURL']?.toString() ?? '',
+          tagName: item['tagName']?.toString() ?? '',
+          averageRating: item['averageRating'] != null
+              ? (item['averageRating'] is num
+                  ? (item['averageRating'] as num).toDouble()
+                  : double.tryParse(item['averageRating'].toString()) ?? 0.0)
+              : 0.0,
+          reviewCount: item['reviewCount'] != null
+              ? (item['reviewCount'] is int
+                  ? item['reviewCount'] as int
+                  : int.tryParse(item['reviewCount'].toString()) ?? 0)
+              : 0,
         ),
       );
     }
+    return result;
   }
 
   void _scrollToBottom() {
     if (!_scrollController.hasClients) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
-      _scrollController.jumpTo(
-        _scrollController.position.maxScrollExtent,
-      );
+      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
     });
+  }
+
+  Widget _buildAssistantAvatar({required double size}) {
+    return AnimatedBuilder(
+      animation: _logoController,
+      builder: (context, child) {
+        final v = _logoController.value;
+        final scale = 1.0 + (0.05 * (1 - (2 * v - 1).abs()));
+        return Transform.scale(scale: scale, child: child);
+      },
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: AppColors.primary.withValues(alpha: 0.1),
+        ),
+        padding: EdgeInsets.all(size * 0.1),
+        child: Image.asset('assets/images/Chatbot.png', fit: BoxFit.contain),
+      ),
+    );
+  }
+
+  Widget _buildUserAvatar({required double size}) {
+    return ProfileAvatarImage(
+      size: size,
+      imageUrl: _userAvatarUrl,
+      fallbackInitial: _userInitial ?? '?',
+    );
+  }
+
+  Widget _buildProductStrip(List<_AiProduct> products) {
+    return SizedBox(
+      height: 160,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.small),
+        itemCount: products.length,
+        separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.medium),
+        itemBuilder: (context, i) => _ProductChip(
+          product: products[i],
+          onTap: () => Navigator.push(
+            context,
+            SlideRightRoute(
+              page: ReviewPage(
+                product: ProductDto(
+                  id: products[i].id,
+                  name: products[i].name,
+                  imageURL: products[i].imageURL,
+                  tag: TagDto(id: '', name: products[i].tagName),
+                  averageRating: products[i].averageRating,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -117,6 +247,7 @@ class _AiChatPageState extends State<AiChatPage> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        automaticallyImplyLeading: true,
         iconTheme: const IconThemeData(color: AppColors.primary),
         title: Text(
           'FAVO Assistant',
@@ -127,7 +258,12 @@ class _AiChatPageState extends State<AiChatPage> {
         ),
         centerTitle: true,
       ),
-      body: GestureDetector(
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: Image.asset('assets/images/background.png', fit: BoxFit.cover),
+          ),
+          GestureDetector(
         behavior: HitTestBehavior.translucent,
         onTap: () => FocusScope.of(context).unfocus(),
         child: Column(
@@ -140,42 +276,71 @@ class _AiChatPageState extends State<AiChatPage> {
                 itemBuilder: (context, index) {
                   final m = _messages[index];
                   final isUser = m.role == 'user';
-                  final align =
-                      isUser ? Alignment.centerRight : Alignment.centerLeft;
                   final bgColor =
                       isUser ? AppColors.primary : AppColors.surface;
                   final textColor =
                       isUser ? Colors.white : AppColors.textPrimary;
-                  final maxWidth =
-                      MediaQuery.of(context).size.width * 0.7; // chat bubble
+                  final maxWidth = MediaQuery.of(context).size.width * 0.7;
 
-                  return Align(
-                    alignment: align,
+                  final bubble = ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: maxWidth),
                     child: Container(
-                      margin: EdgeInsets.only(
-                        bottom: AppSpacing.small,
-                        left: isUser ? 64 : 0,
-                        right: isUser ? 0 : 64,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.large,
+                        vertical: AppSpacing.medium,
                       ),
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(maxWidth: maxWidth),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.large,
-                            vertical: AppSpacing.medium,
+                      decoration: BoxDecoration(
+                        color: bgColor,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Text(
+                        m.text,
+                        style:
+                            AppTextStyles.body.copyWith(color: textColor),
+                      ),
+                    ),
+                  );
+
+                  if (!isUser) {
+                    return Container(
+                      margin:
+                          const EdgeInsets.only(bottom: AppSpacing.small),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              _buildAssistantAvatar(size: 34),
+                              const SizedBox(width: 10),
+                              bubble,
+                            ],
                           ),
-                          decoration: BoxDecoration(
-                            color: bgColor,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Text(
-                            m.text,
-                            style: AppTextStyles.body.copyWith(
-                              color: textColor,
+                          if (m.products.isNotEmpty) ...[
+                            const SizedBox(height: AppSpacing.small),
+                            Padding(
+                              padding: const EdgeInsets.only(
+                                  left: 44), // avatar width + gap
+                              child: _buildProductStrip(m.products),
                             ),
-                          ),
-                        ),
+                          ],
+                        ],
                       ),
+                    );
+                  }
+
+                  return Container(
+                    margin:
+                        const EdgeInsets.only(bottom: AppSpacing.small),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        bubble,
+                        const SizedBox(width: 10),
+                        _buildUserAvatar(size: 26),
+                      ],
                     ),
                   );
                 },
@@ -225,17 +390,138 @@ class _AiChatPageState extends State<AiChatPage> {
           ],
         ),
       ),
+        ],
+      ),
     );
   }
 }
 
+// ─── Models ──────────────────────────────────────────────────────────────────
+
 class _AiMessage {
   final String role;
   final String text;
+  final List<_AiProduct> products;
 
   const _AiMessage({
     required this.role,
     required this.text,
+    this.products = const [],
   });
 }
 
+class _AiProduct {
+  final String id;
+  final String name;
+  final String imageURL;
+  final String tagName;
+  final double averageRating;
+  final int reviewCount;
+
+  const _AiProduct({
+    required this.id,
+    required this.name,
+    required this.imageURL,
+    required this.tagName,
+    required this.averageRating,
+    required this.reviewCount,
+  });
+}
+
+// ─── Product chip in chat ─────────────────────────────────────────────────────
+
+class _ProductChip extends StatelessWidget {
+  final _AiProduct product;
+  final VoidCallback onTap;
+
+  const _ProductChip({required this.product, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 110,
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(12)),
+              child: Container(
+                height: 80,
+                width: 110,
+                color: AppColors.background,
+                child: product.imageURL.isNotEmpty
+                    ? Image.network(
+                        product.imageURL,
+                        height: 80,
+                        width: 110,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => _placeholder(),
+                      )
+                    : _placeholder(),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(6, 6, 6, 4),
+              child: Text(
+                product.name,
+                style: AppTextStyles.bodySmall.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Row(
+                children: [
+                  const Icon(Icons.star_rounded,
+                      size: 12, color: Colors.amber),
+                  const SizedBox(width: 2),
+                  Text(
+                    product.averageRating.toStringAsFixed(1),
+                    style: AppTextStyles.bodySmall.copyWith(fontSize: 11),
+                  ),
+                  if (product.reviewCount > 0) ...[
+                    const SizedBox(width: 3),
+                    Text(
+                      '(${product.reviewCount})',
+                      style: AppTextStyles.bodySmall.copyWith(
+                        fontSize: 10,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _placeholder() {
+    return Container(
+      height: 80,
+      width: 110,
+      color: AppColors.primary.withValues(alpha: 0.08),
+      child: const Icon(Icons.image_not_supported_outlined,
+          color: AppColors.textSecondary),
+    );
+  }
+}

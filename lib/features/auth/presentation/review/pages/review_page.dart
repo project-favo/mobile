@@ -21,6 +21,7 @@ import '../../../data/services/auth_service.dart';
 import 'add_review_page.dart';
 import 'review_detail_page.dart';
 import 'compare_product_select_page.dart';
+import '../../profile/pages/user_profile_page.dart';
 
 class ReviewPage extends StatefulWidget {
   /// Tam product verilirse doğrudan kullanılır.
@@ -42,6 +43,7 @@ class _ReviewPageState extends State<ReviewPage> {
   final SessionHelper _sessionHelper = SessionHelper();
   final MessageRepository _messageRepository = MessageRepository();
   String? _currentUsername;
+  String? _currentUserId;
   late ProductDto _currentProduct;
   bool _isLoadingProduct = false; // productId ile açıldıysa ürün yüklenene kadar
   List<ReviewDto> _reviews = [];
@@ -287,6 +289,7 @@ class _ReviewPageState extends State<ReviewPage> {
         final authService = AuthService();
         final me = await authService.getMe();
         _currentUsername = me.userName;
+        _currentUserId = me.id;
       } catch (_) {}
 
       // Review'ları çek
@@ -687,6 +690,23 @@ class _ReviewPageState extends State<ReviewPage> {
                             review.ownerUserName.toLowerCase() !=
                                 _currentUsername!.toLowerCase(),
                         onChatTap: () => _onChatIconTap(review),
+                        onUsernameTap: () {
+                          if (_currentUserId != null &&
+                              review.ownerId.trim() ==
+                                  _currentUserId!.trim()) {
+                            return;
+                          }
+                          Navigator.push(
+                            context,
+                            SlideRightRoute(
+                              page: UserProfilePage(
+                                userId: review.ownerId,
+                                userName: review.ownerUserName,
+                                profileImageUrl: review.ownerProfilePhotoUrl,
+                              ),
+                            ),
+                          );
+                        },
                         onTap: () async {
                           // Review detail'den dönüldüğünde review listesini yenile
                           final result = await Navigator.push(

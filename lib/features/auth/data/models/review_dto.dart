@@ -9,6 +9,7 @@ class ReviewDto {
   final String productName;
   final String ownerId;
   final String ownerUserName;
+  final String? ownerProfilePhotoUrl;
   final List<ReviewMediaDto> mediaList;
   final int likeCount;
   final bool isLikedByCurrentUser;
@@ -24,10 +25,29 @@ class ReviewDto {
     required this.productName,
     required this.ownerId,
     required this.ownerUserName,
+    this.ownerProfilePhotoUrl,
     required this.mediaList,
     required this.likeCount,
     required this.isLikedByCurrentUser,
   });
+
+  static String? _ownerPhotoFromJson(Map<String, dynamic> json) {
+    final direct = json['ownerProfilePhotoUrl'] ??
+        json['ownerProfileImageUrl'] ??
+        json['ownerImageUrl'] ??
+        json['ownerAvatarUrl'];
+    if (direct != null && direct.toString().isNotEmpty) {
+      return direct.toString();
+    }
+    final owner = json['owner'];
+    if (owner is Map<String, dynamic>) {
+      return (owner['profileImageUrl'] ??
+              owner['profilePhotoUrl'] ??
+              owner['avatarUrl'])
+          ?.toString();
+    }
+    return null;
+  }
 
   factory ReviewDto.fromJson(Map<String, dynamic> json) {
     return ReviewDto(
@@ -41,6 +61,7 @@ class ReviewDto {
       productName: json['productName']?.toString() ?? '',
       ownerId: json['ownerId']?.toString() ?? '',
       ownerUserName: json['ownerUserName']?.toString() ?? '',
+      ownerProfilePhotoUrl: _ownerPhotoFromJson(json),
       mediaList: (json['mediaList'] as List?)
               ?.map((item) => ReviewMediaDto.fromJson(item as Map<String, dynamic>))
               .toList() ??

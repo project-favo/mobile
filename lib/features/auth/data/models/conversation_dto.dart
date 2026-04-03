@@ -10,10 +10,22 @@ class ConversationUserDto {
   });
 
   factory ConversationUserDto.fromJson(Map<String, dynamic> json) {
+    final rawId = json['id'];
+    final id = rawId is num
+        ? rawId.toInt()
+        : int.tryParse(rawId?.toString() ?? '') ?? 0;
+    // UserResponseDto: userName, profileImageUrl
+    final username = json['userName']?.toString() ??
+        json['username']?.toString() ??
+        '';
+    final photo = json['profileImageUrl']?.toString() ??
+        json['profilePhotoUrl']?.toString() ??
+        json['avatarUrl']?.toString() ??
+        json['photoUrl']?.toString();
     return ConversationUserDto(
-      id: (json['id'] as num?)?.toInt() ?? 0,
-      username: json['username']?.toString() ?? '',
-      profilePhotoUrl: json['profilePhotoUrl']?.toString(),
+      id: id,
+      username: username,
+      profilePhotoUrl: photo,
     );
   }
 }
@@ -34,11 +46,16 @@ class ConversationDto {
   });
 
   factory ConversationDto.fromJson(Map<String, dynamic> json) {
+    final rawOp = json['otherParticipant'] ??
+        json['participant'] ??
+        json['otherUser'] ??
+        json['user'];
+    final opMap = rawOp is Map<String, dynamic>
+        ? rawOp
+        : <String, dynamic>{};
     return ConversationDto(
       id: (json['id'] as num?)?.toInt() ?? 0,
-      otherParticipant: ConversationUserDto.fromJson(
-        json['otherParticipant'] as Map<String, dynamic>? ?? {},
-      ),
+      otherParticipant: ConversationUserDto.fromJson(opMap),
       lastMessage: json['lastMessage']?.toString() ?? '',
       lastMessageAt: json['lastMessageAt']?.toString() ?? '',
       unreadCount: (json['unreadCount'] as num?)?.toInt() ?? 0,

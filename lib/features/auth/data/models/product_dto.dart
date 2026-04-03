@@ -71,9 +71,9 @@ class ProductDto {
       description: description ?? this.description,
       tag: tag ?? this.tag,
       // averageRating için: eğer null değilse (0.0 dahil) kullan, null ise this.averageRating kullan
-      averageRating: averageRating != null ? averageRating : this.averageRating,
+      averageRating: averageRating ?? this.averageRating,
       // isLiked için: eğer null değilse (false dahil) kullan, null ise this.isLiked kullan
-      isLiked: isLiked != null ? isLiked : this.isLiked,
+      isLiked: isLiked ?? this.isLiked,
       createdAt: createdAt ?? this.createdAt,
     );
   }

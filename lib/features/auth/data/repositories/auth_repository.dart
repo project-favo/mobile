@@ -17,7 +17,7 @@ class AuthRepository {
         ApiConfig.loginPath,
       );
       return UserResponseDto.fromJson(response.data);
-    } on DioException catch (e) {
+    } on DioException {
       rethrow;
     }
   }
@@ -108,6 +108,39 @@ class AuthRepository {
         throw Exception(errorMessage);
       }
       throw Exception('Network error: ${e.message}');
+    }
+  }
+
+  /// E-posta doğrulama kodu gönderir
+  /// Body: { "code": "12345" } — tam 5 hane
+  Future<UserResponseDto> verifyEmail(String firebaseIdToken, String code) async {
+    try {
+      _apiClient.setAuthToken(firebaseIdToken);
+      final response = await _apiClient.dio.post(
+        '/api/auth/verify-email',
+        data: {'code': code},
+      );
+      return UserResponseDto.fromJson(response.data);
+    } on DioException catch (e) {
+      final errorData = e.response?.data;
+      final errorCode = errorData is Map
+          ? (errorData['error'] ?? errorData['message'] ?? 'VERIFICATION_FAILED')
+          : 'VERIFICATION_FAILED';
+      throw Exception(errorCode.toString());
+    }
+  }
+
+  /// Doğrulama e-postasını yeniden gönderir (60s cooldown)
+  Future<void> resendVerification(String firebaseIdToken) async {
+    try {
+      _apiClient.setAuthToken(firebaseIdToken);
+      await _apiClient.dio.post('/api/auth/resend-verification');
+    } on DioException catch (e) {
+      final errorData = e.response?.data;
+      final errorCode = errorData is Map
+          ? (errorData['error'] ?? errorData['message'] ?? 'RESEND_FAILED')
+          : 'RESEND_FAILED';
+      throw Exception(errorCode.toString());
     }
   }
 

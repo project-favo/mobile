@@ -5,6 +5,7 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/utils/error_handler.dart';
 import '../../../../core/utils/session_helper.dart';
 import '../../../../core/widgets/skeleton_loader.dart';
+import '../../../../core/widgets/profile_avatar.dart';
 import '../../data/repositories/message_repository.dart';
 import '../../data/models/conversation_dto.dart';
 import 'chat_detail_page.dart';
@@ -89,7 +90,12 @@ class _ConversationListPageState extends State<ConversationListPage> {
           onPressed: () => Navigator.of(context).pop(true),
         ),
       ),
-      body: RefreshIndicator(
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: Image.asset('assets/images/background.png', fit: BoxFit.cover),
+          ),
+          RefreshIndicator(
         onRefresh: _loadConversations,
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.xLarge),
@@ -181,9 +187,6 @@ class _ConversationListPageState extends State<ConversationListPage> {
                               const SizedBox(height: AppSpacing.medium),
                           itemBuilder: (context, index) {
                             final c = _conversations[index];
-                            final initials = c.otherParticipant.username.isNotEmpty
-                                ? c.otherParticipant.username[0].toUpperCase()
-                                : '?';
                             final hasUnread = c.unreadCount > 0;
                             return Container(
                               decoration: BoxDecoration(
@@ -199,16 +202,10 @@ class _ConversationListPageState extends State<ConversationListPage> {
                               child: ListTile(
                                 contentPadding:
                                     const EdgeInsets.symmetric(horizontal: 12),
-                                leading: CircleAvatar(
+                                leading: ProfileAvatar(
                                   radius: 22,
-                                  backgroundColor:
-                                      AppColors.primary.withOpacity(0.1),
-                                  child: Text(
-                                    initials,
-                                    style: AppTextStyles.bodyBold.copyWith(
-                                      color: AppColors.primary,
-                                    ),
-                                  ),
+                                  imageUrl: c.otherParticipant.profilePhotoUrl,
+                                  fallbackInitial: c.otherParticipant.username,
                                 ),
                                 title: Text(
                                   c.otherParticipant.username,
@@ -273,7 +270,9 @@ class _ConversationListPageState extends State<ConversationListPage> {
                             );
                           },
                         ),
-        ),
+          ),
+          ),
+        ],
       ),
     );
   }

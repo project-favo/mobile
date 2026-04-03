@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:dio/dio.dart';
 import '../network/api_client.dart';
 import '../config/api_config.dart';
+import 'exceptions.dart';
 
 /// Session management helper
 /// Handles backend session establishment and token management
@@ -53,6 +54,12 @@ class SessionHelper {
       
       return token;
     } on DioException catch (e) {
+      if (dioExceptionBodyContains(e, 'EMAIL_NOT_VERIFIED')) {
+        _sessionEstablished = false;
+        _lastLoginTime = null;
+        ApiClient().setAuthToken(token);
+        return token;
+      }
       // If login fails with 401/403, session might be invalid
       if (e.response?.statusCode == 401 || e.response?.statusCode == 403) {
         _sessionEstablished = false;

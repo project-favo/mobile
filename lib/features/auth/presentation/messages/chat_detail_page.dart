@@ -14,11 +14,14 @@ import '../../data/models/conversation_dto.dart';
 import '../../data/models/message_dto.dart';
 import '../../data/services/auth_service.dart';
 import '../../../../core/widgets/skeleton_loader.dart';
+import '../../../../core/widgets/profile_avatar.dart';
 
 class ChatDetailPage extends StatefulWidget {
   final ConversationDto conversation;
+  /// Set when opening a new chat (no existing conversation id yet)
+  final int? recipientId;
 
-  const ChatDetailPage({super.key, required this.conversation});
+  const ChatDetailPage({super.key, required this.conversation, this.recipientId});
 
   @override
   State<ChatDetailPage> createState() => _ChatDetailPageState();
@@ -31,17 +34,21 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   final ScrollController _scrollController = ScrollController();
   final FocusNode _inputFocusNode = FocusNode();
 
+  late int _conversationId;
   bool _isLoading = true;
   bool _isSending = false;
   String? _errorMessage;
   List<MessageDto> _messages = [];
   int? _currentUserId;
+  String? _myAvatarUrl;
+  String? _myInitial;
   StompClient? _stompClient;
   Timer? _pollTimer;
 
   @override
   void initState() {
     super.initState();
+    _conversationId = widget.conversation.id;
     _init();
     _inputFocusNode.addListener(() {
       if (_inputFocusNode.hasFocus) {
@@ -61,10 +68,17 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         final authService = AuthService();
         final me = await authService.getMe();
         _currentUserId = int.tryParse(me.id);
+        _myAvatarUrl = me.profileImageUrl;
+        _myInitial = me.userName.isNotEmpty ? me.userName[0].toUpperCase() : '?';
       } catch (_) {}
-      _connectStomp(token);
-      await _loadMessages();
-      _startPolling();
+      if (_conversationId > 0) {
+        _connectStomp(token);
+        await _loadMessages();
+        _startPolling();
+      } else {
+        // New conversation — show empty chat, wait for first message
+        if (mounted) setState(() => _isLoading = false);
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -81,7 +95,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     });
     try {
       final page = await _messageRepository.getConversationMessages(
-        conversationId: widget.conversation.id,
+        conversationId: _conversationId,
         page: 0,
         size: 50,
       );
@@ -111,9 +125,19 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         throw Exception('Failed to get Firebase ID token');
       }
       final msg = await _messageRepository.sendMessage(
-        conversationId: widget.conversation.id,
+        conversationId: _conversationId > 0 ? _conversationId : null,
+        recipientId: _conversationId == 0 ? widget.recipientId : null,
         content: text,
       );
+      // First message in a new conversation — bootstrap real-time
+      if (_conversationId == 0 && msg.conversationId > 0) {
+        _conversationId = msg.conversationId;
+        final token = await _sessionHelper.ensureSession();
+        if (token != null) {
+          _connectStomp(token);
+          _startPolling();
+        }
+      }
       if (!mounted) return;
       _controller.clear();
       setState(() {
@@ -157,8 +181,9 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
 
   Future<void> _refreshMessagesSilently() async {
     try {
+      if (_conversationId == 0) return;
       final page = await _messageRepository.getConversationMessages(
-        conversationId: widget.conversation.id,
+        conversationId: _conversationId,
         page: 0,
         size: 50,
       );
@@ -202,7 +227,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
 
   void _onStompConnected(StompFrame frame) {
     _stompClient?.subscribe(
-      destination: '/queue/conversations/${widget.conversation.id}',
+      destination: '/queue/conversations/$_conversationId',
       callback: (StompFrame frame) {
         final body = frame.body;
         if (body == null || body.isEmpty) return;
@@ -224,6 +249,25 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     );
   }
 
+  Widget _buildOtherAvatar({required double size}) {
+    final initial = widget.conversation.otherParticipant.username.isNotEmpty
+        ? widget.conversation.otherParticipant.username[0].toUpperCase()
+        : '?';
+    return ProfileAvatarImage(
+      size: size,
+      imageUrl: widget.conversation.otherParticipant.profilePhotoUrl,
+      fallbackInitial: initial,
+    );
+  }
+
+  Widget _buildMyAvatar({required double size}) {
+    return ProfileAvatarImage(
+      size: size,
+      imageUrl: _myAvatarUrl,
+      fallbackInitial: _myInitial ?? '?',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -240,45 +284,32 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: AppColors.primary.withOpacity(0.1),
-              backgroundImage: (widget.conversation.otherParticipant
-                              .profilePhotoUrl !=
-                          null &&
-                      widget.conversation.otherParticipant.profilePhotoUrl!
-                          .isNotEmpty)
-                  ? NetworkImage(widget
-                      .conversation.otherParticipant.profilePhotoUrl!)
-                  : null,
-              child: (widget.conversation.otherParticipant.profilePhotoUrl ==
-                          null ||
-                      widget.conversation.otherParticipant.profilePhotoUrl!
-                          .isEmpty)
-                  ? Text(
-                      widget.conversation.otherParticipant.username.isNotEmpty
-                          ? widget.conversation.otherParticipant.username[0]
-                              .toUpperCase()
-                          : '?',
-                      style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.primary,
-                      ),
-                    )
-                  : null,
+            ProfileAvatarImage(
+              size: 32,
+              imageUrl: widget.conversation.otherParticipant.profilePhotoUrl,
+              fallbackInitial: widget.conversation.otherParticipant.username,
             ),
             const SizedBox(width: 8),
-            Text(
-              widget.conversation.otherParticipant.username,
-              style: AppTextStyles.heading3.copyWith(
-                color: AppColors.textPrimary,
-                fontWeight: FontWeight.w700,
+            Flexible(
+              child: Text(
+                widget.conversation.otherParticipant.username,
+                style: AppTextStyles.heading3.copyWith(
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.w700,
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
         ),
         centerTitle: true,
       ),
-      body: GestureDetector(
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: Image.asset('assets/images/background.png', fit: BoxFit.cover),
+          ),
+          GestureDetector(
         behavior: HitTestBehavior.translucent,
         onTap: () => FocusScope.of(context).unfocus(),
         child: Column(
@@ -326,58 +357,54 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                           ),
                         ),
                       )
-                    : Padding(
+                    : ListView.builder(
+                        controller: _scrollController,
                         padding: const EdgeInsets.all(AppSpacing.large),
-                        child: ListView.builder(
-                          controller: _scrollController,
-                          itemCount: _messages.length,
-                          itemBuilder: (context, index) {
-                            final m = _messages[index];
-                            final isMine = _currentUserId != null &&
-                                m.senderId == _currentUserId;
-                            final align = isMine
-                                ? Alignment.centerRight
-                                : Alignment.centerLeft;
-                            final color =
-                                isMine ? AppColors.primary : AppColors.surface;
-                            final textColor = isMine
-                                ? Colors.white
-                                : AppColors.textPrimary;
-                            final maxWidth =
-                                MediaQuery.of(context).size.width *
-                                    0.7; // WhatsApp benzeri genişlik
-                            return Align(
-                              alignment: align,
-                              child: Container(
-                                margin: EdgeInsets.only(
-                                  bottom: AppSpacing.small,
-                                  left: isMine ? 64 : 0,
-                                  right: isMine ? 0 : 64,
-                                ),
-                                child: ConstrainedBox(
-                                  constraints:
-                                      BoxConstraints(maxWidth: maxWidth),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: AppSpacing.large,
-                                      vertical: AppSpacing.medium,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: color,
-                                      borderRadius: BorderRadius.circular(16),
-                                    ),
-                                    child: Text(
-                                      m.content,
-                                      style: AppTextStyles.body.copyWith(
-                                        color: textColor,
-                                      ),
-                                    ),
-                                  ),
+                        itemCount: _messages.length,
+                        itemBuilder: (context, index) {
+                          final m = _messages[index];
+                          final isMine = _currentUserId != null &&
+                              m.senderId == _currentUserId;
+                          final bgColor =
+                              isMine ? AppColors.primary : AppColors.surface;
+                          final textColor =
+                              isMine ? Colors.white : AppColors.textPrimary;
+                          final maxWidth =
+                              MediaQuery.of(context).size.width * 0.7;
+
+                          final bubble = ConstrainedBox(
+                            constraints: BoxConstraints(maxWidth: maxWidth),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.large,
+                                vertical: AppSpacing.medium,
+                              ),
+                              decoration: BoxDecoration(
+                                color: bgColor,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Text(
+                                m.content,
+                                style: AppTextStyles.body.copyWith(
+                                  color: textColor,
                                 ),
                               ),
-                            );
-                          },
-                        ),
+                            ),
+                          );
+
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: AppSpacing.small),
+                            child: Row(
+                              mainAxisAlignment: isMine
+                                  ? MainAxisAlignment.end
+                                  : MainAxisAlignment.start,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: isMine
+                                  ? [bubble, const SizedBox(width: 8), _buildMyAvatar(size: 28)]
+                                  : [_buildOtherAvatar(size: 34), const SizedBox(width: 10), bubble],
+                            ),
+                          );
+                        },
                       ),
             ),
             SafeArea(
@@ -423,6 +450,8 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
             ),
           ],
         ),
+      ),
+        ],
       ),
     );
   }

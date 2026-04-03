@@ -1,0 +1,546 @@
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import '../../../../../core/theme/app_colors.dart';
+import '../../../../../core/theme/app_text_styles.dart';
+import '../../../../../core/theme/app_spacing.dart';
+import '../../../../../core/utils/session_helper.dart';
+import '../../../../../core/utils/exceptions.dart';
+import '../../../../../core/widgets/profile_avatar.dart';
+import '../../../../../core/routes/custom_page_transitions.dart';
+import '../../../../../routes/app_routes.dart';
+import '../../../data/models/review_dto.dart';
+import '../../../data/models/conversation_dto.dart';
+import '../../../data/repositories/interaction_repository.dart';
+import '../../../data/repositories/review_repository.dart';
+import '../../../data/services/auth_service.dart';
+import '../../messages/chat_detail_page.dart';
+import '../../review/pages/review_page.dart';
+import '../../review/widgets/review_card.dart';
+import 'follow_list_page.dart';
+
+class UserProfilePage extends StatefulWidget {
+  final String userId;
+  final String userName;
+  final String? profileImageUrl;
+
+  const UserProfilePage({
+    super.key,
+    required this.userId,
+    required this.userName,
+    this.profileImageUrl,
+  });
+
+  @override
+  State<UserProfilePage> createState() => _UserProfilePageState();
+}
+
+class _UserProfilePageState extends State<UserProfilePage>
+    with SingleTickerProviderStateMixin {
+  final InteractionRepository _interactionRepo = InteractionRepository();
+  final ReviewRepository _reviewRepo = ReviewRepository();
+  final SessionHelper _sessionHelper = SessionHelper();
+
+  late TabController _tabController;
+  String _selectedDateSort = 'Newest';
+
+  bool _isFollowing = false;
+  bool _isFollowLoading = false;
+  int _followerCount = 0;
+  int _followingCount = 0;
+  List<ReviewDto> _reviews = [];
+  bool _isLoadingReviews = true;
+  bool _isLoadingCounts = true;
+  /// Görünen profil fotoğrafı (parametre veya yorum listesinden)
+  String? _avatarImageUrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 1, vsync: this);
+    _avatarImageUrl = widget.profileImageUrl;
+    _start();
+  }
+
+  /// Kendi kullanıcı kartına gidilmesin; deep link / hata durumunda kapat.
+  Future<void> _start() async {
+    try {
+      final me = await AuthService().getMe();
+      if (!mounted) return;
+      if (me.id.trim() == widget.userId.trim()) {
+        Navigator.of(context).pop();
+        return;
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    await _loadAll();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadAll() async {
+    final token = await _sessionHelper.ensureSession();
+    await Future.wait([
+      _loadCounts(),
+      _loadIsFollowing(token),
+      _loadReviews(token),
+    ]);
+  }
+
+  Future<void> _loadCounts() async {
+    final results = await Future.wait([
+      _interactionRepo.getFollowerCount(widget.userId),
+      _interactionRepo.getFollowingCount(widget.userId),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _followerCount = results[0];
+      _followingCount = results[1];
+      _isLoadingCounts = false;
+    });
+  }
+
+  Future<void> _loadIsFollowing(String? token) async {
+    final following = await _interactionRepo.isFollowing(token, widget.userId);
+    if (!mounted) return;
+    setState(() => _isFollowing = following);
+  }
+
+  Future<void> _loadReviews(String? token) async {
+    try {
+      final reviews = await _reviewRepo.getReviewsByUserId(
+        widget.userId,
+        firebaseIdToken: token,
+      );
+      if (!mounted) return;
+      String? avatar = _avatarImageUrl;
+      if ((avatar == null || avatar.isEmpty) && reviews.isNotEmpty) {
+        avatar = reviews.first.ownerProfilePhotoUrl;
+      }
+      setState(() {
+        _reviews = reviews;
+        _avatarImageUrl = avatar;
+        _isLoadingReviews = false;
+      });
+      _sortReviews();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isLoadingReviews = false);
+    }
+  }
+
+  void _sortReviews() {
+    if (_reviews.isEmpty) return;
+    final sorted = List<ReviewDto>.from(_reviews);
+    sorted.sort((a, b) {
+      final da = DateTime.tryParse(a.createdAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final db = DateTime.tryParse(b.createdAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
+      if (_selectedDateSort == 'Newest') {
+        return db.compareTo(da);
+      }
+      return da.compareTo(db);
+    });
+    setState(() => _reviews = sorted);
+  }
+
+  double? get _averageRating {
+    if (_reviews.isEmpty) return null;
+    final sum = _reviews.fold<double>(0, (a, r) => a + r.rating);
+    return sum / _reviews.length;
+  }
+
+  Future<void> _toggleFollow() async {
+    if (_isFollowLoading) return;
+    setState(() => _isFollowLoading = true);
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('Takip etmek için giriş yapmalısınız.');
+      final token = await user.getIdToken(true);
+      if (token == null) throw Exception('Takip etmek için giriş yapmalısınız.');
+      final nowFollowing = await _interactionRepo.toggleFollow(token, widget.userId);
+      if (!mounted) return;
+      setState(() {
+        _isFollowing = nowFollowing;
+        _followerCount += nowFollowing ? 1 : -1;
+      });
+    } on UnauthorizedException {
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(context, AppRoutes.login);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isFollowLoading = false);
+    }
+  }
+
+  void _openChat() {
+    final recipientId = int.tryParse(widget.userId);
+    if (recipientId == null) return;
+    final syntheticConversation = ConversationDto(
+      id: 0,
+      otherParticipant: ConversationUserDto(
+        id: recipientId,
+        username: widget.userName,
+        profilePhotoUrl: _avatarImageUrl ?? widget.profileImageUrl,
+      ),
+      lastMessage: '',
+      lastMessageAt: '',
+      unreadCount: 0,
+    );
+    Navigator.push(
+      context,
+      SlideRightRoute(
+        page: ChatDetailPage(
+          conversation: syntheticConversation,
+          recipientId: recipientId,
+        ),
+      ),
+    );
+  }
+
+  void _openFollowerList() {
+    Navigator.push(
+      context,
+      SlideRightRoute(
+        page: FollowListPage(
+          userId: widget.userId,
+          title: 'Takipçiler',
+          isFollowers: true,
+        ),
+      ),
+    );
+  }
+
+  void _openFollowingList() {
+    Navigator.push(
+      context,
+      SlideRightRoute(
+        page: FollowListPage(
+          userId: widget.userId,
+          title: 'Takip Edilenler',
+          isFollowers: false,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final handle =
+        '@${widget.userName.toLowerCase().replaceAll(' ', '')}';
+
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: AppColors.primary),
+        title: const Text(
+          'Profile',
+          style: AppTextStyles.HomeHeader,
+        ),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.chat_bubble_outline),
+            color: AppColors.primary,
+            tooltip: 'Mesaj',
+            onPressed: _openChat,
+          ),
+        ],
+      ),
+      body: RefreshIndicator(
+        color: AppColors.primary,
+        onRefresh: _loadAll,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: Column(
+            children: [
+              const SizedBox(height: AppSpacing.xxLarge),
+              ProfileAvatar(
+                radius: 50,
+                imageUrl: _avatarImageUrl ?? widget.profileImageUrl,
+                fallbackInitial: widget.userName,
+              ),
+              const SizedBox(height: AppSpacing.large),
+              Text(
+                widget.userName,
+                style: AppTextStyles.titleMedium,
+              ),
+              const SizedBox(height: AppSpacing.small),
+              Text(
+                handle,
+                style: AppTextStyles.bodySmall.copyWith(
+                  color: AppColors.textSecondary,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xxLarge),
+              _isLoadingCounts
+                  ? const SizedBox(height: 48)
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        GestureDetector(
+                          onTap: _openFollowerList,
+                          child: _StatItem(
+                            count: _followerCount,
+                            label: 'Takipçi',
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.xxLarge),
+                        GestureDetector(
+                          onTap: _openFollowingList,
+                          child: _StatItem(
+                            count: _followingCount,
+                            label: 'Takip',
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.xxLarge),
+                        _StatItem(
+                          count: _isLoadingReviews ? 0 : _reviews.length,
+                          label: 'Yorum',
+                        ),
+                      ],
+                    ),
+              const SizedBox(height: AppSpacing.large),
+              SizedBox(
+                width: 160,
+                child: ElevatedButton(
+                  onPressed: _isFollowLoading ? null : _toggleFollow,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _isFollowing
+                        ? AppColors.surface
+                        : AppColors.primary,
+                    foregroundColor:
+                        _isFollowing ? AppColors.primary : Colors.white,
+                    side: _isFollowing
+                        ? const BorderSide(color: AppColors.primary)
+                        : null,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: AppSpacing.medium,
+                    ),
+                  ),
+                  child: _isFollowLoading
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.primary,
+                          ),
+                        )
+                      : Text(
+                          _isFollowing ? 'Takip Ediliyor' : 'Takip Et',
+                          style: AppTextStyles.button,
+                        ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xxLarge),
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _SummaryCard(
+                        title: 'AVERAGE RATING',
+                        content: _averageRating != null
+                            ? '${_averageRating!.toStringAsFixed(1)} /5.0'
+                            : '— /5.0',
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.xLarge),
+                    const Expanded(
+                      child: _SummaryCard(
+                        title: 'TOP CATEGORY',
+                        content: '—',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xxLarge),
+              TabBar(
+                controller: _tabController,
+                labelColor: AppColors.primary,
+                unselectedLabelColor: AppColors.textSecondary,
+                indicatorColor: AppColors.primary,
+                indicatorWeight: 2,
+                tabs: const [
+                  Tab(text: 'Yorumları'),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.large),
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'SORT BY DATE',
+                      style: AppTextStyles.bodyMedium
+                          .copyWith(color: AppColors.textSecondary),
+                    ),
+                    _SortDropdown(
+                      items: const ['Newest', 'Oldest'],
+                      value: _selectedDateSort,
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setState(() => _selectedDateSort = value);
+                        _sortReviews();
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xxLarge),
+              if (_isLoadingReviews)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: AppSpacing.xxLarge),
+                  child: CircularProgressIndicator(color: AppColors.primary),
+                )
+              else if (_reviews.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(AppSpacing.xLarge),
+                  child: Text(
+                    'Henüz yorum yok.',
+                    style: AppTextStyles.bodySecondary,
+                  ),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.xLarge,
+                  ),
+                  child: Column(
+                    children: _reviews
+                        .map(
+                          (r) => Padding(
+                            padding: const EdgeInsets.only(
+                              bottom: AppSpacing.large,
+                            ),
+                            child: ReviewCard(
+                              username: '@${r.ownerUserName}',
+                              content: r.description ?? r.title,
+                              rating: r.rating,
+                              isSponsored: r.isCollaborative,
+                              likeCount: r.likeCount,
+                              isLiked: r.isLikedByCurrentUser,
+                              onTap: () => Navigator.push(
+                                context,
+                                SlideRightRoute(
+                                  page: ReviewPage(productId: r.productId),
+                                ),
+                              ),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+              const SizedBox(height: AppSpacing.xxLarge),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StatItem extends StatelessWidget {
+  final int count;
+  final String label;
+
+  const _StatItem({required this.count, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(count.toString(), style: AppTextStyles.heading3),
+        const SizedBox(height: AppSpacing.small),
+        Text(label, style: AppTextStyles.bodySecondary),
+      ],
+    );
+  }
+}
+
+class _SummaryCard extends StatelessWidget {
+  final String title;
+  final String content;
+
+  const _SummaryCard({
+    required this.title,
+    required this.content,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.xLarge),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: AppTextStyles.bodySecondary.copyWith(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.medium),
+          Text(
+            content,
+            style: AppTextStyles.heading3,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SortDropdown extends StatelessWidget {
+  final List<String> items;
+  final String value;
+  final ValueChanged<String?> onChanged;
+
+  const _SortDropdown({
+    required this.items,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButton<String>(
+      value: value,
+      underline: Container(),
+      style: AppTextStyles.bodyMedium,
+      items: items.map((String item) {
+        return DropdownMenuItem<String>(
+          value: item,
+          child: Text(item),
+        );
+      }).toList(),
+      onChanged: onChanged,
+      icon: const Icon(Icons.arrow_drop_down, color: AppColors.textSecondary),
+    );
+  }
+}

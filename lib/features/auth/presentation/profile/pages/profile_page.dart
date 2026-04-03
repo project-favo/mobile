@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
@@ -16,7 +15,10 @@ import '../../home_page.dart';
 import '../../search_page.dart';
 import '../../review/pages/review_page.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
+import '../../../../../core/widgets/profile_avatar.dart';
+import '../../../../../core/utils/resolve_media_url.dart';
 import 'settings_page.dart';
+import 'follow_list_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -42,6 +44,8 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
   bool _isLoadingMyReviews = false;
   String? _myReviewsError;
   String _selectedDateSort = 'Newest';
+  int _followerCount = 0;
+  int _followingCount = 0;
 
   Route _noAnimationRoute(Widget page) {
     return PageRouteBuilder(
@@ -255,12 +259,25 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
         _user = user;
         _isLoading = false;
       });
+      _loadFollowCounts(user.id);
     } catch (e) {
       setState(() {
         _errorMessage = e.toString();
         _isLoading = false;
       });
     }
+  }
+
+  Future<void> _loadFollowCounts(String userId) async {
+    final results = await Future.wait([
+      _interactionRepository.getFollowerCount(userId),
+      _interactionRepository.getFollowingCount(userId),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _followerCount = results[0];
+      _followingCount = results[1];
+    });
   }
 
   @override
@@ -532,15 +549,11 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
         child: Column(
           children: [
             const SizedBox(height: AppSpacing.xxLarge),
-            CircleAvatar(
+            ProfileAvatar(
               radius: 50,
-              backgroundColor: AppColors.surface,
-              backgroundImage: _user!.profilePhotoData != null && _user!.profilePhotoData!.isNotEmpty
-                  ? MemoryImage(base64Decode(_user!.profilePhotoData!))
-                  : null,
-              child: _user!.profilePhotoData == null || _user!.profilePhotoData!.isEmpty
-                  ? const Icon(Icons.person_outline_rounded, size: 60, color: AppColors.primary)
-                  : null,
+              imageUrl: _user!.profileImageUrl,
+              memoryBytes: decodeProfilePhotoBytes(_user!.profilePhotoData),
+              fallbackInitial: _user!.userName,
             ),
             const SizedBox(height: AppSpacing.large),
             if (_user!.name != null || _user!.surname != null) ...[
@@ -563,26 +576,36 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _StatItem(label: '2.4K Followers'),
-                const SizedBox(width: AppSpacing.xxLarge),
-                _StatItem(label: '342 Following'),
-                const SizedBox(width: AppSpacing.xxLarge),
-                _StatItem(label: '128 Reviews'),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.xxLarge),
-            SizedBox(
-              width: 120,
-              child: ElevatedButton(
-                onPressed: () {},
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.medium),
+                GestureDetector(
+                  onTap: () => Navigator.push(
+                    context,
+                    SlideRightRoute(
+                      page: FollowListPage(
+                        userId: _user!.id,
+                        title: 'Takipçiler',
+                        isFollowers: true,
+                      ),
+                    ),
+                  ),
+                  child: _StatItem(count: _followerCount, label: 'Takipçi'),
                 ),
-                child: const Text('Follow', style: AppTextStyles.button),
-              ),
+                const SizedBox(width: AppSpacing.xxLarge),
+                GestureDetector(
+                  onTap: () => Navigator.push(
+                    context,
+                    SlideRightRoute(
+                      page: FollowListPage(
+                        userId: _user!.id,
+                        title: 'Takip Edilenler',
+                        isFollowers: false,
+                      ),
+                    ),
+                  ),
+                  child: _StatItem(count: _followingCount, label: 'Takip'),
+                ),
+                const SizedBox(width: AppSpacing.xxLarge),
+                _StatItem(count: _myReviews.length, label: 'Yorum'),
+              ],
             ),
             const SizedBox(height: AppSpacing.xxLarge),
             Padding(
@@ -656,23 +679,21 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
 }
 
 class _StatItem extends StatelessWidget {
+  final int count;
   final String label;
 
-  const _StatItem({required this.label});
+  const _StatItem({required this.count, required this.label});
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
         Text(
-          label.split(' ')[0],
+          count.toString(),
           style: AppTextStyles.heading3,
         ),
         const SizedBox(height: AppSpacing.small),
-        Text(
-          label.split(' ').skip(1).join(' '),
-          style: AppTextStyles.bodySecondary,
-          ),
+        Text(label, style: AppTextStyles.bodySecondary),
       ],
     );
   }

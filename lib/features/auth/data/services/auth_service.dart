@@ -4,6 +4,7 @@ import '../models/user_response_dto.dart';
 import '../models/user_update_request_dto.dart';
 import '../models/register_request_dto.dart';
 import '../repositories/auth_repository.dart';
+import '../../../../core/utils/exceptions.dart';
 
 class AuthService {
   final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
@@ -28,13 +29,29 @@ class AuthService {
       }
 
       // 3. Backend'e login isteği gönder (idToken Authorization header'ında)
-      final userDto = await _authRepository.login(idToken);
-      return userDto;
+      try {
+        final userDto = await _authRepository.login(idToken);
+        // Backend emailVerified: false döndürürse doğrulama sayfasına yönlendir
+        if (!userDto.isEmailVerified) {
+          throw EmailNotVerifiedException(idToken);
+        }
+        return userDto;
+      } on EmailNotVerifiedException {
+        rethrow;
+      } on DioException catch (e) {
+        // Backend 500 + EMAIL_NOT_VERIFIED (gövde Map/String/HTML olabilir)
+        if (dioExceptionBodyContains(e, 'EMAIL_NOT_VERIFIED')) {
+          throw EmailNotVerifiedException(idToken);
+        }
+        rethrow;
+      }
+    } on EmailNotVerifiedException {
+      rethrow;
     } on FirebaseAuthException catch (e) {
       throw _handleFirebaseError(e);
-    } on DioException catch (e) {
+    } on DioException {
       rethrow;
-    } on Exception catch (e) {
+    } on Exception {
       rethrow;
     } catch (e) {
       throw Exception(e.toString());
@@ -134,6 +151,24 @@ class AuthService {
     } catch (e) {
       throw Exception(e.toString());
     }
+  }
+
+  /// E-posta doğrulama kodunu backend'e gönderir.
+  Future<UserResponseDto> verifyEmail(String code) async {
+    final user = _firebaseAuth.currentUser;
+    if (user == null) throw Exception('User not authenticated');
+    final token = await user.getIdToken();
+    if (token == null) throw Exception('Failed to get Firebase ID token');
+    return _authRepository.verifyEmail(token, code);
+  }
+
+  /// Doğrulama e-postasını yeniden gönderir.
+  Future<void> resendVerification() async {
+    final user = _firebaseAuth.currentUser;
+    if (user == null) throw Exception('User not authenticated');
+    final token = await user.getIdToken();
+    if (token == null) throw Exception('Failed to get Firebase ID token');
+    return _authRepository.resendVerification(token);
   }
 
   /// Şifre değiştirir (Firebase Auth)

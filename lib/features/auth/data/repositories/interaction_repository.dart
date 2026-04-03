@@ -1,10 +1,30 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import '../../../../core/config/api_config.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/utils/exceptions.dart';
+import '../models/conversation_dto.dart';
 import '../models/product_dto.dart';
 
 class InteractionRepository {
   final ApiClient _apiClient = ApiClient();
+
+  /// GET /api/interactions/... public uçlar: global Authorization (özellikle doğrulanmamış
+  /// kullanıcıda) Spring filtresinde 401 üretebiliyor; bu isteklerde header göndermeyiz.
+  Dio? _publicDio;
+  Dio get _publicDioInstance {
+    return _publicDio ??= Dio(
+      BaseOptions(
+        baseUrl: ApiConfig.baseUrl,
+        connectTimeout: const Duration(seconds: 30),
+        receiveTimeout: const Duration(seconds: 30),
+        headers: const {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      ),
+    );
+  }
 
   /// Product'a like/unlike yapar
   /// Returns: { "liked": true/false }
@@ -258,6 +278,123 @@ class InteractionRepository {
         throw Exception(errorMessage);
       }
       throw Exception('Network error: ${e.message}');
+    }
+  }
+
+  // ─── Follow ──────────────────────────────────────────────────────────────
+
+  /// Takip et / takibi bırak (toggle). Returns: { "following": true|false }
+  /// 401 → UnauthorizedException, 400 → Exception(message)
+  Future<bool> toggleFollow(String firebaseIdToken, String userId) async {
+    try {
+      _apiClient.setAuthToken(firebaseIdToken);
+      final response = await _apiClient.dio.post('/api/interactions/user/$userId/follow');
+      if (response.data is Map) {
+        return response.data['following'] as bool? ?? false;
+      }
+      return false;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) throw const UnauthorizedException();
+      final errorData = e.response?.data;
+      final msg = errorData is Map
+          ? (errorData['message'] ?? errorData['error'] ?? 'Failed to toggle follow')
+          : 'Failed to toggle follow';
+      throw Exception(msg.toString());
+    }
+  }
+
+  /// Takipçi listesi — GET /api/interactions/user/{userId}/followers?page&size
+  Future<List<ConversationUserDto>> getFollowers(
+    String userId, {
+    int page = 0,
+    int size = 20,
+  }) async {
+    try {
+      final response = await _publicDioInstance.get(
+        '/api/interactions/user/$userId/followers',
+        queryParameters: {'page': page, 'size': size},
+      );
+      final content = response.data is Map ? (response.data['content'] as List? ?? []) : [];
+      return content
+          .map((e) => ConversationUserDto.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } on DioException {
+      return [];
+    }
+  }
+
+  /// Takip edilenler listesi — GET /api/interactions/user/{userId}/following?page&size
+  Future<List<ConversationUserDto>> getFollowing(
+    String userId, {
+    int page = 0,
+    int size = 20,
+  }) async {
+    try {
+      final response = await _publicDioInstance.get(
+        '/api/interactions/user/$userId/following',
+        queryParameters: {'page': page, 'size': size},
+      );
+      final content = response.data is Map ? (response.data['content'] as List? ?? []) : [];
+      return content
+          .map((e) => ConversationUserDto.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } on DioException {
+      return [];
+    }
+  }
+
+  /// Takipçi sayısı. Returns: `{ "count": number }`
+  Future<int> getFollowerCount(String userId) async {
+    try {
+      final response = await _publicDioInstance.get(
+        '/api/interactions/user/$userId/followers/count',
+      );
+      if (response.data is Map) return (response.data['count'] as num?)?.toInt() ?? 0;
+      return 0;
+    } on DioException {
+      return 0;
+    }
+  }
+
+  /// Takip edilen sayısı. Returns: `{ "count": number }`
+  Future<int> getFollowingCount(String userId) async {
+    try {
+      final response = await _publicDioInstance.get(
+        '/api/interactions/user/$userId/following/count',
+      );
+      if (response.data is Map) return (response.data['count'] as num?)?.toInt() ?? 0;
+      return 0;
+    } on DioException {
+      return 0;
+    }
+  }
+
+  /// Mevcut kullanıcı userId'yi takip ediyor mu? Returns: { "following": true|false }
+  Future<bool> isFollowing(String? firebaseIdToken, String userId) async {
+    bool parse(Response response) {
+      if (response.data is Map) {
+        return response.data['following'] as bool? ?? false;
+      }
+      return false;
+    }
+
+    final path = '/api/interactions/user/$userId/is-following';
+    if (firebaseIdToken != null && firebaseIdToken.isNotEmpty) {
+      try {
+        _apiClient.setAuthToken(firebaseIdToken);
+        final response = await _apiClient.dio.get(path);
+        return parse(response);
+      } on DioException catch (e) {
+        if (e.response?.statusCode != 401) {
+          return false;
+        }
+      }
+    }
+    try {
+      final response = await _publicDioInstance.get(path);
+      return parse(response);
+    } on DioException {
+      return false;
     }
   }
 
