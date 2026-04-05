@@ -1,52 +1,95 @@
 import 'package:dio/dio.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../../../core/utils/exceptions.dart';
 import '../models/user_response_dto.dart';
 import '../models/user_update_request_dto.dart';
 import '../models/register_request_dto.dart';
 import '../repositories/auth_repository.dart';
-import '../../../../core/utils/exceptions.dart';
+
+bool _dioLooksLikeNoBackendUser(DioException e) {
+  final code = e.response?.statusCode;
+  final s = dioResponseDataAsSearchString(e.response?.data).toLowerCase();
+  if (code == 404) return true;
+  if (s.contains('no_such_account') || s.contains('no such account')) {
+    return true;
+  }
+  if (s.contains('not registered') ||
+      s.contains('register first') ||
+      s.contains('unknown user')) {
+    return true;
+  }
+  if (s.contains('user') &&
+      (s.contains('not found') || s.contains('does not exist'))) {
+    return true;
+  }
+  if (s.contains('complete') && s.contains('registration')) return true;
+  if (code == 403 && (s.contains('register') || s.contains('registration'))) {
+    return true;
+  }
+  return false;
+}
 
 class AuthService {
   final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
   final AuthRepository _authRepository = AuthRepository();
 
-  /// Firebase'de email/password ile giriş yapar ve backend'e login isteği gönderir
+  /// Kayıt formundan doğrulama ekranına taşınan veri (tüm AuthService örnekleri için ortak).
+  static RegisterRequestDto? _registerFormDraft;
+
+  static void saveRegisterFormDraft(RegisterRequestDto dto) {
+    _registerFormDraft = dto;
+  }
+
+  static RegisterRequestDto? get peekRegisterFormDraft => _registerFormDraft;
+
+  static void clearRegisterFormDraft() {
+    _registerFormDraft = null;
+  }
+
+  Future<String> _getFreshIdToken(User user) async {
+    final idToken = await user.getIdToken(true);
+    if (idToken == null) {
+      throw Exception('Failed to get Firebase ID token');
+    }
+    return idToken;
+  }
+
+  Future<UserResponseDto> _backendLoginWithIdToken(String idToken) async {
+    return _authRepository.login(idToken);
+  }
+
+  /// Firebase + backend login. E-posta doğrulanmamış olsa da oturum açılır (profilde uyarı).
   Future<UserResponseDto> loginWithEmailAndPassword({
     required String email,
     required String password,
   }) async {
     try {
-      // 1. Firebase Authentication ile giriş yap
       final userCredential = await _firebaseAuth.signInWithEmailAndPassword(
         email: email.trim(),
         password: password,
       );
-
-      // 2. Firebase idToken al
-      final idToken = await userCredential.user?.getIdToken();
-      if (idToken == null) {
-        throw Exception('Failed to get Firebase ID token');
+      var user = userCredential.user;
+      if (user == null) {
+        throw Exception('Sign in failed');
+      }
+      await user.reload();
+      user = _firebaseAuth.currentUser;
+      if (user == null) {
+        throw Exception('Sign in failed');
       }
 
-      // 3. Backend'e login isteği gönder (idToken Authorization header'ında)
+      final idToken = await _getFreshIdToken(user);
       try {
-        final userDto = await _authRepository.login(idToken);
-        // Backend emailVerified: false döndürürse doğrulama sayfasına yönlendir
-        if (!userDto.isEmailVerified) {
-          throw EmailNotVerifiedException(idToken);
-        }
-        return userDto;
-      } on EmailNotVerifiedException {
-        rethrow;
+        return await _backendLoginWithIdToken(idToken);
       } on DioException catch (e) {
-        // Backend 500 + EMAIL_NOT_VERIFIED (gövde Map/String/HTML olabilir)
         if (dioExceptionBodyContains(e, 'EMAIL_NOT_VERIFIED')) {
-          throw EmailNotVerifiedException(idToken);
+          throw EmailNotVerifiedException(user.email ?? email.trim());
+        }
+        if (_dioLooksLikeNoBackendUser(e)) {
+          throw const IncompleteBackendRegistrationException();
         }
         rethrow;
       }
-    } on EmailNotVerifiedException {
-      rethrow;
     } on FirebaseAuthException catch (e) {
       throw _handleFirebaseError(e);
     } on DioException {
@@ -58,81 +101,130 @@ class AuthService {
     }
   }
 
-  /// Firebase'de email/password ile kayıt olur ve backend'e register isteği gönderir
-  Future<UserResponseDto> registerWithEmailAndPassword({
+  /// Profil / oturum öncesi token claim’lerini güncellemek için (backend gecikmesi).
+  Future<void> syncFirebaseUserAndRefreshIdToken() async {
+    final u = _firebaseAuth.currentUser;
+    if (u == null) return;
+    try {
+      await u.reload();
+    } catch (_) {}
+    await _firebaseAuth.currentUser?.getIdToken(true);
+  }
+
+  /// Adım 2–3: `POST /api/auth/register` ardından `POST /api/auth/resend-verification`.
+  /// Firebase oturumu açık olmalı (kayıt veya “profili tamamla”).
+  Future<void> postRegisterAndResendVerificationCode(
+    RegisterRequestDto request,
+  ) async {
+    final user = _firebaseAuth.currentUser;
+    if (user == null) {
+      throw Exception('Session expired. Please sign in again.');
+    }
+    final t1 = await _getFreshIdToken(user);
+    await _authRepository.register(t1, request);
+    final t2 = await _getFreshIdToken(user);
+    await _authRepository.resendVerification(t2);
+  }
+
+  /// Adım 1–3: Firebase’de kullanıcı oluşturur, backend’e kaydeder, doğrulama kodu gönderir.
+  Future<void> signUpWithEmailPasswordAndBackend({
     required String email,
     required String password,
-    required String userName,
-    required String name,
-    required String surname,
-    required String birthdate,
-    String? profilePhotoBase64,
-    String? profilePhotoMimeType,
+    required RegisterRequestDto request,
   }) async {
     try {
-      // 1. Firebase Authentication ile kayıt ol
       final userCredential = await _firebaseAuth.createUserWithEmailAndPassword(
         email: email.trim(),
         password: password,
       );
-
-      // 2. Firebase idToken al (force refresh ile yeni token al)
-      // Firebase'de kullanıcı oluşturulduktan sonra backend'in token'ı doğrulayabilmesi için delay ekle
-      await Future.delayed(const Duration(milliseconds: 1000));
-      
-      // Token'ı birkaç kez refresh etmeyi dene (bazı durumlarda ilk token henüz tam hazır olmayabilir)
-      String? idToken;
-      for (int i = 0; i < 3; i++) {
-        idToken = await userCredential.user?.getIdToken(true);
-        if (idToken != null) {
-          // Token başarıyla alındı, kısa bir delay daha ekle
-          await Future.delayed(const Duration(milliseconds: 300));
-          break;
-        }
-        // Token alınamadıysa kısa bir delay ile tekrar dene
-        await Future.delayed(const Duration(milliseconds: 200));
+      if (userCredential.user == null) {
+        throw Exception('Failed to create account');
       }
-      
-      if (idToken == null) {
-        throw Exception('Failed to get Firebase ID token');
-      }
-
-      // 3. RegisterRequestDto oluştur
-      final registerRequest = RegisterRequestDto(
-        userName: userName,
-        name: name,
-        surname: surname,
-        birthdate: birthdate,
-        profilePhotoBase64: profilePhotoBase64,
-        profilePhotoMimeType: profilePhotoMimeType,
-      );
-
-      // 4. Backend'e register isteği gönder (idToken Authorization header'ında, RegisterRequestDto request body'de)
-      final userDto = await _authRepository.register(idToken, registerRequest);
-      return userDto;
+      await postRegisterAndResendVerificationCode(request);
     } on FirebaseAuthException catch (e) {
       throw _handleFirebaseError(e);
-    } catch (e) {
-      throw Exception(e.toString());
+    }
+  }
+
+  /// Başka kullanıcı (mesaj / liste avatarı için). Uç yoksa null.
+  Future<UserResponseDto?> getUserById(String userId) async {
+    final user = _firebaseAuth.currentUser;
+    if (user == null) return null;
+    try {
+      final idToken = await _getFreshIdToken(user);
+      return _authRepository.getUserById(idToken, userId);
+    } catch (_) {
+      return null;
     }
   }
 
   /// Me endpoint - Authenticated user bilgilerini getirir
+  ///
+  /// `EMAIL_NOT_VERIFIED` dönerse verify tamamlanana kadar [login] çağrılmaz; minimal profil döner.
   Future<UserResponseDto> getMe() async {
-    try {
-      final user = _firebaseAuth.currentUser;
-      if (user == null) {
-        throw Exception('User not authenticated');
-      }
+    final user = _firebaseAuth.currentUser;
+    if (user == null) {
+      throw Exception('User not authenticated');
+    }
 
-      final idToken = await user.getIdToken();
-      if (idToken == null) {
-        throw Exception('Failed to get Firebase ID token');
-      }
+    try {
+      await user.reload();
+    } catch (_) {}
+
+    Future<String?> freshToken() async => user.getIdToken(true);
+
+    var idToken = await freshToken();
+    if (idToken == null) {
+      throw Exception('Failed to get Firebase ID token');
+    }
+
+    try {
       return await _authRepository.getMe(idToken);
     } catch (e) {
-      throw Exception(e.toString());
+      final buf = StringBuffer(e.toString());
+      if (e is DioException) {
+        buf.write(dioResponseDataAsSearchString(e.response?.data));
+      }
+      final msg = buf.toString().toUpperCase();
+      if (msg.contains('EMAIL_NOT_VERIFIED')) {
+        return _fallbackUserWhenMeBlocked(user);
+      }
+      if (msg.contains('NO_SUCH')) {
+        try {
+          await user.reload();
+          idToken = await freshToken();
+          if (idToken == null) {
+            return _fallbackUserWhenMeBlocked(user);
+          }
+          return await _authRepository.login(idToken);
+        } catch (e2) {
+          final buf2 = StringBuffer(e2.toString());
+          if (e2 is DioException) {
+            buf2.write(dioResponseDataAsSearchString(e2.response?.data));
+          }
+          final m2 = buf2.toString().toUpperCase();
+          if (m2.contains('NO_SUCH')) {
+            return _fallbackUserWhenMeBlocked(user);
+          }
+          rethrow;
+        }
+      }
+      rethrow;
     }
+  }
+
+  UserResponseDto _fallbackUserWhenMeBlocked(User firebaseUser) {
+    final email = firebaseUser.email ?? '';
+    final local =
+        email.contains('@') ? email.split('@').first.trim() : email.trim();
+    final nameFromEmail = local.isNotEmpty ? local : 'User';
+    final dn = firebaseUser.displayName?.trim();
+    return UserResponseDto(
+      id: '',
+      email: email,
+      userName: (dn != null && dn.isNotEmpty) ? dn : nameFromEmail,
+      emailVerified: firebaseUser.emailVerified,
+    );
   }
 
   /// Me update endpoint - User bilgilerini günceller
@@ -143,10 +235,7 @@ class AuthService {
         throw Exception('User not authenticated');
       }
 
-      final idToken = await user.getIdToken();
-      if (idToken == null) {
-        throw Exception('Failed to get Firebase ID token');
-      }
+      final idToken = await _getFreshIdToken(user);
       return await _authRepository.updateMe(idToken, request);
     } catch (e) {
       throw Exception(e.toString());
@@ -157,8 +246,7 @@ class AuthService {
   Future<UserResponseDto> verifyEmail(String code) async {
     final user = _firebaseAuth.currentUser;
     if (user == null) throw Exception('User not authenticated');
-    final token = await user.getIdToken();
-    if (token == null) throw Exception('Failed to get Firebase ID token');
+    final token = await _getFreshIdToken(user);
     return _authRepository.verifyEmail(token, code);
   }
 
@@ -166,8 +254,7 @@ class AuthService {
   Future<void> resendVerification() async {
     final user = _firebaseAuth.currentUser;
     if (user == null) throw Exception('User not authenticated');
-    final token = await user.getIdToken();
-    if (token == null) throw Exception('Failed to get Firebase ID token');
+    final token = await _getFreshIdToken(user);
     return _authRepository.resendVerification(token);
   }
 
@@ -212,10 +299,7 @@ class AuthService {
         throw Exception('User not authenticated');
       }
 
-      final idToken = await user.getIdToken();
-      if (idToken == null) {
-        throw Exception('Failed to get Firebase ID token');
-      }
+      final idToken = await _getFreshIdToken(user);
 
       // Backend'de hesabı sil
       await _authRepository.deleteMe(idToken);

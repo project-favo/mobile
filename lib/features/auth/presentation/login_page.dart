@@ -6,8 +6,8 @@ import '../../../core/widgets/app_input.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/exceptions.dart';
-import '../data/services/auth_service.dart';
 import 'email_verification_page.dart';
+import '../data/services/auth_service.dart';
 
 
 class LoginPage extends StatefulWidget {
@@ -83,18 +83,30 @@ class _LoginPageState extends State<LoginPage> {
         password: _password.text,
       );
 
+      AuthService.clearRegisterFormDraft();
+
       if (mounted) {
         Navigator.pushReplacementNamed(context, AppRoutes.home);
       }
-    } on EmailNotVerifiedException {
-      // E-posta doğrulanmamış → doğrulama sayfasına yönlendir
+    } on EmailNotVerifiedException catch (e) {
       if (mounted) {
+        setState(() => _isLoading = false);
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => EmailVerificationPage(email: _email.text.trim()),
+            builder: (_) => EmailVerificationPage(email: e.email),
           ),
         );
+      }
+    } on IncompleteBackendRegistrationException catch (_) {
+      if (mounted) {
+        setState(() {
+          _authError = ErrorHandler.getUserFriendlyMessage(
+            const IncompleteBackendRegistrationException(),
+          );
+          _isLoading = false;
+        });
+        _formKey.currentState?.validate();
       }
     } catch (e) {
       if (mounted) {

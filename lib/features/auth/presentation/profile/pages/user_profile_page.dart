@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../../../../core/theme/app_colors.dart';
@@ -6,6 +8,7 @@ import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/utils/exceptions.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
+import '../../../../../core/utils/resolve_media_url.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
 import '../../../../../routes/app_routes.dart';
 import '../../../data/models/review_dto.dart';
@@ -39,6 +42,7 @@ class _UserProfilePageState extends State<UserProfilePage>
   final InteractionRepository _interactionRepo = InteractionRepository();
   final ReviewRepository _reviewRepo = ReviewRepository();
   final SessionHelper _sessionHelper = SessionHelper();
+  final AuthService _authService = AuthService();
 
   late TabController _tabController;
   String _selectedDateSort = 'Newest';
@@ -52,6 +56,8 @@ class _UserProfilePageState extends State<UserProfilePage>
   bool _isLoadingCounts = true;
   /// Görünen profil fotoğrafı (parametre veya yorum listesinden)
   String? _avatarImageUrl;
+  Uint8List? _avatarMemoryBytes;
+  String? _avatarPhotoDataRaw;
 
   @override
   void initState() {
@@ -64,7 +70,7 @@ class _UserProfilePageState extends State<UserProfilePage>
   /// Kendi kullanıcı kartına gidilmesin; deep link / hata durumunda kapat.
   Future<void> _start() async {
     try {
-      final me = await AuthService().getMe();
+      final me = await _authService.getMe();
       if (!mounted) return;
       if (me.id.trim() == widget.userId.trim()) {
         Navigator.of(context).pop();
@@ -73,6 +79,38 @@ class _UserProfilePageState extends State<UserProfilePage>
     } catch (_) {}
     if (!mounted) return;
     await _loadAll();
+    if (mounted) await _enrichProfileFromApi();
+  }
+
+  Future<void> _enrichProfileFromApi() async {
+    try {
+      final u = await _authService.getUserById(widget.userId);
+      if (u != null && mounted) {
+        final bytes = decodeProfilePhotoBytes(u.profilePhotoData);
+        setState(() {
+          final url = u.profileImageUrl?.trim();
+          if (url != null && url.isNotEmpty) _avatarImageUrl = url;
+          if (bytes != null && bytes.isNotEmpty) _avatarMemoryBytes = bytes;
+          if (u.profilePhotoData != null &&
+              u.profilePhotoData!.trim().isNotEmpty) {
+            _avatarPhotoDataRaw = u.profilePhotoData;
+          }
+        });
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    final noUrl = _avatarImageUrl == null || _avatarImageUrl!.trim().isEmpty;
+    final noMem =
+        _avatarMemoryBytes == null || _avatarMemoryBytes!.isEmpty;
+    if (noUrl && noMem) {
+      for (final r in _reviews) {
+        final u = r.ownerProfilePhotoUrl?.trim();
+        if (u != null && u.isNotEmpty) {
+          setState(() => _avatarImageUrl = u);
+          break;
+        }
+      }
+    }
   }
 
   @override
@@ -117,8 +155,14 @@ class _UserProfilePageState extends State<UserProfilePage>
       );
       if (!mounted) return;
       String? avatar = _avatarImageUrl;
-      if ((avatar == null || avatar.isEmpty) && reviews.isNotEmpty) {
-        avatar = reviews.first.ownerProfilePhotoUrl;
+      if (avatar == null || avatar.isEmpty) {
+        for (final r in reviews) {
+          final u = r.ownerProfilePhotoUrl?.trim();
+          if (u != null && u.isNotEmpty) {
+            avatar = u;
+            break;
+          }
+        }
       }
       setState(() {
         _reviews = reviews;
@@ -157,9 +201,13 @@ class _UserProfilePageState extends State<UserProfilePage>
     setState(() => _isFollowLoading = true);
     try {
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) throw Exception('Takip etmek için giriş yapmalısınız.');
+      if (user == null) {
+        throw Exception('Sign in to follow or unfollow users.');
+      }
       final token = await user.getIdToken(true);
-      if (token == null) throw Exception('Takip etmek için giriş yapmalısınız.');
+      if (token == null) {
+        throw Exception('Sign in to follow or unfollow users.');
+      }
       final nowFollowing = await _interactionRepo.toggleFollow(token, widget.userId);
       if (!mounted) return;
       setState(() {
@@ -191,6 +239,7 @@ class _UserProfilePageState extends State<UserProfilePage>
         id: recipientId,
         username: widget.userName,
         profilePhotoUrl: _avatarImageUrl ?? widget.profileImageUrl,
+        profilePhotoData: _avatarPhotoDataRaw,
       ),
       lastMessage: '',
       lastMessageAt: '',
@@ -213,7 +262,7 @@ class _UserProfilePageState extends State<UserProfilePage>
       SlideRightRoute(
         page: FollowListPage(
           userId: widget.userId,
-          title: 'Takipçiler',
+          title: 'Followers',
           isFollowers: true,
         ),
       ),
@@ -226,7 +275,7 @@ class _UserProfilePageState extends State<UserProfilePage>
       SlideRightRoute(
         page: FollowListPage(
           userId: widget.userId,
-          title: 'Takip Edilenler',
+          title: 'Following',
           isFollowers: false,
         ),
       ),
@@ -253,7 +302,7 @@ class _UserProfilePageState extends State<UserProfilePage>
           IconButton(
             icon: const Icon(Icons.chat_bubble_outline),
             color: AppColors.primary,
-            tooltip: 'Mesaj',
+            tooltip: 'Message',
             onPressed: _openChat,
           ),
         ],
@@ -269,6 +318,7 @@ class _UserProfilePageState extends State<UserProfilePage>
               ProfileAvatar(
                 radius: 50,
                 imageUrl: _avatarImageUrl ?? widget.profileImageUrl,
+                memoryBytes: _avatarMemoryBytes,
                 fallbackInitial: widget.userName,
               ),
               const SizedBox(height: AppSpacing.large),
@@ -293,7 +343,7 @@ class _UserProfilePageState extends State<UserProfilePage>
                           onTap: _openFollowerList,
                           child: _StatItem(
                             count: _followerCount,
-                            label: 'Takipçi',
+                            label: 'Followers',
                           ),
                         ),
                         const SizedBox(width: AppSpacing.xxLarge),
@@ -301,19 +351,19 @@ class _UserProfilePageState extends State<UserProfilePage>
                           onTap: _openFollowingList,
                           child: _StatItem(
                             count: _followingCount,
-                            label: 'Takip',
+                            label: 'Following',
                           ),
                         ),
                         const SizedBox(width: AppSpacing.xxLarge),
                         _StatItem(
                           count: _isLoadingReviews ? 0 : _reviews.length,
-                          label: 'Yorum',
+                          label: 'Reviews',
                         ),
                       ],
                     ),
               const SizedBox(height: AppSpacing.large),
               SizedBox(
-                width: 160,
+                width: 200,
                 child: ElevatedButton(
                   onPressed: _isFollowLoading ? null : _toggleFollow,
                   style: ElevatedButton.styleFrom(
@@ -342,8 +392,12 @@ class _UserProfilePageState extends State<UserProfilePage>
                           ),
                         )
                       : Text(
-                          _isFollowing ? 'Takip Ediliyor' : 'Takip Et',
-                          style: AppTextStyles.button,
+                          _isFollowing ? 'Unfollow' : 'Follow',
+                          style: AppTextStyles.button.copyWith(
+                            color: _isFollowing
+                                ? AppColors.primary
+                                : Colors.white,
+                          ),
                         ),
                 ),
               ),
@@ -379,7 +433,7 @@ class _UserProfilePageState extends State<UserProfilePage>
                 indicatorColor: AppColors.primary,
                 indicatorWeight: 2,
                 tabs: const [
-                  Tab(text: 'Yorumları'),
+                  Tab(text: 'Reviews'),
                 ],
               ),
               const SizedBox(height: AppSpacing.large),
@@ -416,7 +470,7 @@ class _UserProfilePageState extends State<UserProfilePage>
                 Padding(
                   padding: const EdgeInsets.all(AppSpacing.xLarge),
                   child: Text(
-                    'Henüz yorum yok.',
+                    'No reviews yet.',
                     style: AppTextStyles.bodySecondary,
                   ),
                 )

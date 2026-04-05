@@ -127,7 +127,9 @@ class _FollowListPageState extends State<FollowListPage> {
                   child: Padding(
                     padding: const EdgeInsets.all(AppSpacing.xLarge),
                     child: Text(
-                      widget.isFollowers ? 'Henüz takipçi yok.' : 'Henüz takip edilen yok.',
+                      widget.isFollowers
+                          ? 'No followers yet.'
+                          : 'Not following anyone yet.',
                       style: AppTextStyles.bodySecondary,
                     ),
                   ),

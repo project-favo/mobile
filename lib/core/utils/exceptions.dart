@@ -23,13 +23,20 @@ bool dioExceptionBodyContains(DioException e, String needle) {
 }
 
 /// Login sırasında backend EMAIL_NOT_VERIFIED döndürdüğünde fırlatılır.
-/// [firebaseIdToken] doğrulama sayfasında kullanmak için taşınır.
 class EmailNotVerifiedException implements Exception {
-  final String firebaseIdToken;
-  const EmailNotVerifiedException(this.firebaseIdToken);
+  final String email;
+  const EmailNotVerifiedException(this.email);
 
   @override
   String toString() => 'EmailNotVerifiedException';
+}
+
+/// Firebase Auth’ta e-posta henüz doğrulanmamış (gelen kutusundaki bağlantı).
+class FirebaseEmailNotVerifiedException implements Exception {
+  const FirebaseEmailNotVerifiedException();
+
+  @override
+  String toString() => 'FirebaseEmailNotVerifiedException';
 }
 
 /// 401 Unauthorized — kullanıcı giriş yapmamış ya da token süresi dolmuş.
@@ -38,4 +45,12 @@ class UnauthorizedException implements Exception {
 
   @override
   String toString() => 'UnauthorizedException';
+}
+
+/// Firebase oturumu var ama backend’de kayıt yok (kayıt akışı yarım kaldı).
+class IncompleteBackendRegistrationException implements Exception {
+  const IncompleteBackendRegistrationException();
+
+  @override
+  String toString() => 'IncompleteBackendRegistrationException';
 }

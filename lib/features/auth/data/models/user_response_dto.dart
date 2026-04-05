@@ -27,18 +27,125 @@ class UserResponseDto {
   /// Backend: null → legacy (verified), false → not verified, true → verified
   bool get isEmailVerified => emailVerified != false;
 
-  factory UserResponseDto.fromJson(Map<String, dynamic> json) {
+  /// URL veya base64 ile doldurulmuş görsel var mı (mesajlaşma / profil).
+  bool get hasProfileAvatarVisual {
+    final u = profileImageUrl?.trim();
+    if (u != null && u.isNotEmpty) return true;
+    final d = profilePhotoData?.trim();
+    return d != null && d.isNotEmpty;
+  }
+
+  /// `/api/auth/me` seyrek dönerse; `/api/users/{id}` vb. ile gelen avatarı birleştirir.
+  UserResponseDto withFilledAvatarFrom(UserResponseDto? other) {
+    if (other == null) return this;
+    if (hasProfileAvatarVisual) return this;
+    if (!other.hasProfileAvatarVisual) return this;
     return UserResponseDto(
-      id: json['id']?.toString() ?? '',
-      email: json['email']?.toString() ?? '',
-      userName: json['userName']?.toString() ?? '',
-      name: json['name']?.toString(),
-      surname: json['surname']?.toString(),
-      birthdate: json['birthdate']?.toString(),
-      profileImageUrl: json['profileImageUrl']?.toString(),
-      profilePhotoData: json['profilePhotoData']?.toString(),
-      profilePhotoMimeType: json['profilePhotoMimeType']?.toString(),
-      emailVerified: json['emailVerified'] as bool?,
+      id: id,
+      email: email,
+      userName: userName,
+      name: name,
+      surname: surname,
+      birthdate: birthdate,
+      profileImageUrl: other.profileImageUrl,
+      profilePhotoData: other.profilePhotoData,
+      profilePhotoMimeType: other.profilePhotoMimeType ?? profilePhotoMimeType,
+      emailVerified: emailVerified,
+    );
+  }
+
+  static Map<String, dynamic> _asUserMap(Map<String, dynamic> json) {
+    bool looksLikeUser(Map<String, dynamic> m) =>
+        m.containsKey('email') ||
+        m.containsKey('userName') ||
+        m.containsKey('username') ||
+        m.containsKey('id') ||
+        m.containsKey('userId') ||
+        m.containsKey('user_id');
+
+    if (looksLikeUser(json)) return json;
+    final u = json['user'];
+    if (u is Map<String, dynamic> && looksLikeUser(u)) return u;
+    final d = json['data'];
+    if (d is Map<String, dynamic> && looksLikeUser(d)) return d;
+    return json;
+  }
+
+  /// Backend `id` / `userId` / sayısal id farkları
+  static String _coerceUserId(Map<String, dynamic> m) {
+    for (final k in ['id', 'userId', 'user_id', 'uuid']) {
+      final v = m[k];
+      if (v == null) continue;
+      final s = v.toString().trim();
+      if (s.isNotEmpty) return s;
+    }
+    return '';
+  }
+
+  static String? _firstString(Map<String, dynamic> m, List<String> keys) {
+    for (final k in keys) {
+      final v = m[k];
+      if (v == null) continue;
+      final s = v.toString().trim();
+      if (s.isNotEmpty) return s;
+    }
+    return null;
+  }
+
+  /// `profilePhoto` bazen URL, bazen base64 olabiliyor.
+  static ({String? url, String? data}) _splitProfilePhoto(String? raw) {
+    if (raw == null) return (url: null, data: null);
+    final t = raw.trim();
+    if (t.isEmpty) return (url: null, data: null);
+    final lower = t.toLowerCase();
+    if (lower.startsWith('http://') ||
+        lower.startsWith('https://') ||
+        t.startsWith('/') ||
+        lower.startsWith('data:image/')) {
+      return (url: t, data: null);
+    }
+    return (url: null, data: t);
+  }
+
+  factory UserResponseDto.fromJson(Map<String, dynamic> json) {
+    final m = _asUserMap(json);
+
+    String? imageUrl = _firstString(m, [
+      'profileImageUrl',
+      'profilePhotoUrl',
+      'avatarUrl',
+      'photoUrl',
+      'imageUrl',
+      'profilePicture',
+      'picture',
+    ]);
+
+    String? photoData = _firstString(m, [
+      'profilePhotoData',
+      'avatarBase64',
+      'photoData',
+    ]);
+
+    final mime = _firstString(m, ['profilePhotoMimeType', 'profileImageMimeType']);
+
+    final genericPhoto = m['profilePhoto']?.toString().trim();
+    if (genericPhoto != null && genericPhoto.isNotEmpty) {
+      final split = _splitProfilePhoto(genericPhoto);
+      imageUrl ??= split.url;
+      photoData ??= split.data;
+    }
+
+    return UserResponseDto(
+      id: _coerceUserId(m),
+      email: m['email']?.toString() ?? '',
+      userName: _firstString(m, ['userName', 'username', 'user_name']) ?? '',
+      name: m['name']?.toString(),
+      surname: m['surname']?.toString(),
+      birthdate: m['birthdate']?.toString(),
+      profileImageUrl: imageUrl,
+      profilePhotoData: photoData,
+      profilePhotoMimeType: mime,
+      emailVerified: m['emailVerified'] as bool?,
     );
   }
 
@@ -57,4 +164,3 @@ class UserResponseDto {
     };
   }
 }
-

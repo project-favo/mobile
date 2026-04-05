@@ -12,7 +12,18 @@ import '../data/services/auth_service.dart';
 class EmailVerificationPage extends StatefulWidget {
   final String email;
 
-  const EmailVerificationPage({super.key, required this.email});
+  /// Ayarlardan opsiyonel doğrulama: doğrulama sonrası `POST /login` çağrılmaz.
+  final bool onlyVerifyNoBackendLogin;
+
+  /// `true`: doğrulama (+ gerekirse login) sonrası `Navigator.pop(context, true)`.
+  final bool popOnSuccessWithResult;
+
+  const EmailVerificationPage({
+    super.key,
+    required this.email,
+    this.onlyVerifyNoBackendLogin = false,
+    this.popOnSuccessWithResult = false,
+  });
 
   @override
   State<EmailVerificationPage> createState() => _EmailVerificationPageState();
@@ -74,7 +85,22 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
         _startCooldown();
         setState(() => _errorMessage = 'Lütfen 60 saniye bekleyin.');
       } else if (msg == 'ALREADY_VERIFIED') {
-        if (mounted) Navigator.pushReplacementNamed(context, AppRoutes.home);
+        if (widget.onlyVerifyNoBackendLogin) {
+          if (mounted) Navigator.pop(context, true);
+        } else {
+          await SessionHelper().refreshSession();
+          if (!mounted) return;
+          if (widget.popOnSuccessWithResult) {
+            Navigator.pop(context, true);
+          } else {
+            AuthService.clearRegisterFormDraft();
+            Navigator.pushNamedAndRemoveUntil(
+              context,
+              AppRoutes.home,
+              (r) => false,
+            );
+          }
+        }
       } else {
         setState(() => _errorMessage = msg);
       }
@@ -92,10 +118,18 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
     setState(() { _isVerifying = true; _errorMessage = null; });
     try {
       await _authService.verifyEmail(code);
-      // Önerilen akış: doğrulama sonrası POST /api/auth/login ile backend oturumu
+      if (widget.onlyVerifyNoBackendLogin) {
+        if (mounted) Navigator.pop(context, true);
+        return;
+      }
       await SessionHelper().refreshSession();
       if (!mounted) return;
-      Navigator.pushReplacementNamed(context, AppRoutes.home);
+      if (widget.popOnSuccessWithResult) {
+        Navigator.pop(context, true);
+      } else {
+        AuthService.clearRegisterFormDraft();
+        Navigator.pushNamedAndRemoveUntil(context, AppRoutes.home, (r) => false);
+      }
     } catch (e) {
       if (!mounted) return;
       final msg = e.toString().replaceFirst('Exception: ', '');
@@ -126,7 +160,14 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
         iconTheme: const IconThemeData(color: AppColors.primary),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pushReplacementNamed(context, AppRoutes.login),
+          onPressed: () {
+            if (widget.popOnSuccessWithResult ||
+                widget.onlyVerifyNoBackendLogin) {
+              Navigator.pop(context);
+            } else {
+              Navigator.pushReplacementNamed(context, AppRoutes.login);
+            }
+          },
         ),
       ),
       body: GestureDetector(

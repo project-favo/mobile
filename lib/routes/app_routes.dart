@@ -5,7 +5,8 @@ import '../features/auth/presentation/home_page.dart';
 import '../features/auth/presentation/onboarding_page.dart';
 
 class AppRoutes {
-  static const onboarding = '/';
+  /// [MaterialApp.home] kullanıldığı için `/` routes tablosunda olamaz; çakışmayı önler.
+  static const onboarding = '/onboarding';
   static const login = '/login';
   static const register = '/register';
   static const home = '/home';

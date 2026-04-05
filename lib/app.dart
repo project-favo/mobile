@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'routes/app_routes.dart';
 import 'core/theme/app_theme.dart';
+import 'features/auth/presentation/auth_splash_gate.dart';
 
 class MyApp extends StatelessWidget {
-  final String initialRoute;
+  final bool onboardingCompleted;
 
   const MyApp({
     super.key,
-    required this.initialRoute,
+    required this.onboardingCompleted,
   });
 
   @override
@@ -16,8 +17,8 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Favo',
       theme: AppTheme.lightTheme,
-      initialRoute: initialRoute,
       routes: AppRoutes.routes,
+      home: AuthSplashGate(onboardingCompleted: onboardingCompleted),
     );
   }
 }

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:stomp_dart_client/stomp_dart_client.dart';
@@ -9,6 +10,7 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/utils/error_handler.dart';
 import '../../../../core/utils/session_helper.dart';
 import '../../../../core/config/api_config.dart';
+import '../../../../core/utils/resolve_media_url.dart';
 import '../../data/repositories/message_repository.dart';
 import '../../data/models/conversation_dto.dart';
 import '../../data/models/message_dto.dart';
@@ -30,6 +32,7 @@ class ChatDetailPage extends StatefulWidget {
 class _ChatDetailPageState extends State<ChatDetailPage> {
   final SessionHelper _sessionHelper = SessionHelper();
   final MessageRepository _messageRepository = MessageRepository();
+  final AuthService _authService = AuthService();
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _inputFocusNode = FocusNode();
@@ -41,7 +44,11 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   List<MessageDto> _messages = [];
   int? _currentUserId;
   String? _myAvatarUrl;
+  Uint8List? _myAvatarBytes;
   String? _myInitial;
+  late final Uint8List? _inlineOtherBytes;
+  String? _resolvedOtherUrl;
+  Uint8List? _resolvedOtherBytes;
   StompClient? _stompClient;
   Timer? _pollTimer;
 
@@ -49,6 +56,9 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   void initState() {
     super.initState();
     _conversationId = widget.conversation.id;
+    _inlineOtherBytes = decodeProfilePhotoBytes(
+      widget.conversation.otherParticipant.profilePhotoData,
+    );
     _init();
     _inputFocusNode.addListener(() {
       if (_inputFocusNode.hasFocus) {
@@ -65,18 +75,24 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       }
       // Backend current user id'yi al (senderId ile karşılaştırmak için)
       try {
-        final authService = AuthService();
-        final me = await authService.getMe();
+        var me = await _authService.getMe();
+        if (!me.hasProfileAvatarVisual && me.id.isNotEmpty) {
+          final extra = await _authService.getUserById(me.id);
+          me = me.withFilledAvatarFrom(extra);
+        }
         _currentUserId = int.tryParse(me.id);
         _myAvatarUrl = me.profileImageUrl;
+        _myAvatarBytes = decodeProfilePhotoBytes(me.profilePhotoData);
         _myInitial = me.userName.isNotEmpty ? me.userName[0].toUpperCase() : '?';
       } catch (_) {}
+      await _bootstrapExistingConversationIfNeeded();
+      await _enrichOtherParticipant();
       if (_conversationId > 0) {
         _connectStomp(token);
         await _loadMessages();
         _startPolling();
       } else {
-        // New conversation — show empty chat, wait for first message
+        // Yeni konuşma (henüz backend’de yok) — ilk mesajı bekler
         if (mounted) setState(() => _isLoading = false);
       }
     } catch (e) {
@@ -87,6 +103,74 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       });
     }
   }
+
+  /// Profil / sentetik konuşmadan açıldıysa, liste API’sinde zaten var olan thread’i bulur.
+  Future<void> _bootstrapExistingConversationIfNeeded() async {
+    if (_conversationId > 0) return;
+    final rid = widget.recipientId;
+    if (rid == null || rid <= 0) return;
+
+    for (var page = 0; page < 6; page++) {
+      try {
+        final result =
+            await _messageRepository.getConversations(page: page, size: 50);
+        for (final c in result.content) {
+          if (c.otherParticipant.id != rid) continue;
+          if (c.id > 0) {
+            _conversationId = c.id;
+          }
+          final op = c.otherParticipant;
+          final url = op.profilePhotoUrl?.trim();
+          final bytes = decodeProfilePhotoBytes(op.profilePhotoData);
+          final hasListAvatar = (url != null && url.isNotEmpty) ||
+              (bytes != null && bytes.isNotEmpty);
+          if (hasListAvatar && mounted) {
+            setState(() {
+              _resolvedOtherUrl ??= url;
+              _resolvedOtherBytes ??= bytes;
+            });
+          }
+          return;
+        }
+        if (result.last || result.content.isEmpty) break;
+      } catch (_) {
+        break;
+      }
+    }
+  }
+
+  bool _otherParticipantHasLoadableVisual(ConversationUserDto op) {
+    final url = op.profilePhotoUrl?.trim();
+    if (url != null && url.isNotEmpty) return true;
+    final inline = _inlineOtherBytes;
+    if (inline != null && inline.isNotEmpty) return true;
+    return false;
+  }
+
+  Future<void> _enrichOtherParticipant() async {
+    final op = widget.conversation.otherParticipant;
+    if (_otherParticipantHasLoadableVisual(op)) return;
+    if (op.id <= 0) return;
+    try {
+      final u = await _authService.getUserById(op.id.toString());
+      if (u == null || !mounted) return;
+      final bytes = decodeProfilePhotoBytes(u.profilePhotoData);
+      final url = u.profileImageUrl?.trim();
+      if ((url != null && url.isNotEmpty) ||
+          (bytes != null && bytes.isNotEmpty)) {
+        setState(() {
+          _resolvedOtherUrl = url;
+          _resolvedOtherBytes = bytes;
+        });
+      }
+    } catch (_) {}
+  }
+
+  String? get _effectiveOtherUrl =>
+      _resolvedOtherUrl ?? widget.conversation.otherParticipant.profilePhotoUrl;
+
+  Uint8List? get _effectiveOtherBytes =>
+      _resolvedOtherBytes ?? _inlineOtherBytes;
 
   Future<void> _loadMessages() async {
     setState(() {
@@ -255,7 +339,8 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
         : '?';
     return ProfileAvatarImage(
       size: size,
-      imageUrl: widget.conversation.otherParticipant.profilePhotoUrl,
+      imageUrl: _effectiveOtherUrl,
+      memoryBytes: _effectiveOtherBytes,
       fallbackInitial: initial,
     );
   }
@@ -264,6 +349,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     return ProfileAvatarImage(
       size: size,
       imageUrl: _myAvatarUrl,
+      memoryBytes: _myAvatarBytes,
       fallbackInitial: _myInitial ?? '?',
     );
   }
@@ -286,7 +372,8 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
           children: [
             ProfileAvatarImage(
               size: 32,
-              imageUrl: widget.conversation.otherParticipant.profilePhotoUrl,
+              imageUrl: _effectiveOtherUrl,
+              memoryBytes: _effectiveOtherBytes,
               fallbackInitial: widget.conversation.otherParticipant.username,
             ),
             const SizedBox(width: 8),

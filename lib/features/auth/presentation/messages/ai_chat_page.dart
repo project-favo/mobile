@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:dio/dio.dart';
@@ -7,6 +9,7 @@ import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
+import '../../../../../core/utils/resolve_media_url.dart';
 import '../../../../../core/network/api_client.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
 import '../../data/services/auth_service.dart';
@@ -32,6 +35,7 @@ class _AiChatPageState extends State<AiChatPage>
   bool _isSending = false;
   late final AnimationController _logoController;
   String? _userAvatarUrl;
+  Uint8List? _userAvatarBytes;
   String? _userInitial;
 
   final List<_AiMessage> _messages = [
@@ -60,10 +64,15 @@ class _AiChatPageState extends State<AiChatPage>
 
   Future<void> _loadMe() async {
     try {
-      final me = await _authService.getMe();
+      var me = await _authService.getMe();
+      if (!me.hasProfileAvatarVisual && me.id.isNotEmpty) {
+        final extra = await _authService.getUserById(me.id);
+        me = me.withFilledAvatarFrom(extra);
+      }
       if (!mounted) return;
       setState(() {
         _userAvatarUrl = me.profileImageUrl;
+        _userAvatarBytes = decodeProfilePhotoBytes(me.profilePhotoData);
         _userInitial =
             (me.userName.isNotEmpty) ? me.userName[0].toUpperCase() : '?';
       });
@@ -206,6 +215,7 @@ class _AiChatPageState extends State<AiChatPage>
     return ProfileAvatarImage(
       size: size,
       imageUrl: _userAvatarUrl,
+      memoryBytes: _userAvatarBytes,
       fallbackInitial: _userInitial ?? '?',
     );
   }

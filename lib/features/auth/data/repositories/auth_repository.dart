@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import '../../../../core/config/api_config.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/utils/exceptions.dart';
 import '../models/user_response_dto.dart';
 import '../models/user_update_request_dto.dart';
 import '../models/register_request_dto.dart';
@@ -69,6 +70,38 @@ class AuthRepository {
     }
   }
 
+  /// Başka kullanıcının profili (avatar için). Backend path’i yoksa null döner.
+  Future<UserResponseDto?> getUserById(
+    String firebaseIdToken,
+    String userId,
+  ) async {
+    final paths = <String>[
+      '/api/users/$userId',
+      '/api/auth/user/$userId',
+      '/api/auth/users/$userId',
+    ];
+    try {
+      _apiClient.setAuthToken(firebaseIdToken);
+      for (final path in paths) {
+        try {
+          final response = await _apiClient.dio.get(path);
+          final data = response.data;
+          if (data is Map) {
+            return UserResponseDto.fromJson(
+              Map<String, dynamic>.from(data),
+            );
+          }
+        } on DioException {
+          // Bir uç 403/404 dönerse diğer path'leri dene (policy farkı sık görülür).
+          continue;
+        } catch (_) {
+          continue;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
   /// Me endpoint - Authenticated user bilgilerini getirir
   Future<UserResponseDto> getMe(String firebaseIdToken) async {
     try {
@@ -76,12 +109,26 @@ class AuthRepository {
       final response = await _apiClient.dio.get(ApiConfig.mePath);
       return UserResponseDto.fromJson(response.data);
     } on DioException catch (e) {
+      final data = e.response?.data;
+      if (data is Map) {
+        final m = Map<String, dynamic>.from(data);
+        if (m['id'] != null || m['userName'] != null || m['email'] != null) {
+          try {
+            return UserResponseDto.fromJson(m);
+          } catch (_) {}
+        }
+      }
       if (e.response != null) {
         final errorData = e.response?.data;
         final errorMessage = errorData is Map
             ? (errorData['message'] ?? errorData['error'] ?? 'Failed to get user info')
             : errorData?.toString() ?? 'Failed to get user info';
-        throw Exception(errorMessage);
+        if (dioResponseDataAsSearchString(errorData)
+            .toUpperCase()
+            .contains('EMAIL_NOT_VERIFIED')) {
+          throw Exception('EMAIL_NOT_VERIFIED');
+        }
+        throw Exception(errorMessage.toString());
       }
       throw Exception('Network error: ${e.message}');
     }

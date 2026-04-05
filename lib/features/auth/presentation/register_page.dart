@@ -8,8 +8,8 @@ import '../../../core/widgets/app_button.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/error_handler.dart';
-import '../../../core/utils/session_helper.dart';
 import '../data/services/auth_service.dart';
+import '../data/models/register_request_dto.dart';
 import 'email_verification_page.dart';
 
 class RegisterPage extends StatefulWidget {
@@ -35,6 +35,7 @@ class _RegisterPageState extends State<RegisterPage> {
   bool _obscureConfirmPassword = true;
   bool _submitted = false;
   bool _isLoading = false;
+  bool _acknowledgedEmailVerification = false;
   DateTime? _selectedDate;
   String? _registerError; // Backend'den gelen registration error
   final ImagePicker _imagePicker = ImagePicker();
@@ -237,6 +238,20 @@ class _RegisterPageState extends State<RegisterPage> {
     final ok = _formKey.currentState?.validate() ?? false;
     if (!ok) return;
 
+    if (!_acknowledgedEmailVerification) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Please confirm you will enter the 5-digit code sent to your email.',
+            ),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -249,10 +264,7 @@ class _RegisterPageState extends State<RegisterPage> {
         profilePhotoMimeType = _selectedProfilePhoto!.mimeType ?? 'image/jpeg';
       }
 
-      // Firebase Auth ile kayıt ol ve backend'e istek gönder
-      final userDto = await _authService.registerWithEmailAndPassword(
-        email: _email.text.trim(),
-        password: _password.text,
+      final registerRequest = RegisterRequestDto(
         userName: _userName.text.trim(),
         name: _name.text.trim(),
         surname: _surname.text.trim(),
@@ -260,22 +272,24 @@ class _RegisterPageState extends State<RegisterPage> {
         profilePhotoBase64: profilePhotoBase64,
         profilePhotoMimeType: profilePhotoMimeType,
       );
+      AuthService.saveRegisterFormDraft(registerRequest);
+
+      await _authService.signUpWithEmailPasswordAndBackend(
+        email: _email.text.trim(),
+        password: _password.text,
+        request: registerRequest,
+      );
 
       if (!mounted) return;
       setState(() => _isLoading = false);
-      // Yeni kullanıcı: emailVerified === false → doğrulama; legacy (null) / true → ana sayfa
-      if (!userDto.isEmailVerified) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => EmailVerificationPage(email: _email.text.trim()),
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => EmailVerificationPage(
+            email: _email.text.trim(),
           ),
-        );
-      } else {
-        await SessionHelper().refreshSession();
-        if (!mounted) return;
-        Navigator.pushReplacementNamed(context, AppRoutes.home);
-      }
+        ),
+      );
     } catch (e) {
       if (mounted) {
         final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
@@ -475,6 +489,47 @@ class _RegisterPageState extends State<RegisterPage> {
                     onToggleObscure: () => setState(
                         () => _obscureConfirmPassword = !_obscureConfirmPassword),
                     validator: _confirmPasswordValidator,
+                  ),
+
+                  const SizedBox(height: 20),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: SizedBox(
+                          height: 24,
+                          width: 24,
+                          child: Checkbox(
+                            value: _acknowledgedEmailVerification,
+                            activeColor: AppColors.primary,
+                            onChanged: (v) {
+                              setState(() {
+                                _acknowledgedEmailVerification = v ?? false;
+                              });
+                            },
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _acknowledgedEmailVerification =
+                                  !_acknowledgedEmailVerification;
+                            });
+                          },
+                          child: Text(
+                            'I understand I must enter the 5-digit verification code '
+                            'sent to my email before my account is fully active.',
+                            style: AppTextStyles.bodySecondary.copyWith(
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
 
                   const SizedBox(height: 24),

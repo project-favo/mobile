@@ -16,55 +16,50 @@ class SessionHelper {
   static const Duration _sessionValidDuration = Duration(minutes: 30);
 
   /// Ensures backend session is established
-  /// Only calls login if session is not established or expired
-  /// Returns the Firebase ID token
+  /// Firebase token is always refreshed with [getIdToken(true)]; backend login
+  /// is only repeated when the local session window expired.
   Future<String?> ensureSession() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       return null;
     }
 
-    // Get token (don't force refresh unless needed)
-    final token = await user.getIdToken();
-    if (token == null) {
+    final freshToken = await user.getIdToken(true);
+    if (freshToken == null) {
       return null;
     }
 
-    // Check if session is still valid
-    if (_sessionEstablished && 
-        _lastLoginTime != null && 
+    ApiClient().setAuthToken(freshToken);
+
+    if (_sessionEstablished &&
+        _lastLoginTime != null &&
         DateTime.now().difference(_lastLoginTime!) < _sessionValidDuration) {
-      // Session is still valid, just set the token in header
-      ApiClient().setAuthToken(token);
-      return token;
+      return freshToken;
     }
 
-    // Session expired or not established, login to backend
     try {
       final apiClient = ApiClient();
-      apiClient.setAuthToken(token);
-      
-      // Call login endpoint to establish session
       await apiClient.dio.post(
         ApiConfig.loginPath,
       );
-      
+
       _sessionEstablished = true;
       _lastLoginTime = DateTime.now();
-      
-      return token;
+
+      return freshToken;
     } on DioException catch (e) {
       if (dioExceptionBodyContains(e, 'EMAIL_NOT_VERIFIED')) {
         _sessionEstablished = false;
         _lastLoginTime = null;
-        ApiClient().setAuthToken(token);
-        return token;
+        final t = await user.getIdToken(true);
+        if (t != null) {
+          ApiClient().setAuthToken(t);
+        }
+        return t;
       }
-      // If login fails with 401/403, session might be invalid
       if (e.response?.statusCode == 401 || e.response?.statusCode == 403) {
         _sessionEstablished = false;
         _lastLoginTime = null;
-        // Try to refresh token and login again
         try {
           final refreshedToken = await user.getIdToken(true);
           if (refreshedToken != null) {
@@ -79,27 +74,23 @@ class SessionHelper {
           // Ignore refresh errors
         }
       }
-      // For other errors, assume session might still work with cookies
-      // Just set the token and continue
       _sessionEstablished = true;
       _lastLoginTime = DateTime.now();
-      return token;
+      return freshToken;
     } catch (_) {
-      // On any other error, just set token and hope cookies work
-      ApiClient().setAuthToken(token);
-      return token;
+      ApiClient().setAuthToken(freshToken);
+      return freshToken;
     }
   }
 
   /// Gets Firebase ID token and sets it in API client
-  /// Does NOT call login endpoint - assumes session exists via cookies
   Future<String?> getTokenAndSetHeader() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       return null;
     }
 
-    final token = await user.getIdToken();
+    final token = await user.getIdToken(true);
     if (token != null) {
       ApiClient().setAuthToken(token);
     }
@@ -120,4 +111,3 @@ class SessionHelper {
     return await ensureSession();
   }
 }
-

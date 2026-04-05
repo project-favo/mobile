@@ -1,13 +1,17 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/utils/error_handler.dart';
 import '../../../../core/utils/session_helper.dart';
+import '../../../../core/utils/resolve_media_url.dart';
 import '../../../../core/widgets/skeleton_loader.dart';
 import '../../../../core/widgets/profile_avatar.dart';
 import '../../data/repositories/message_repository.dart';
 import '../../data/models/conversation_dto.dart';
+import '../../data/services/auth_service.dart';
 import 'chat_detail_page.dart';
 
 class ConversationListPage extends StatefulWidget {
@@ -20,9 +24,12 @@ class ConversationListPage extends StatefulWidget {
 class _ConversationListPageState extends State<ConversationListPage> {
   final SessionHelper _sessionHelper = SessionHelper();
   final MessageRepository _messageRepository = MessageRepository();
+  final AuthService _authService = AuthService();
   bool _isLoading = true;
   String? _errorMessage;
   List<ConversationDto> _conversations = [];
+  /// Konuşma API’si avatar göndermiyorsa [getUserById] ile doldurulur.
+  final Map<int, ({String? url, Uint8List? bytes})> _avatarExtras = {};
 
   @override
   void initState() {
@@ -52,12 +59,43 @@ class _ConversationListPageState extends State<ConversationListPage> {
         _conversations = sorted;
         _isLoading = false;
       });
+      _enrichConversationAvatars(sorted);
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
         _isLoading = false;
       });
+    }
+  }
+
+  bool _participantHasLoadableAvatar(ConversationUserDto op) {
+    final url = op.profilePhotoUrl?.trim();
+    if (url != null && url.isNotEmpty) return true;
+    final bytes = decodeProfilePhotoBytes(op.profilePhotoData);
+    return bytes != null && bytes.isNotEmpty;
+  }
+
+  Future<void> _enrichConversationAvatars(List<ConversationDto> list) async {
+    final updates = <int, ({String? url, Uint8List? bytes})>{};
+    for (final c in list) {
+      final op = c.otherParticipant;
+      if (op.id <= 0) continue;
+      if (_participantHasLoadableAvatar(op)) continue;
+      if (_avatarExtras.containsKey(op.id)) continue;
+      try {
+        final u = await _authService.getUserById(op.id.toString());
+        if (u == null) continue;
+        final bytes = decodeProfilePhotoBytes(u.profilePhotoData);
+        final url = u.profileImageUrl?.trim();
+        if ((url != null && url.isNotEmpty) ||
+            (bytes != null && bytes.isNotEmpty)) {
+          updates[op.id] = (url: url, bytes: bytes);
+        }
+      } catch (_) {}
+    }
+    if (updates.isNotEmpty && mounted) {
+      setState(() => _avatarExtras.addAll(updates));
     }
   }
 
@@ -187,6 +225,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
                               const SizedBox(height: AppSpacing.medium),
                           itemBuilder: (context, index) {
                             final c = _conversations[index];
+                            final extra = _avatarExtras[c.otherParticipant.id];
                             final hasUnread = c.unreadCount > 0;
                             return Container(
                               decoration: BoxDecoration(
@@ -204,7 +243,12 @@ class _ConversationListPageState extends State<ConversationListPage> {
                                     const EdgeInsets.symmetric(horizontal: 12),
                                 leading: ProfileAvatar(
                                   radius: 22,
-                                  imageUrl: c.otherParticipant.profilePhotoUrl,
+                                  imageUrl: extra?.url ??
+                                      c.otherParticipant.profilePhotoUrl,
+                                  memoryBytes: extra?.bytes ??
+                                      decodeProfilePhotoBytes(
+                                        c.otherParticipant.profilePhotoData,
+                                      ),
                                   fallbackInitial: c.otherParticipant.username,
                                 ),
                                 title: Text(

@@ -2,15 +2,25 @@ class ConversationUserDto {
   final int id;
   final String username;
   final String? profilePhotoUrl;
+  /// Bazı API’ler base64 döner (UserResponseDto ile uyumlu).
+  final String? profilePhotoData;
 
   ConversationUserDto({
     required this.id,
     required this.username,
     this.profilePhotoUrl,
+    this.profilePhotoData,
   });
 
+  bool get hasAvatarVisual {
+    final u = profilePhotoUrl?.trim();
+    if (u != null && u.isNotEmpty) return true;
+    final d = profilePhotoData?.trim();
+    return d != null && d.isNotEmpty;
+  }
+
   factory ConversationUserDto.fromJson(Map<String, dynamic> json) {
-    final rawId = json['id'];
+    final rawId = json['id'] ?? json['userId'] ?? json['participantId'];
     final id = rawId is num
         ? rawId.toInt()
         : int.tryParse(rawId?.toString() ?? '') ?? 0;
@@ -21,11 +31,15 @@ class ConversationUserDto {
     final photo = json['profileImageUrl']?.toString() ??
         json['profilePhotoUrl']?.toString() ??
         json['avatarUrl']?.toString() ??
-        json['photoUrl']?.toString();
+        json['photoUrl']?.toString() ??
+        json['imageUrl']?.toString();
+    final data = json['profilePhotoData']?.toString() ??
+        json['profilePhoto']?.toString();
     return ConversationUserDto(
       id: id,
       username: username,
       profilePhotoUrl: photo,
+      profilePhotoData: data,
     );
   }
 }

@@ -1,11 +1,46 @@
 import 'package:dio/dio.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import 'exceptions.dart';
+
 /// Centralized error handling utility
 /// Converts technical errors to user-friendly messages
 class ErrorHandler {
   /// Converts any exception to a user-friendly error message
   static String getUserFriendlyMessage(dynamic error) {
+    if (error is IncompleteBackendRegistrationException) {
+      return 'No app profile is linked to this account yet. Use Register with the '
+          'same email, complete email verification, then tap Continue on the '
+          'verification screen to create your profile.';
+    }
+
+    final raw = error.toString().toUpperCase();
+    if (raw.contains('EMAIL_NOT_VERIFIED')) {
+      return 'Your email is not verified on the server yet. Enter the 5-digit code '
+          'sent to your inbox, or tap Resend code.';
+    }
+
+    if (raw.contains('NO_ACTIVE_CODE')) {
+      return 'No active verification code. Tap Resend to get a new code.';
+    }
+    if (raw.contains('WRONG_CODE')) {
+      return 'That code is incorrect. Please try again.';
+    }
+    if (raw.contains('RESEND_COOLDOWN')) {
+      return 'Please wait 60 seconds before requesting another code.';
+    }
+    if (raw.contains('ALREADY_VERIFIED')) {
+      return 'This email is already verified.';
+    }
+
+    if (raw.contains('NO_SUCH_ACCOUNT') ||
+        raw.contains('NO_SUCH') ||
+        raw.contains('NOT_REGISTERED')) {
+      return 'Your Firebase sign-in is active, but no app profile exists yet. '
+          'Open the Profile tab and use “Complete profile” if shown, or sign out and '
+          'finish registration with the same email.';
+    }
+
     // Firebase Auth errors
     if (error is FirebaseAuthException) {
       return _handleFirebaseError(error);
@@ -99,20 +134,34 @@ class ErrorHandler {
         case 400:
           return serverMessage ?? 'Invalid request. Please check your input.';
         case 401:
-          // 401 is usually an authentication error
           if (serverMessage != null) {
-            final messageLower = serverMessage.toLowerCase();
-            if (messageLower.contains('no_such_account') ||
-                messageLower.contains('no such account')) {
+            final ml = serverMessage.toLowerCase();
+            if (ml.contains('no_such_account') ||
+                ml.contains('no such account')) {
               return 'Unable to create account. Please try again or contact support.';
             }
-            if (messageLower.contains('credential') ||
-                messageLower.contains('password') ||
-                messageLower.contains('email')) {
+            // Register / API: Firebase JWT — not the email+password login form
+            if (ml.contains('token') ||
+                ml.contains('jwt') ||
+                ml.contains('firebase') ||
+                ml.contains('bearer') ||
+                ml.contains('email_not_verified') ||
+                (ml.contains('expired') &&
+                    (ml.contains('token') || ml.contains('session')))) {
+              return 'Your email is verified, but the server needs a moment to accept '
+                  'your session. Wait a few seconds and tap Continue again.';
+            }
+            if ((ml.contains('wrong') && ml.contains('password')) ||
+                (ml.contains('invalid') && ml.contains('password'))) {
+              return 'Incorrect email or password.';
+            }
+            if (ml.contains('credential') &&
+                !ml.contains('token') &&
+                !ml.contains('firebase')) {
               return 'Incorrect email or password.';
             }
           }
-          return 'Your session has expired. Please login again.';
+          return 'Your session is still updating. Please try Continue again in a few seconds.';
         case 403:
           return 'You do not have permission to perform this action.';
         case 404:
@@ -158,12 +207,27 @@ class ErrorHandler {
   static String _handleGenericException(Exception e) {
     final errorString = e.toString().toLowerCase();
 
-    // Catch technical messages and convert to simple messages
-    if (errorString.contains('malformed') || 
-        errorString.contains('expired') ||
-        errorString.contains('credential') ||
-        errorString.contains('invalid credential') ||
-        errorString.contains('auth credential')) {
+    final looksLikeFirebaseOrJwt =
+        errorString.contains('token') ||
+        errorString.contains('jwt') ||
+        errorString.contains('firebase') ||
+        errorString.contains('bearer') ||
+        errorString.contains('id_token');
+    if (looksLikeFirebaseOrJwt &&
+        (errorString.contains('invalid') ||
+            errorString.contains('expired') ||
+            errorString.contains('malformed'))) {
+      return 'Your email is verified, but the server could not accept your sign-in '
+          'yet. Wait a few seconds and tap Continue again.';
+    }
+
+    // Catch login-form mistakes (not JWT / post-verify token lag)
+    if (errorString.contains('malformed') && !looksLikeFirebaseOrJwt) {
+      return 'Incorrect email or password.';
+    }
+    if ((errorString.contains('credential') ||
+            errorString.contains('auth credential')) &&
+        !looksLikeFirebaseOrJwt) {
       return 'Incorrect email or password.';
     }
     
@@ -186,11 +250,14 @@ class ErrorHandler {
       if (message.contains('at ') || 
           message.contains('error:') ||
           message.length > 200) {
-        // General error message for technical messages
-        if (message.contains('login') || 
-            message.contains('auth') ||
-            message.contains('password') ||
-            message.contains('email')) {
+        if (message.contains('token') ||
+            message.contains('jwt') ||
+            message.contains('firebase')) {
+          return 'Your email is verified, but the server could not accept your session '
+              'yet. Wait a few seconds and tap Continue again.';
+        }
+        if ((message.contains('wrong') && message.contains('password')) ||
+            (message.contains('invalid') && message.contains('password'))) {
           return 'Incorrect email or password.';
         }
         return 'Something went wrong. Please try again.';
@@ -205,11 +272,13 @@ class ErrorHandler {
         return 'This email is already registered.';
       }
       
-      // Simple message for login/auth related messages
-      if (message.contains('login') || 
-          message.contains('auth') ||
-          message.contains('password') ||
-          message.contains('credential')) {
+      if ((message.contains('wrong') && message.contains('password')) ||
+          (message.contains('invalid') && message.contains('password'))) {
+        return 'Incorrect email or password.';
+      }
+      if (message.contains('credential') &&
+          !message.contains('token') &&
+          !message.contains('firebase')) {
         return 'Incorrect email or password.';
       }
       
@@ -217,13 +286,11 @@ class ErrorHandler {
       return message;
     }
 
-    // General error message
-    if (errorString.contains('login') || 
-        errorString.contains('auth') ||
-        errorString.contains('password')) {
+    if (errorString.contains('password') &&
+        (errorString.contains('wrong') || errorString.contains('incorrect'))) {
       return 'Incorrect email or password.';
     }
-    
+
     return 'Something went wrong. Please try again.';
   }
 

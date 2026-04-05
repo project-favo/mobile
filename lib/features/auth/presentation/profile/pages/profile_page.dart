@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
@@ -16,7 +17,10 @@ import '../../search_page.dart';
 import '../../review/pages/review_page.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
+import '../../../../../core/widgets/app_button.dart';
 import '../../../../../core/utils/resolve_media_url.dart';
+import '../../../../../routes/app_routes.dart';
+import '../../complete_app_profile_page.dart';
 import 'settings_page.dart';
 import 'follow_list_page.dart';
 
@@ -254,18 +258,40 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
     });
 
     try {
-      final user = await _authService.getMe();
+      await _authService.syncFirebaseUserAndRefreshIdToken();
+      var user = await _authService.getMe();
+      if (!user.hasProfileAvatarVisual && user.id.isNotEmpty) {
+        final extra = await _authService.getUserById(user.id);
+        user = user.withFilledAvatarFrom(extra);
+      }
       setState(() {
         _user = user;
         _isLoading = false;
+        if (user.id.isEmpty) {
+          _followerCount = 0;
+          _followingCount = 0;
+        }
       });
-      _loadFollowCounts(user.id);
+      if (user.id.isNotEmpty) {
+        _loadFollowCounts(user.id);
+      }
     } catch (e) {
       setState(() {
-        _errorMessage = e.toString();
+        _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
         _isLoading = false;
       });
     }
+  }
+
+  Future<void> _signOutFromIncompleteProfile() async {
+    AuthService.clearRegisterFormDraft();
+    _sessionHelper.clearSession();
+    await FirebaseAuth.instance.signOut();
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil(
+      AppRoutes.login,
+      (_) => false,
+    );
   }
 
   Future<void> _loadFollowCounts(String userId) async {
@@ -516,6 +542,104 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
       );
     }
 
+    if (_user != null && _user!.id.isEmpty) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          automaticallyImplyLeading: false,
+          title: const Text(
+            'Profile',
+            style: AppTextStyles.HomeHeader,
+          ),
+          centerTitle: true,
+        ),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: AppSpacing.xxLarge),
+                Icon(
+                  Icons.verified_user_outlined,
+                  size: 56,
+                  color: AppColors.primary.withValues(alpha: 0.85),
+                ),
+                const SizedBox(height: AppSpacing.xLarge),
+                Text(
+                  'Profilinizi tamamlayın',
+                  style: AppTextStyles.heading2.copyWith(
+                    color: AppColors.textPrimary,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: AppSpacing.medium),
+                Text(
+                  'Kayıt ekranında yazdığınız bilgiler kayıtlıysa “Profili tamamla” '
+                  'sayfasında otomatik dolar. Sunucu bazen kullanıcı kimliğini geç '
+                  'gösterir; yine de bu adımı bir kez tamamlamanız gerekebilir.',
+                  style: AppTextStyles.bodySecondary,
+                  textAlign: TextAlign.center,
+                ),
+                if (_user!.email.isNotEmpty) ...[
+                  const SizedBox(height: AppSpacing.large),
+                  Text(
+                    _user!.email,
+                    style: AppTextStyles.bodyMedium.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+                if (!(_user!.isEmailVerified)) ...[
+                  const SizedBox(height: AppSpacing.medium),
+                  Text(
+                    'E-posta doğrulaması bekleniyor. Önce gelen kutunuzdaki '
+                    'Firebase bağlantısını açın.',
+                    style: AppTextStyles.bodySmall.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+                const Spacer(),
+                AppButton(
+                  text: 'Profili tamamla',
+                  onPressed: () async {
+                    final ok = await Navigator.push<bool>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const CompleteAppProfilePage(),
+                      ),
+                    );
+                    if (ok == true && mounted) {
+                      await _loadUserData();
+                    }
+                  },
+                ),
+                const SizedBox(height: AppSpacing.medium),
+                TextButton(
+                  onPressed: _signOutFromIncompleteProfile,
+                  child: Text(
+                    'Çıkış yap',
+                    style: AppTextStyles.bodyMedium.copyWith(
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xxLarge),
+              ],
+            ),
+          ),
+        ),
+        bottomNavigationBar: _buildBottomNavigationBar(),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -582,12 +706,12 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                     SlideRightRoute(
                       page: FollowListPage(
                         userId: _user!.id,
-                        title: 'Takipçiler',
+                        title: 'Followers',
                         isFollowers: true,
                       ),
                     ),
                   ),
-                  child: _StatItem(count: _followerCount, label: 'Takipçi'),
+                  child: _StatItem(count: _followerCount, label: 'Followers'),
                 ),
                 const SizedBox(width: AppSpacing.xxLarge),
                 GestureDetector(
@@ -596,15 +720,15 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                     SlideRightRoute(
                       page: FollowListPage(
                         userId: _user!.id,
-                        title: 'Takip Edilenler',
+                        title: 'Following',
                         isFollowers: false,
                       ),
                     ),
                   ),
-                  child: _StatItem(count: _followingCount, label: 'Takip'),
+                  child: _StatItem(count: _followingCount, label: 'Following'),
                 ),
                 const SizedBox(width: AppSpacing.xxLarge),
-                _StatItem(count: _myReviews.length, label: 'Yorum'),
+                _StatItem(count: _myReviews.length, label: 'Reviews'),
               ],
             ),
             const SizedBox(height: AppSpacing.xxLarge),
