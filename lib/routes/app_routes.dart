@@ -17,7 +17,6 @@ class AppRoutes {
     login: (_) => const LoginPage(),
     register: (_) => const RegisterPage(),
     home: (_) => const HomePage(),
-    // EmailVerificationPage email parametresi gerektiriyor;
-    // Navigator.push ile doğrudan kullan, route üzerinden değil.
+    // Email flows use Navigator.push with EmailVerificationWaitingPage / gate pages.
   };
 }

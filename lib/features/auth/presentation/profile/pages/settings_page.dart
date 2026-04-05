@@ -12,7 +12,7 @@ import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/utils/resolve_media_url.dart';
 import 'edit_profile_page.dart';
 import 'change_password_page.dart';
-import '../../email_verification_page.dart';
+import '../../email_verification_waiting_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -235,7 +235,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'A new 5-digit code was sent to your email.',
+            'A new verification email was sent.',
           ),
           backgroundColor: AppColors.success,
         ),
@@ -260,10 +260,11 @@ class _SettingsPageState extends State<SettingsPage> {
     final ok = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => EmailVerificationPage(
+        builder: (_) => EmailVerificationWaitingPage(
           email: email,
-          onlyVerifyNoBackendLogin: onlyVerifyNoBackendLogin,
-          popOnSuccessWithResult: true,
+          popWithSuccessResult: true,
+          navigateHomeOnSuccess: false,
+          refreshProfileOnlyOnContinue: onlyVerifyNoBackendLogin,
         ),
       ),
     );
@@ -308,7 +309,7 @@ class _SettingsPageState extends State<SettingsPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Optional: verify your email with a 5-digit code.',
+                'Optional: verify your email using the link we send you.',
                 style: AppTextStyles.bodySecondary,
               ),
               const SizedBox(height: AppSpacing.medium),
@@ -355,7 +356,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(height: AppSpacing.small),
               Text(
-                'We sent a 5-digit code to your inbox. Enter it to finish verification.',
+                'Open the verification link in your email to finish. You can resend the email if needed.',
                 style: AppTextStyles.bodySecondary,
               ),
               const SizedBox(height: AppSpacing.medium),
@@ -376,7 +377,7 @@ class _SettingsPageState extends State<SettingsPage> {
                               email: email,
                               onlyVerifyNoBackendLogin: false,
                             ),
-                    child: const Text('Enter code'),
+                    child: const Text('Open verification'),
                   ),
                 ],
               ),

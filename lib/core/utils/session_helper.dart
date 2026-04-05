@@ -104,6 +104,13 @@ class SessionHelper {
     ApiClient().clearAuthToken();
   }
 
+  /// Call after a successful `POST /api/auth/login` elsewhere (e.g. [AuthService.establishBackendSession])
+  /// so [ensureSession] does not immediately repeat login.
+  void markBackendLoginSucceeded() {
+    _sessionEstablished = true;
+    _lastLoginTime = DateTime.now();
+  }
+
   /// Forces session refresh (call login endpoint)
   Future<String?> refreshSession() async {
     _sessionEstablished = false;

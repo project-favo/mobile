@@ -10,7 +10,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/error_handler.dart';
 import '../data/services/auth_service.dart';
 import '../data/models/register_request_dto.dart';
-import 'email_verification_page.dart';
+import 'register_firebase_verify_gate_page.dart';
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
@@ -243,7 +243,7 @@ class _RegisterPageState extends State<RegisterPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Please confirm you will enter the 5-digit code sent to your email.',
+              'Please confirm you will verify your email using the links we send you.',
             ),
             backgroundColor: AppColors.error,
           ),
@@ -274,10 +274,9 @@ class _RegisterPageState extends State<RegisterPage> {
       );
       AuthService.saveRegisterFormDraft(registerRequest);
 
-      await _authService.signUpWithEmailPasswordAndBackend(
+      await _authService.createFirebaseUserAndSendEmailVerification(
         email: _email.text.trim(),
         password: _password.text,
-        request: registerRequest,
       );
 
       if (!mounted) return;
@@ -285,8 +284,9 @@ class _RegisterPageState extends State<RegisterPage> {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => EmailVerificationPage(
+          builder: (_) => RegisterFirebaseVerifyGatePage(
             email: _email.text.trim(),
+            pendingRegistration: registerRequest,
           ),
         ),
       );
@@ -521,8 +521,8 @@ class _RegisterPageState extends State<RegisterPage> {
                             });
                           },
                           child: Text(
-                            'I understand I must enter the 5-digit verification code '
-                            'sent to my email before my account is fully active.',
+                            'I understand I will verify my email using the links sent to my inbox '
+                            '(including any follow-up from Favo) before using the app.',
                             style: AppTextStyles.bodySecondary.copyWith(
                               height: 1.35,
                             ),

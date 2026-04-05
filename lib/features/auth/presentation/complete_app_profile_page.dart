@@ -8,7 +8,7 @@ import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_input.dart';
 import '../data/models/register_request_dto.dart';
 import '../data/services/auth_service.dart';
-import 'email_verification_page.dart';
+import 'email_verification_waiting_page.dart';
 
 /// Firebase oturumu var, backend’de kayıt yoksa profilden açılır (/register tamamlar).
 class CompleteAppProfilePage extends StatefulWidget {
@@ -150,15 +150,20 @@ class _CompleteAppProfilePageState extends State<CompleteAppProfilePage> {
         surname: _surname.text.trim(),
         birthdate: _birthdate.text.trim(),
       );
-      await _authService.postRegisterAndResendVerificationCode(dto);
+      await _authService.registerOnBackend(dto, requireFirebaseEmailVerified: false);
+      try {
+        await _authService.resendVerification();
+      } catch (_) {}
       if (!mounted) return;
       setState(() => _isLoading = false);
       final verified = await Navigator.push<bool>(
         context,
         MaterialPageRoute(
-          builder: (_) => EmailVerificationPage(
+          builder: (_) => EmailVerificationWaitingPage(
             email: fb.email ?? '',
-            popOnSuccessWithResult: true,
+            popWithSuccessResult: true,
+            navigateHomeOnSuccess: false,
+            refreshProfileOnlyOnContinue: false,
           ),
         ),
       );

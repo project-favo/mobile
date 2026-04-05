@@ -42,7 +42,18 @@ class AuthRepository {
         ApiConfig.registerPath,
         data: requestBody,
       );
-      return UserResponseDto.fromJson(response.data);
+      final raw = response.data;
+      try {
+        if (raw is Map) {
+          return UserResponseDto.fromJson(Map<String, dynamic>.from(raw));
+        }
+      } catch (_) {}
+      return UserResponseDto(
+        id: '',
+        email: '',
+        userName: request.userName,
+        emailVerified: false,
+      );
     } on DioException catch (e) {
       if (e.response != null) {
         final statusCode = e.response?.statusCode;

@@ -58,6 +58,16 @@ class AuthService {
     return _authRepository.login(idToken);
   }
 
+  /// Mevcut Firebase oturumu ile `POST /api/auth/login` (kayıt / e-posta doğrulama sonrası).
+  Future<UserResponseDto> establishBackendSession() async {
+    final user = _firebaseAuth.currentUser;
+    if (user == null) {
+      throw Exception('Not signed in');
+    }
+    final token = await _getFreshIdToken(user);
+    return _backendLoginWithIdToken(token);
+  }
+
   /// Firebase + backend login. E-posta doğrulanmamış olsa da oturum açılır (profilde uyarı).
   Future<UserResponseDto> loginWithEmailAndPassword({
     required String email,
@@ -111,39 +121,52 @@ class AuthService {
     await _firebaseAuth.currentUser?.getIdToken(true);
   }
 
-  /// Adım 2–3: `POST /api/auth/register` ardından `POST /api/auth/resend-verification`.
-  /// Firebase oturumu açık olmalı (kayıt veya “profili tamamla”).
-  Future<void> postRegisterAndResendVerificationCode(
-    RegisterRequestDto request,
-  ) async {
-    final user = _firebaseAuth.currentUser;
-    if (user == null) {
-      throw Exception('Session expired. Please sign in again.');
-    }
-    final t1 = await _getFreshIdToken(user);
-    await _authRepository.register(t1, request);
-    final t2 = await _getFreshIdToken(user);
-    await _authRepository.resendVerification(t2);
-  }
-
-  /// Adım 1–3: Firebase’de kullanıcı oluşturur, backend’e kaydeder, doğrulama kodu gönderir.
-  Future<void> signUpWithEmailPasswordAndBackend({
+  /// Kayıt adımı 1: Yalnızca Firebase hesabı + Firebase’in gönderdiği doğrulama bağlantısı.
+  /// Backend [registerOnBackend] bundan sonra, e-posta Firebase’de doğrulandıktan sonra çağrılır.
+  Future<void> createFirebaseUserAndSendEmailVerification({
     required String email,
     required String password,
-    required RegisterRequestDto request,
   }) async {
     try {
       final userCredential = await _firebaseAuth.createUserWithEmailAndPassword(
         email: email.trim(),
         password: password,
       );
-      if (userCredential.user == null) {
+      final u = userCredential.user;
+      if (u == null) {
         throw Exception('Failed to create account');
       }
-      await postRegisterAndResendVerificationCode(request);
+      await u.sendEmailVerification();
     } on FirebaseAuthException catch (e) {
       throw _handleFirebaseError(e);
     }
+  }
+
+  /// Kayıt adımı 2: `POST /api/auth/register`. [requireFirebaseEmailVerified] kayıt akışında true olmalı.
+  Future<void> registerOnBackend(
+    RegisterRequestDto request, {
+    bool requireFirebaseEmailVerified = true,
+  }) async {
+    final user = _firebaseAuth.currentUser;
+    if (user == null) {
+      throw Exception('Session expired. Please sign in again.');
+    }
+    if (requireFirebaseEmailVerified && !user.emailVerified) {
+      throw Exception(
+        'Önce e-postanızdaki doğrulama bağlantısını açın, ardından Devam’a basın.',
+      );
+    }
+    final t1 = await _getFreshIdToken(user);
+    await _authRepository.register(t1, request);
+  }
+
+  /// Firebase doğrulama e-postasını yeniden gönderir (kayıt öncesi adım).
+  Future<void> resendFirebaseEmailVerification() async {
+    final user = _firebaseAuth.currentUser;
+    if (user == null) {
+      throw Exception('No active session. Please register again.');
+    }
+    await user.sendEmailVerification();
   }
 
   /// Başka kullanıcı (mesaj / liste avatarı için). Uç yoksa null.

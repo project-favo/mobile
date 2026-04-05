@@ -6,7 +6,7 @@ import '../../../core/widgets/app_input.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/exceptions.dart';
-import 'email_verification_page.dart';
+import 'email_verification_waiting_page.dart';
 import '../data/services/auth_service.dart';
 
 
@@ -94,7 +94,12 @@ class _LoginPageState extends State<LoginPage> {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => EmailVerificationPage(email: e.email),
+            builder: (_) => EmailVerificationWaitingPage(
+                  email: e.email,
+                  navigateHomeOnSuccess: true,
+                  popWithSuccessResult: false,
+                  refreshProfileOnlyOnContinue: false,
+                ),
           ),
         );
       }
