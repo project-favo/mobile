@@ -1,10 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/session_helper.dart';
+import '../../../core/notifications/notification_realtime_service.dart';
+import '../../../core/widgets/notification_profile_nav_icon.dart';
 import '../data/models/product_dto.dart';
 import '../data/models/tag_dto.dart';
 import '../data/repositories/product_repository.dart';
@@ -42,6 +45,7 @@ class _SearchPageState extends State<SearchPage> {
   String? _errorMessage;
   String _activeQuery = '';
   String? _firebaseIdToken;
+  bool _notificationSvcAttached = false;
 
   Route _noAnimationRoute(Widget page) {
     return PageRouteBuilder(
@@ -54,14 +58,28 @@ class _SearchPageState extends State<SearchPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_hookNotificationsIfSignedIn());
+    });
     _searchFocusNode.addListener(() {
       setState(() {});
     });
     _loadInitialData();
   }
 
+  Future<void> _hookNotificationsIfSignedIn() async {
+    final t = await _sessionHelper.ensureSession();
+    if (!mounted || t == null) return;
+    NotificationRealtimeService.instance.attach();
+    _notificationSvcAttached = true;
+    await NotificationRealtimeService.instance.refreshUnread();
+  }
+
   @override
   void dispose() {
+    if (_notificationSvcAttached) {
+      NotificationRealtimeService.instance.detach();
+    }
     _searchController.dispose();
     _searchFocusNode.dispose();
     super.dispose();
@@ -457,21 +475,26 @@ class _SearchPageState extends State<SearchPage> {
             return;
           }
         },
-        items: const [
-          BottomNavigationBarItem(
+        items: [
+          const BottomNavigationBarItem(
             icon: Icon(Icons.add),
             label: 'Add',
           ),
-          BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
-          BottomNavigationBarItem(
+          const BottomNavigationBarItem(
+              icon: Icon(Icons.search), label: 'Search'),
+          const BottomNavigationBarItem(
             icon: Icon(
               Icons.home,
               size: 32,
             ),
             label: 'Home',
           ),
-          BottomNavigationBarItem(icon: Icon(Icons.favorite_border), label: 'Favorites'),
-          BottomNavigationBarItem(icon: Icon(Icons.person_outline), label: 'Profile'),
+          const BottomNavigationBarItem(
+              icon: Icon(Icons.favorite_border), label: 'Favorites'),
+          BottomNavigationBarItem(
+            icon: NotificationProfileNavIcon(),
+            label: 'Profile',
+          ),
         ],
       ),
     );

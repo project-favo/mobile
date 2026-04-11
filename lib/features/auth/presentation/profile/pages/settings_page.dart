@@ -12,7 +12,9 @@ import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/utils/resolve_media_url.dart';
 import 'edit_profile_page.dart';
 import 'change_password_page.dart';
-import '../../email_verification_waiting_page.dart';
+import 'notifications_page.dart';
+import '../../../../../core/notifications/notification_realtime_service.dart';
+import '../../backend_email_verification_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -260,7 +262,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final ok = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => EmailVerificationWaitingPage(
+        builder: (_) => BackendEmailVerificationPage(
           email: email,
           popWithSuccessResult: true,
           navigateHomeOnSuccess: false,
@@ -586,7 +588,17 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           ProfileMenuItem(
             title: 'Notifications',
-            onTap: () {},
+            onTap: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const NotificationsPage(),
+                ),
+              );
+              if (mounted) {
+                await NotificationRealtimeService.instance.refreshUnread();
+              }
+            },
           ),
           Divider(
             thickness: 2,

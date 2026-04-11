@@ -121,9 +121,9 @@ class AuthService {
     await _firebaseAuth.currentUser?.getIdToken(true);
   }
 
-  /// Kayıt adımı 1: Yalnızca Firebase hesabı + Firebase’in gönderdiği doğrulama bağlantısı.
-  /// Backend [registerOnBackend] bundan sonra, e-posta Firebase’de doğrulandıktan sonra çağrılır.
-  Future<void> createFirebaseUserAndSendEmailVerification({
+  /// Kayıt adımı 1: Firebase hesabı oluşturur; **e-posta göndermez** (Firebase link maili yok).
+  /// E-postadaki 5 haneli kod yalnızca backend (`register` / `resend-verification`) üzerinden gelir.
+  Future<void> createFirebaseUserForRegistration({
     required String email,
     required String password,
   }) async {
@@ -136,16 +136,15 @@ class AuthService {
       if (u == null) {
         throw Exception('Failed to create account');
       }
-      await u.sendEmailVerification();
     } on FirebaseAuthException catch (e) {
       throw _handleFirebaseError(e);
     }
   }
 
-  /// Kayıt adımı 2: `POST /api/auth/register`. [requireFirebaseEmailVerified] kayıt akışında true olmalı.
+  /// Kayıt adımı 2: `POST /api/auth/register`. Backend e-posta kodu için [requireFirebaseEmailVerified] false olmalı.
   Future<void> registerOnBackend(
     RegisterRequestDto request, {
-    bool requireFirebaseEmailVerified = true,
+    bool requireFirebaseEmailVerified = false,
   }) async {
     final user = _firebaseAuth.currentUser;
     if (user == null) {
@@ -156,11 +155,24 @@ class AuthService {
         'Önce e-postanızdaki doğrulama bağlantısını açın, ardından Devam’a basın.',
       );
     }
+    final email = user.email?.trim();
+    if (email == null || email.isEmpty) {
+      throw Exception('No email on this account. Sign out and register again.');
+    }
     final t1 = await _getFreshIdToken(user);
-    await _authRepository.register(t1, request);
+    final payload = RegisterRequestDto(
+      userName: request.userName,
+      name: request.name,
+      surname: request.surname,
+      birthdate: request.birthdate,
+      email: email,
+      profilePhotoBase64: request.profilePhotoBase64,
+      profilePhotoMimeType: request.profilePhotoMimeType,
+    );
+    await _authRepository.register(t1, payload);
   }
 
-  /// Firebase doğrulama e-postasını yeniden gönderir (kayıt öncesi adım).
+  /// İsteğe bağlı: Firebase’in **link** içeren doğrulama e-postasını gönderir (kayıt akışında kullanılmaz).
   Future<void> resendFirebaseEmailVerification() async {
     final user = _firebaseAuth.currentUser;
     if (user == null) {
@@ -273,12 +285,15 @@ class AuthService {
     return _authRepository.verifyEmail(token, code);
   }
 
-  /// Doğrulama e-postasını yeniden gönderir.
+  /// `POST /api/auth/resend-verification` — gövdede [email] (Spring’de yaygın).
   Future<void> resendVerification() async {
     final user = _firebaseAuth.currentUser;
     if (user == null) throw Exception('User not authenticated');
     final token = await _getFreshIdToken(user);
-    return _authRepository.resendVerification(token);
+    return _authRepository.resendVerification(
+      token,
+      email: user.email?.trim(),
+    );
   }
 
   /// Şifre değiştirir (Firebase Auth)

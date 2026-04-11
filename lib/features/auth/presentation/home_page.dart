@@ -8,6 +8,8 @@ import '../../../core/theme/app_chip_styles.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/session_helper.dart';
+import '../../../core/notifications/notification_realtime_service.dart';
+import '../../../core/widgets/notification_profile_nav_icon.dart';
 import '../../../core/widgets/custom_refresh_indicator.dart';
 import '../../../core/widgets/skeleton_loader.dart';
 import '../../../core/routes/custom_page_transitions.dart';
@@ -57,6 +59,7 @@ class _HomePageState extends State<HomePage> {
   String? _errorMessage;
   final ScrollController _scrollController = ScrollController();
   int _unreadMessageCount = 0;
+  bool _notificationSvcAttached = false;
 
   Route _noAnimationRoute(Widget page) {
     return PageRouteBuilder(
@@ -101,23 +104,26 @@ class _HomePageState extends State<HomePage> {
           return;
         }
       },
-      items: const [
-        BottomNavigationBarItem(
+      items: [
+        const BottomNavigationBarItem(
           icon: Icon(Icons.add),
           label: 'Add',
         ),
-        BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
-        BottomNavigationBarItem(
+        const BottomNavigationBarItem(
+            icon: Icon(Icons.search), label: 'Search'),
+        const BottomNavigationBarItem(
           icon: Icon(
             Icons.home,
             size: 32,
           ),
           label: 'Home',
         ),
-        BottomNavigationBarItem(
+        const BottomNavigationBarItem(
             icon: Icon(Icons.favorite_border), label: 'Favorites'),
         BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline), label: 'Profile'),
+          icon: NotificationProfileNavIcon(),
+          label: 'Profile',
+        ),
       ],
     );
   }
@@ -125,13 +131,27 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_hookNotificationsIfSignedIn());
+    });
     _loadData();
     _loadUnreadCount();
     _scrollController.addListener(_onScroll);
   }
 
+  Future<void> _hookNotificationsIfSignedIn() async {
+    final t = await _sessionHelper.ensureSession();
+    if (!mounted || t == null) return;
+    NotificationRealtimeService.instance.attach();
+    _notificationSvcAttached = true;
+    await NotificationRealtimeService.instance.refreshUnread();
+  }
+
   @override
   void dispose() {
+    if (_notificationSvcAttached) {
+      NotificationRealtimeService.instance.detach();
+    }
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
@@ -148,6 +168,7 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         _unreadMessageCount = convCountWithUnread;
       });
+      unawaited(NotificationRealtimeService.instance.refreshUnread());
     } catch (_) {
       // Sessiyon/yetki hatalarında badge'i sadece sıfır bırak
       if (!mounted) return;

@@ -6,12 +6,57 @@ import 'exceptions.dart';
 /// Centralized error handling utility
 /// Converts technical errors to user-friendly messages
 class ErrorHandler {
+  /// Backend 503 “mail gönderilemedi” JSON: [code], isteğe bağlı [smtpDetail].
+  /// Tanınmazsa null (genel 503 metni kullanılır).
+  static String? messageForMailDelivery503Body(dynamic errorData) {
+    if (errorData is! Map) return null;
+    final m = Map<String, dynamic>.from(errorData);
+    final code = m['code']?.toString().trim();
+    if (code == null || code.isEmpty) return null;
+
+    String? detailRaw = m['smtpDetail']?.toString().trim();
+    if (detailRaw == null || detailRaw.isEmpty) {
+      detailRaw = m['smtp_detail']?.toString().trim();
+    }
+    final detail = (detailRaw != null && detailRaw.isNotEmpty)
+        ? (detailRaw.length > 320
+            ? '${detailRaw.substring(0, 317)}...'
+            : detailRaw)
+        : null;
+    final detailBlock =
+        detail != null ? '\n\nTechnical detail: $detail' : '';
+
+    switch (code) {
+      case 'MISSING_MAIL_USERNAME':
+        return 'Email was not sent: MAIL_USERNAME (or SPRING_MAIL_USERNAME) is not set '
+            'on the server. In Railway, add the variable, fix typos, and redeploy.$detailBlock';
+      case 'MISSING_MAIL_FROM':
+        return 'Email was not sent: MAIL_FROM is missing or invalid. Set MAIL_FROM to a '
+            'full email address (usually the same as MAIL_USERNAME).$detailBlock';
+      case 'NO_MAIL_SENDER_BEAN':
+        return 'Email was not sent: mail service failed to initialize. Check Spring Mail '
+            'starter and mail auto-configuration on the server.$detailBlock';
+      case 'EMPTY_USER_EMAIL':
+        return 'Email was not sent: this account has no email address on the server / '
+            'Firebase. Sign out and register again with a valid email.$detailBlock';
+      case 'SMTP_REJECTED':
+        return 'The mail server rejected the message (wrong password, app password, '
+            '2FA, or blocked account). Regenerate Gmail app password, set MAIL_PASSWORD '
+            'in Railway (no spaces needed), and set MAIL_FROM = MAIL_USERNAME.$detailBlock';
+      default:
+        final hint = m['message']?.toString().trim();
+        if (hint != null && hint.isNotEmpty && hint != code) {
+          return 'Email was not sent ($code). $hint$detailBlock';
+        }
+        return 'Email was not sent ($code).$detailBlock';
+    }
+  }
+
   /// Converts any exception to a user-friendly error message
   static String getUserFriendlyMessage(dynamic error) {
     if (error is IncompleteBackendRegistrationException) {
-      return 'No app profile is linked to this account yet. Use Register with the '
-          'same email, complete email verification, then tap Continue on the '
-          'verification screen to create your profile.';
+      return 'No app profile is linked to this account yet. Register with the '
+          'same email, enter the 5-digit code from Favo, then sign in.';
     }
 
     final raw = error.toString().toUpperCase();
@@ -31,6 +76,9 @@ class ErrorHandler {
     }
     if (raw.contains('ALREADY_VERIFIED')) {
       return 'This email is already verified.';
+    }
+    if (raw.contains('INVALID_CODE_FORMAT')) {
+      return 'Enter the 5-digit code from your email.';
     }
 
     if (raw.contains('NO_SUCH_ACCOUNT') ||
@@ -181,8 +229,12 @@ class ErrorHandler {
           return 'Too many requests. Please try again later.';
         case 500:
         case 502:
-        case 503:
           return 'Server error. Please try again later.';
+        case 503:
+          final mail503 = messageForMailDelivery503Body(errorData);
+          if (mail503 != null) return mail503;
+          return serverMessage ??
+              'Service unavailable. Please try again later.';
         default:
           // Try to use server message if available, otherwise generic message
           if (serverMessage != null && serverMessage.isNotEmpty) {

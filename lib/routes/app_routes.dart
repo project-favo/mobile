@@ -17,6 +17,6 @@ class AppRoutes {
     login: (_) => const LoginPage(),
     register: (_) => const RegisterPage(),
     home: (_) => const HomePage(),
-    // Email flows use Navigator.push with EmailVerificationWaitingPage / gate pages.
+    // Email flows: Navigator.push → BackendEmailVerificationPage / register gate.
   };
 }

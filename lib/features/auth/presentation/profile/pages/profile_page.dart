@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../../../../../core/notifications/notification_realtime_service.dart';
+import '../../../../../core/widgets/notification_profile_nav_icon.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
@@ -23,6 +27,7 @@ import '../../../../../routes/app_routes.dart';
 import '../../complete_app_profile_page.dart';
 import 'settings_page.dart';
 import 'follow_list_page.dart';
+import 'notifications_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -50,6 +55,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
   String _selectedDateSort = 'Newest';
   int _followerCount = 0;
   int _followingCount = 0;
+  bool _notificationSvcAttached = false;
 
   Route _noAnimationRoute(Widget page) {
     return PageRouteBuilder(
@@ -80,23 +86,26 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
           return;
         }
       },
-      items: const [
-        BottomNavigationBarItem(
+      items: [
+        const BottomNavigationBarItem(
           icon: Icon(Icons.add),
           label: 'Add',
         ),
-        BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
-        BottomNavigationBarItem(
+        const BottomNavigationBarItem(
+            icon: Icon(Icons.search), label: 'Search'),
+        const BottomNavigationBarItem(
           icon: Icon(
             Icons.home,
             size: 32,
           ),
           label: 'Home',
         ),
-        BottomNavigationBarItem(
+        const BottomNavigationBarItem(
             icon: Icon(Icons.favorite_border), label: 'Favorites'),
         BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline), label: 'Profile'),
+          icon: NotificationProfileNavIcon(),
+          label: 'Profile',
+        ),
       ],
     );
   }
@@ -274,6 +283,11 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
       });
       if (user.id.isNotEmpty) {
         _loadFollowCounts(user.id);
+        if (!_notificationSvcAttached) {
+          _notificationSvcAttached = true;
+          NotificationRealtimeService.instance.attach();
+          unawaited(NotificationRealtimeService.instance.refreshUnread());
+        }
       }
     } catch (e) {
       setState(() {
@@ -308,8 +322,64 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
 
   @override
   void dispose() {
+    if (_notificationSvcAttached) {
+      NotificationRealtimeService.instance.detach();
+    }
     _tabController.dispose();
     super.dispose();
+  }
+
+  Widget _notificationsLeadingButton() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.small),
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.notifications_outlined),
+            color: AppColors.primary,
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const NotificationsPage(),
+                ),
+              );
+              if (mounted) {
+                await NotificationRealtimeService.instance.refreshUnread();
+              }
+            },
+          ),
+          ValueListenableBuilder<int>(
+            valueListenable: NotificationRealtimeService.instance.unreadCount,
+            builder: (context, count, _) {
+              if (count <= 0) return const SizedBox.shrink();
+              return Positioned(
+                right: 2,
+                top: 4,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    count > 9 ? '9+' : '$count',
+                    style: AppTextStyles.bodySecondary.copyWith(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _loadWishlist() async {
@@ -646,6 +716,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
         backgroundColor: Colors.transparent,
         elevation: 0,
         automaticallyImplyLeading: false,
+        leading: _notificationsLeadingButton(),
         title: const Text(
           'Profile',
           style: AppTextStyles.HomeHeader,

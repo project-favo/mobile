@@ -243,7 +243,7 @@ class _RegisterPageState extends State<RegisterPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Please confirm you will verify your email using the links we send you.',
+              'Please confirm you will enter the 5-digit code Favo sends to your email.',
             ),
             backgroundColor: AppColors.error,
           ),
@@ -274,7 +274,7 @@ class _RegisterPageState extends State<RegisterPage> {
       );
       AuthService.saveRegisterFormDraft(registerRequest);
 
-      await _authService.createFirebaseUserAndSendEmailVerification(
+      await _authService.createFirebaseUserForRegistration(
         email: _email.text.trim(),
         password: _password.text,
       );
@@ -521,8 +521,8 @@ class _RegisterPageState extends State<RegisterPage> {
                             });
                           },
                           child: Text(
-                            'I understand I will verify my email using the links sent to my inbox '
-                            '(including any follow-up from Favo) before using the app.',
+                            'I understand Favo will send a 5-digit code to my email and I will '
+                            'enter it to finish sign-up.',
                             style: AppTextStyles.bodySecondary.copyWith(
                               height: 1.35,
                             ),

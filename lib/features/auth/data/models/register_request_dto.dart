@@ -3,6 +3,8 @@ class RegisterRequestDto {
   final String name;
   final String surname;
   final String birthdate;
+  /// Bazı Spring kurulumları JWT yerine veya ek olarak body’deki e-postayı kullanır (kod maili için).
+  final String? email;
   final String? profilePhotoBase64; // Base64 encoded profil fotoğrafı (data URI formatında)
   final String? profilePhotoMimeType; // MIME type (örn: "image/jpeg")
 
@@ -11,6 +13,7 @@ class RegisterRequestDto {
     required this.name,
     required this.surname,
     required this.birthdate,
+    this.email,
     this.profilePhotoBase64,
     this.profilePhotoMimeType,
   });
@@ -22,6 +25,10 @@ class RegisterRequestDto {
       'surname': surname,
       'birthdate': birthdate,
     };
+    final e = email?.trim();
+    if (e != null && e.isNotEmpty) {
+      json['email'] = e;
+    }
     
     if (profilePhotoBase64 != null) {
       json['profilePhotoBase64'] = profilePhotoBase64!;

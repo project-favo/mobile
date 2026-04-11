@@ -55,6 +55,9 @@ class AuthRepository {
         emailVerified: false,
       );
     } on DioException catch (e) {
+      if (e.response?.statusCode == 503) {
+        rethrow;
+      }
       if (e.response != null) {
         final statusCode = e.response?.statusCode;
         final errorData = e.response?.data;
@@ -74,7 +77,12 @@ class AuthRepository {
         if (statusCode == 403) {
           errorMessage = 'Access forbidden. Please check your authentication token or contact support.';
         }
-        
+        if (statusCode == 401) {
+          errorMessage =
+              'Unauthorized (401). Confirm the request URL is POST ${ApiConfig.registerPath} '
+              'and you are signed in to Firebase so a fresh ID token is sent.';
+        }
+
         throw Exception(errorMessage);
       }
       throw Exception('Network error: ${e.message}');
@@ -169,14 +177,17 @@ class AuthRepository {
     }
   }
 
-  /// E-posta doğrulama kodu gönderir
-  /// Body: { "code": "12345" } — tam 5 hane
+  /// Backend e-posta kodu: `POST /api/auth/verify-email`, body `{ "code": "12345" }` (tam 5 rakam).
   Future<UserResponseDto> verifyEmail(String firebaseIdToken, String code) async {
+    final normalized = code.trim();
+    if (!RegExp(r'^\d{5}$').hasMatch(normalized)) {
+      throw Exception('INVALID_CODE_FORMAT');
+    }
     try {
       _apiClient.setAuthToken(firebaseIdToken);
       final response = await _apiClient.dio.post(
-        '/api/auth/verify-email',
-        data: {'code': code},
+        ApiConfig.verifyEmailPath,
+        data: {'code': normalized},
       );
       return UserResponseDto.fromJson(response.data);
     } on DioException catch (e) {
@@ -188,18 +199,21 @@ class AuthRepository {
     }
   }
 
-  /// Doğrulama e-postasını yeniden gönderir (60s cooldown)
-  Future<void> resendVerification(String firebaseIdToken) async {
-    try {
-      _apiClient.setAuthToken(firebaseIdToken);
-      await _apiClient.dio.post('/api/auth/resend-verification');
-    } on DioException catch (e) {
-      final errorData = e.response?.data;
-      final errorCode = errorData is Map
-          ? (errorData['error'] ?? errorData['message'] ?? 'RESEND_FAILED')
-          : 'RESEND_FAILED';
-      throw Exception(errorCode.toString());
+  /// `POST /api/auth/resend-verification` (Bearer + isteğe bağlı `{ "email": "..." }`).
+  Future<void> resendVerification(
+    String firebaseIdToken, {
+    String? email,
+  }) async {
+    _apiClient.setAuthToken(firebaseIdToken);
+    final body = <String, dynamic>{};
+    final addr = email?.trim();
+    if (addr != null && addr.isNotEmpty) {
+      body['email'] = addr;
     }
+    await _apiClient.dio.post(
+      ApiConfig.resendVerificationPath,
+      data: body,
+    );
   }
 
   /// Hesabı siler (backend'de /api/auth/me DELETE)
