@@ -28,6 +28,9 @@ class ProductCard extends StatefulWidget {
   final VoidCallback? onTap;
   final VoidCallback? onFavoriteTap;
 
+  /// Grid/listelerde `false` bırakın: her kart için review API çağrısı yapılmaz (çok daha hızlı).
+  final bool loadReviewCount;
+
   const ProductCard({
     super.key,
     required this.imageUrl,
@@ -37,6 +40,7 @@ class ProductCard extends StatefulWidget {
     required this.desc,
     required this.productId,
     this.isFavorite = false,
+    this.loadReviewCount = false,
     this.onTap,
     this.onFavoriteTap,
   });
@@ -51,7 +55,9 @@ class _ProductCardState extends State<ProductCard> {
   @override
   void initState() {
     super.initState();
-    _loadReviewCount();
+    if (widget.loadReviewCount) {
+      _loadReviewCount();
+    }
   }
 
   Future<void> _loadReviewCount() async {
@@ -80,6 +86,13 @@ class _ProductCardState extends State<ProductCard> {
 
   @override
   Widget build(BuildContext context) {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final screenW = MediaQuery.sizeOf(context).width;
+    final imageCacheW =
+        ((screenW * 0.55) * dpr).round().clamp(120, 900);
+    final imageCacheH =
+        (AppSpacing.productImageHeight * dpr).round().clamp(100, 800);
+
     return GestureDetector(
       onTap: widget.onTap,
       child: Container(
@@ -104,6 +117,9 @@ class _ProductCardState extends State<ProductCard> {
                   child: Image.network(
                     widget.imageUrl,
                     fit: BoxFit.contain,
+                    cacheWidth: imageCacheW,
+                    cacheHeight: imageCacheH,
+                    filterQuality: FilterQuality.medium,
                     errorBuilder: (context, error, stackTrace) {
                       return Container(
                         color: AppColors.background,
@@ -236,30 +252,30 @@ class _ProductCardState extends State<ProductCard> {
               },
             ),
 
-            const SizedBox(height: 4),
-            
-            // Review count
-            Row(
-              children: [
-                Icon(
-                  Icons.reviews_outlined,
-                  size: 12,
-                  color: AppColors.textSecondary,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  _reviewCount == null
-                      ? 'Reviews'
-                      : '${_reviewCount ?? 0} Reviews',
-                  style: AppTextStyles.bodySmall.copyWith(
+            if (widget.loadReviewCount) ...[
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Icon(
+                    Icons.reviews_outlined,
+                    size: 12,
                     color: AppColors.textSecondary,
-                    fontSize: 11,
                   ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 2),
+                  const SizedBox(width: 4),
+                  Text(
+                    _reviewCount == null
+                        ? 'Reviews'
+                        : '${_reviewCount ?? 0} Reviews',
+                    style: AppTextStyles.bodySmall.copyWith(
+                      color: AppColors.textSecondary,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 2),
+            ] else
+              const SizedBox(height: 2),
 
             Text(
               widget.desc,

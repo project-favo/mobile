@@ -3,7 +3,8 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../../../../core/notifications/notification_realtime_service.dart';
-import '../../../../../core/widgets/notification_profile_nav_icon.dart';
+import '../../../../../core/widgets/main_bottom_nav_items.dart';
+import '../../../../../features/activity/presentation/activity_page.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
@@ -21,6 +22,7 @@ import '../../search_page.dart';
 import '../../review/pages/review_page.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
+import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../../../../core/widgets/app_button.dart';
 import '../../../../../core/utils/resolve_media_url.dart';
 import '../../../../../routes/app_routes.dart';
@@ -75,38 +77,30 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
       showUnselectedLabels: false,
       onTap: (index) {
         if (index == 4) return;
-        // 0: Add (+) → şimdilik hiçbir yere gitme / placeholder
-        if (index == 0) return;
-        if (index == 1) {
-          Navigator.pushReplacement(context, _noAnimationRoute(const SearchPage()));
+        if (index == 1) return;
+        if (index == 0) {
+          Navigator.pushReplacement(
+            context,
+            _noAnimationRoute(const SearchPage()),
+          );
           return;
         }
         if (index == 2) {
-          Navigator.pushReplacement(context, _noAnimationRoute(const HomePage()));
+          Navigator.pushReplacement(
+            context,
+            _noAnimationRoute(const HomePage()),
+          );
+          return;
+        }
+        if (index == 3) {
+          Navigator.pushReplacement(
+            context,
+            _noAnimationRoute(const ActivityPage()),
+          );
           return;
         }
       },
-      items: [
-        const BottomNavigationBarItem(
-          icon: Icon(Icons.add),
-          label: 'Add',
-        ),
-        const BottomNavigationBarItem(
-            icon: Icon(Icons.search), label: 'Search'),
-        const BottomNavigationBarItem(
-          icon: Icon(
-            Icons.home,
-            size: 32,
-          ),
-          label: 'Home',
-        ),
-        const BottomNavigationBarItem(
-            icon: Icon(Icons.favorite_border), label: 'Favorites'),
-        BottomNavigationBarItem(
-          icon: NotificationProfileNavIcon(),
-          label: 'Profile',
-        ),
-      ],
+      items: MainBottomNavItems.barItems,
     );
   }
 
@@ -157,7 +151,15 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
 
   Widget _buildMyReviewsTab() {
     if (_isLoadingMyReviews) {
-      return const Center(child: CircularProgressIndicator());
+      return Column(
+        children: [
+          const ReviewCardSkeleton(),
+          const SizedBox(height: AppSpacing.medium),
+          const ReviewCardSkeleton(),
+          const SizedBox(height: AppSpacing.medium),
+          const ReviewCardSkeleton(),
+        ],
+      );
     }
     if (_myReviewsError != null) {
       return Center(
@@ -413,7 +415,13 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
 
   Widget _buildWishlistTab() {
     if (_isLoadingWishlist) {
-      return const Center(child: CircularProgressIndicator());
+      return Column(
+        children: [
+          const ProductCardSkeleton(),
+          const SizedBox(height: AppSpacing.large),
+          const ProductCardSkeleton(),
+        ],
+      );
     }
     if (_wishlistError != null) {
       return Center(
@@ -571,9 +579,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
           ),
           centerTitle: true,
         ),
-        body: const Center(
-          child: CircularProgressIndicator(),
-        ),
+        body: const _ProfilePageSkeleton(),
         bottomNavigationBar: _buildBottomNavigationBar(),
       );
     }
@@ -869,6 +875,166 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
         ),
       ),
       bottomNavigationBar: _buildBottomNavigationBar(),
+    );
+  }
+}
+
+/// Ana profil verisi yüklenirken gerçek düzenle uyumlu shimmer.
+class _ProfilePageSkeleton extends StatelessWidget {
+  const _ProfilePageSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const SizedBox(height: AppSpacing.xxLarge),
+          ClipOval(
+            child: SkeletonLoader(
+              width: 100,
+              height: 100,
+              borderRadius: BorderRadius.circular(50),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.large),
+          SkeletonLoader(
+            width: 200,
+            height: 22,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          const SizedBox(height: AppSpacing.small),
+          SkeletonLoader(
+            width: 140,
+            height: 14,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          const SizedBox(height: AppSpacing.xxLarge),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _profileStatSkeleton(),
+              const SizedBox(width: AppSpacing.xxLarge),
+              _profileStatSkeleton(),
+              const SizedBox(width: AppSpacing.xxLarge),
+              _profileStatSkeleton(),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xxLarge),
+          Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+            child: Row(
+              children: [
+                Expanded(child: _profileSummaryCardSkeleton()),
+                const SizedBox(width: AppSpacing.xLarge),
+                Expanded(child: _profileSummaryCardSkeleton()),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xxLarge),
+          Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+            child: Row(
+              children: [
+                Expanded(
+                  child: SkeletonLoader(
+                    width: double.infinity,
+                    height: 36,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.large),
+                Expanded(
+                  child: SkeletonLoader(
+                    width: double.infinity,
+                    height: 36,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.large),
+          Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                SkeletonLoader(
+                  width: 100,
+                  height: 14,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                SkeletonLoader(
+                  width: 88,
+                  height: 32,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xxLarge),
+          Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+            child: Column(
+              children: [
+                const ReviewCardSkeleton(),
+                const SizedBox(height: AppSpacing.medium),
+                const ReviewCardSkeleton(),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xxLarge),
+        ],
+      ),
+    );
+  }
+
+  static Widget _profileStatSkeleton() {
+    return Column(
+      children: [
+        SkeletonLoader(
+          width: 36,
+          height: 24,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        const SizedBox(height: AppSpacing.small),
+        SkeletonLoader(
+          width: 64,
+          height: 12,
+          borderRadius: BorderRadius.circular(4),
+        ),
+      ],
+    );
+  }
+
+  static Widget _profileSummaryCardSkeleton() {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.xLarge),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SkeletonLoader(
+            width: 110,
+            height: 12,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          const SizedBox(height: AppSpacing.medium),
+          SkeletonLoader(
+            width: 72,
+            height: 22,
+            borderRadius: BorderRadius.circular(4),
+          ),
+        ],
+      ),
     );
   }
 }

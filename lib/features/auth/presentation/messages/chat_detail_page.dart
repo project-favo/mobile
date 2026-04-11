@@ -29,7 +29,8 @@ class ChatDetailPage extends StatefulWidget {
   State<ChatDetailPage> createState() => _ChatDetailPageState();
 }
 
-class _ChatDetailPageState extends State<ChatDetailPage> {
+class _ChatDetailPageState extends State<ChatDetailPage>
+    with WidgetsBindingObserver {
   final SessionHelper _sessionHelper = SessionHelper();
   final MessageRepository _messageRepository = MessageRepository();
   final AuthService _authService = AuthService();
@@ -55,16 +56,29 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _conversationId = widget.conversation.id;
     _inlineOtherBytes = decodeProfilePhotoBytes(
       widget.conversation.otherParticipant.profilePhotoData,
     );
     _init();
-    _inputFocusNode.addListener(() {
-      if (_inputFocusNode.hasFocus) {
-        _scrollToBottom();
-      }
-    });
+    _inputFocusNode.addListener(_onInputFocusChanged);
+  }
+
+  void _onInputFocusChanged() {
+    if (_inputFocusNode.hasFocus) {
+      _scrollToBottom();
+    }
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    // Klavye açılıp kapanınca viewport yeniden boyanıyor; birkaç kare boyunca
+    // maxScrollExtent güncellenir, tek seferde jumpTo yetmiyor.
+    if (!_isLoading && _errorMessage == null && _messages.isNotEmpty) {
+      _scrollToBottom();
+    }
   }
 
   Future<void> _init() async {
@@ -248,6 +262,8 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
 
   @override
   void dispose() {
+    _inputFocusNode.removeListener(_onInputFocusChanged);
+    WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
     _scrollController.dispose();
     _inputFocusNode.dispose();
@@ -410,23 +426,46 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                       final isMine = index.isEven;
                       final maxWidth =
                           MediaQuery.of(context).size.width * 0.7;
-                      return Align(
-                        alignment: isMine
-                            ? Alignment.centerRight
-                            : Alignment.centerLeft,
-                        child: Container(
-                          margin: EdgeInsets.only(
-                            bottom: AppSpacing.small,
-                            left: isMine ? 64 : 0,
-                            right: isMine ? 0 : 64,
-                          ),
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(maxWidth: maxWidth),
-                            child: const SkeletonLoader(
-                              width: double.infinity,
-                              height: 20,
+                      const otherAvatarSize = 34.0;
+                      const myAvatarSize = 28.0;
+                      final bubbleHeight =
+                          index % 3 == 1 ? 36.0 : 20.0;
+                      Widget circleSkeleton(double size) => ClipOval(
+                            child: SkeletonLoader(
+                              width: size,
+                              height: size,
+                              borderRadius:
+                                  BorderRadius.circular(size / 2),
                             ),
-                          ),
+                          );
+                      final bubble = ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: maxWidth),
+                        child: SkeletonLoader(
+                          width: double.infinity,
+                          height: bubbleHeight,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      );
+                      return Container(
+                        margin: const EdgeInsets.only(
+                          bottom: AppSpacing.small,
+                        ),
+                        child: Row(
+                          mainAxisAlignment: isMine
+                              ? MainAxisAlignment.end
+                              : MainAxisAlignment.start,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: isMine
+                              ? [
+                                  bubble,
+                                  const SizedBox(width: 8),
+                                  circleSkeleton(myAvatarSize),
+                                ]
+                              : [
+                                  circleSkeleton(otherAvatarSize),
+                                  const SizedBox(width: 10),
+                                  bubble,
+                                ],
                         ),
                       );
                     },
@@ -544,14 +583,23 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   }
 
   void _scrollToBottom() {
-    if (!_scrollController.hasClients) return;
-    // Layout tamamen çizildikten hemen sonra en alta atla.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
-      _scrollController.jumpTo(
-        _scrollController.position.maxScrollExtent,
-      );
-    });
+    void jump() {
+      if (!mounted || !_scrollController.hasClients) return;
+      final max = _scrollController.position.maxScrollExtent;
+      if (!max.isFinite) return;
+      _scrollController.jumpTo(max);
+    }
+
+    // Ardışık karelerde tekrarla: klavye animasyonu sırasında extent her karede artabilir.
+    void scheduleChained(int remaining) {
+      if (remaining <= 0) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        jump();
+        scheduleChained(remaining - 1);
+      });
+    }
+
+    scheduleChained(4);
   }
 }
 

@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/theme/app_chip_styles.dart';
@@ -9,7 +11,8 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/session_helper.dart';
 import '../../../core/notifications/notification_realtime_service.dart';
-import '../../../core/widgets/notification_profile_nav_icon.dart';
+import '../../../core/widgets/main_bottom_nav_items.dart';
+import '../../../features/activity/presentation/activity_page.dart';
 import '../../../core/widgets/custom_refresh_indicator.dart';
 import '../../../core/widgets/skeleton_loader.dart';
 import '../../../core/routes/custom_page_transitions.dart';
@@ -26,6 +29,8 @@ import '../data/repositories/product_repository.dart';
 import '../data/repositories/interaction_repository.dart';
 import '../data/models/tag_dto.dart';
 import '../data/models/product_dto.dart';
+import '../data/models/home_feed_mode.dart';
+import '../data/models/product_search_result_dto.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -36,7 +41,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   // BottomNavigationBar index mapping:
-  // 0: add (+), 1: search, 2: home, 3: favorites, 4: profile
+  // 0: search, 1: add (placeholder), 2: home, 3: activity, 4: profile
   int _selectedCategoryIndex = -1; // -1 means "All", 0+ means selected category
   int _selectedSubCategoryIndex = -1; // -1 means none
   final TagRepository _tagRepository = TagRepository();
@@ -60,6 +65,7 @@ class _HomePageState extends State<HomePage> {
   final ScrollController _scrollController = ScrollController();
   int _unreadMessageCount = 0;
   bool _notificationSvcAttached = false;
+  HomeFeedMode _feedMode = HomeFeedMode.discover;
 
   Route _noAnimationRoute(Widget page) {
     return PageRouteBuilder(
@@ -72,30 +78,33 @@ class _HomePageState extends State<HomePage> {
   BottomNavigationBar _buildBottomNavigationBar() {
     return BottomNavigationBar(
       type: BottomNavigationBarType.fixed,
-      // Home sayfasındayken her zaman Home (index 2) seçili görünsün
+      // On Home, highlight center Home tab (index 2).
       currentIndex: 2,
       selectedItemColor: AppColors.primary,
       unselectedItemColor: AppColors.textSecondary,
       showSelectedLabels: false,
       showUnselectedLabels: false,
       onTap: (index) {
-        // 0: Add (+) → şimdilik hiçbir yere gitme / placeholder
         if (index == 0) {
-          return;
-        }
-        // 1: Search
-        if (index == 1) {
           Navigator.pushReplacement(
             context,
             _noAnimationRoute(const SearchPage()),
           );
           return;
         }
-        // 2: Home (zaten buradayız) → hiçbir şey yapma
+        if (index == 1) {
+          return;
+        }
         if (index == 2) {
           return;
         }
-        // 4: Profile
+        if (index == 3) {
+          Navigator.pushReplacement(
+            context,
+            _noAnimationRoute(const ActivityPage()),
+          );
+          return;
+        }
         if (index == 4) {
           Navigator.pushReplacement(
             context,
@@ -104,27 +113,7 @@ class _HomePageState extends State<HomePage> {
           return;
         }
       },
-      items: [
-        const BottomNavigationBarItem(
-          icon: Icon(Icons.add),
-          label: 'Add',
-        ),
-        const BottomNavigationBarItem(
-            icon: Icon(Icons.search), label: 'Search'),
-        const BottomNavigationBarItem(
-          icon: Icon(
-            Icons.home,
-            size: 32,
-          ),
-          label: 'Home',
-        ),
-        const BottomNavigationBarItem(
-            icon: Icon(Icons.favorite_border), label: 'Favorites'),
-        BottomNavigationBarItem(
-          icon: NotificationProfileNavIcon(),
-          label: 'Profile',
-        ),
-      ],
+      items: MainBottomNavItems.barItems,
     );
   }
 
@@ -209,18 +198,72 @@ class _HomePageState extends State<HomePage> {
     try {
       final firebaseIdToken = await _sessionHelper.ensureSession();
 
-      final result = _activeCategoryPathPrefix == null
-          ? await _productRepository.getHomeFeed(
-              page: page,
-              size: 10,
-              firebaseIdToken: firebaseIdToken,
-            )
-          : await _productRepository.searchProducts(
-              categoryPathPrefix: _activeCategoryPathPrefix!,
+      late ProductSearchResultDto result;
+      if (_activeCategoryPathPrefix != null) {
+        result = await _productRepository.searchProducts(
+          categoryPathPrefix: _activeCategoryPathPrefix!,
+          page: page,
+          size: 10,
+          firebaseIdToken: firebaseIdToken,
+        );
+      } else {
+        switch (_feedMode) {
+          case HomeFeedMode.discover:
+            result = await _productRepository.getHomeFeed(
               page: page,
               size: 10,
               firebaseIdToken: firebaseIdToken,
             );
+            break;
+          case HomeFeedMode.trendingReviews:
+            result = await _productRepository.getTrendingReviewsFeed(
+              page: page,
+              size: 10,
+              firebaseIdToken: firebaseIdToken,
+            );
+            break;
+          case HomeFeedMode.weeklyLikes:
+            result = await _productRepository.getTrendingLikesWeekFeed(
+              page: page,
+              size: 10,
+              firebaseIdToken: firebaseIdToken,
+            );
+            break;
+          case HomeFeedMode.personalized:
+            final t = firebaseIdToken;
+            if (t == null) {
+              result = await _productRepository.getTrendingReviewsFeed(
+                page: page,
+                size: 10,
+                firebaseIdToken: null,
+              );
+            } else {
+              try {
+                result = await _productRepository.getPersonalizedFeed(
+                  page: page,
+                  size: 10,
+                  firebaseIdToken: t,
+                );
+              } on DioException catch (e) {
+                if (e.response?.statusCode == 401) {
+                  final user = FirebaseAuth.instance.currentUser;
+                  if (user == null) rethrow;
+                  final newToken = await user.getIdToken(true);
+                  if (newToken == null) rethrow;
+                  ApiClient().setAuthToken(newToken);
+                  result = await _productRepository.getPersonalizedFeed(
+                    page: page,
+                    size: 10,
+                    firebaseIdToken: newToken,
+                  );
+                } else {
+                  rethrow;
+                }
+              }
+            }
+            break;
+        }
+      }
 
       if (!mounted) return;
 
@@ -389,9 +432,25 @@ class _HomePageState extends State<HomePage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                /// Feed mode chips skeleton (Discover / Trending / …)
+                SizedBox(
+                  height: AppSpacing.categoryChipHeight,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: 4,
+                    separatorBuilder: (_, __) =>
+                        const SizedBox(width: AppSpacing.large),
+                    itemBuilder: (context, index) => const SkeletonLoader(
+                      width: 88,
+                      height: AppSpacing.categoryChipHeight - 8,
+                      borderRadius: BorderRadius.all(Radius.circular(20)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.large),
                 /// TOP 10 SKELETON
-                const Text(
-                  'Top 10 Products',
+                Text(
+                  _feedMode.topStripTitle,
                   style: AppTextStyles.heading2,
                 ),
                 const SizedBox(height: AppSpacing.large),
@@ -590,8 +649,52 @@ class _HomePageState extends State<HomePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Top 10 Products',
+              if (_selectedCategoryIndex == -1) ...[
+                SizedBox(
+                  height: AppSpacing.categoryChipHeight,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      for (final mode in HomeFeedMode.values)
+                        Padding(
+                          padding:
+                              const EdgeInsets.only(right: AppSpacing.large),
+                          child: _FeedModeChip(
+                            title: mode.chipLabel,
+                            selected: _feedMode == mode,
+                            onTap: () async {
+                              if (mode == HomeFeedMode.personalized) {
+                                final t =
+                                    await _sessionHelper.ensureSession();
+                                if (!mounted) return;
+                                if (t == null) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Sign in for personalized recommendations.',
+                                      ),
+                                      backgroundColor: AppColors.error,
+                                    ),
+                                  );
+                                  return;
+                                }
+                              }
+                              if (_feedMode == mode) return;
+                              setState(() {
+                                _feedMode = mode;
+                                _isFiltering = true;
+                              });
+                              await _loadProductsPage(0);
+                            },
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.large),
+              ],
+              Text(
+                _feedMode.topStripTitle,
                 style: AppTextStyles.heading2,
               ),
               const SizedBox(height: AppSpacing.large),
@@ -902,6 +1005,41 @@ class _HomePageState extends State<HomePage> {
         ),
       ),
       bottomNavigationBar: _buildBottomNavigationBar(),
+    );
+  }
+}
+
+/// Feed kaynağı (Discover / Trending / …) — sadece "All" kategorideyken.
+class _FeedModeChip extends StatelessWidget {
+  final String title;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  const _FeedModeChip({
+    required this.title,
+    this.selected = false,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final decoration =
+        AppChipStyles.categoryChipDecoration(selected: selected);
+    final textStyle = AppChipStyles.categoryChipText(selected: selected);
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.large),
+        alignment: Alignment.center,
+        decoration: decoration,
+        child: Text(
+          title,
+          style: textStyle,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
     );
   }
 }

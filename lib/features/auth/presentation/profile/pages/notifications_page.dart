@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../../../../../core/notifications/notification_realtime_service.dart';
 import '../../../../../core/theme/app_colors.dart';
@@ -9,8 +10,12 @@ import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../data/models/notification_dto.dart';
+import '../../../data/models/notification_section.dart';
 import '../../../data/repositories/notification_repository.dart';
 import '../../review/pages/review_page.dart';
+
+/// Tarihler ve metinler İngilizce (ekran dili ne olursa olsun).
+const String _kDateLocale = 'en_US';
 
 class NotificationsPage extends StatefulWidget {
   const NotificationsPage({super.key});
@@ -26,6 +31,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
   final List<NotificationDto> _items = [];
   StreamSubscription<NotificationPushEvent>? _pushSub;
 
+  late final Map<NotificationSection, bool> _sectionExpanded;
+
   bool _loadingFirst = true;
   bool _loadingMore = false;
   String? _errorMessage;
@@ -36,6 +43,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
   @override
   void initState() {
     super.initState();
+    _sectionExpanded = {
+      for (final s in NotificationSection.values) s: true,
+    };
     NotificationRealtimeService.instance.attach();
     _pushSub =
         NotificationRealtimeService.instance.pushStream.listen(_onRealtimePush);
@@ -101,7 +111,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
     if (_loadingMore || _page + 1 >= _totalPages) return;
     setState(() => _loadingMore = true);
     try {
-      final next = await _repository.getNotifications(page: _page + 1, size: 20);
+      final next =
+          await _repository.getNotifications(page: _page + 1, size: 20);
       if (!mounted) return;
       setState(() {
         _items.addAll(next.content);
@@ -181,11 +192,80 @@ class _NotificationsPageState extends State<NotificationsPage> {
     } catch (_) {}
   }
 
-  String _formatTime(DateTime? d) {
+  String _formatTimestamp(DateTime? d) {
     if (d == null) return '';
-    final l = d.toLocal();
-    String two(int v) => v.toString().padLeft(2, '0');
-    return '${l.year}-${two(l.month)}-${two(l.day)} ${two(l.hour)}:${two(l.minute)}';
+    final local = d.toLocal();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final day = DateTime(local.year, local.month, local.day);
+    final yesterday = today.subtract(const Duration(days: 1));
+    final time = DateFormat.Hm(_kDateLocale).format(local);
+
+    if (day == today) {
+      return 'Today · $time';
+    }
+    if (day == yesterday) {
+      return 'Yesterday · $time';
+    }
+    if (local.year == now.year) {
+      return '${DateFormat.MMMd(_kDateLocale).format(local)} · $time';
+    }
+    return '${DateFormat.yMMMd(_kDateLocale).format(local)} · $time';
+  }
+
+  Future<bool> _confirmDelete(NotificationDto n) async {
+    final del = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete notification'),
+        content: const Text(
+          'Remove this notification permanently?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.error),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    return del == true;
+  }
+
+  Future<bool> _deleteNotification(NotificationDto n) async {
+    final ok = await _confirmDelete(n);
+    if (!ok || !mounted) return false;
+    try {
+      await _repository.deleteNotification(n.id);
+      if (!mounted) return false;
+      await NotificationRealtimeService.instance.refreshUnread();
+      return true;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(ErrorHandler.getUserFriendlyMessage(e)),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+      return false;
+    }
+  }
+
+  Future<bool?> _onDismissConfirm(NotificationDto n) async {
+    return _deleteNotification(n);
+  }
+
+  void _onDismissed(NotificationDto n) {
+    setState(() {
+      _items.removeWhere((e) => e.id == n.id);
+    });
   }
 
   @override
@@ -291,34 +371,182 @@ class _NotificationsPageState extends State<NotificationsPage> {
       );
     }
 
-    return ListView.builder(
+    final grouped = groupNotifications(_items);
+    final orderedSections = List<NotificationSection>.from(
+      NotificationSection.values,
+    )..sort((a, b) => a.sortIndex.compareTo(b.sortIndex));
+
+    final sectionWidgets = <Widget>[];
+    for (final section in orderedSections) {
+      final list = grouped[section]!;
+      if (list.isEmpty) continue;
+
+      final countLabel =
+          list.length == 1 ? '1 notification' : '${list.length} notifications';
+
+      sectionWidgets.add(
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.medium,
+            AppSpacing.small,
+            AppSpacing.medium,
+            AppSpacing.small,
+          ),
+          child: Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: Material(
+              color: AppColors.background,
+              borderRadius: BorderRadius.circular(12),
+              child: ExpansionTile(
+                key: PageStorageKey<String>('notif-section-${section.name}'),
+                initiallyExpanded: _sectionExpanded[section] ?? true,
+                onExpansionChanged: (open) {
+                  setState(() => _sectionExpanded[section] = open);
+                },
+                leading: Icon(section.icon, color: AppColors.primary, size: 22),
+                title: Text(
+                  section.title,
+                  style: AppTextStyles.bodyMedium.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                subtitle: Text(
+                  countLabel,
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                collapsedShape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                backgroundColor: AppColors.surface,
+                collapsedBackgroundColor: AppColors.surface,
+                childrenPadding: const EdgeInsets.only(bottom: AppSpacing.medium),
+                children: [
+                  for (final n in list)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.small,
+                        0,
+                        AppSpacing.small,
+                        AppSpacing.medium,
+                      ),
+                      child: Dismissible(
+                        key: ValueKey('notification-${n.id}'),
+                        direction: DismissDirection.endToStart,
+                        background: const _DismissDeleteBackground(),
+                        confirmDismiss: (_) => _onDismissConfirm(n),
+                        onDismissed: (_) => _onDismissed(n),
+                        child: _NotificationTile(
+                          notification: n,
+                          timestamp: _formatTimestamp(n.createdAt),
+                          onTap: () => _onTapItem(n),
+                          onDelete: () async {
+                            if (await _deleteNotification(n) && mounted) {
+                              setState(() {
+                                _items.removeWhere((e) => e.id == n.id);
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (_loadingMore) {
+      sectionWidgets.add(
+        const Padding(
+          padding: EdgeInsets.all(AppSpacing.large),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+
+    sectionWidgets.add(const SizedBox(height: AppSpacing.large));
+
+    return ListView(
       controller: _scrollController,
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.large,
-        vertical: AppSpacing.medium,
+      padding: const EdgeInsets.only(top: AppSpacing.small),
+      children: sectionWidgets,
+    );
+  }
+}
+
+class _DismissDeleteBackground extends StatelessWidget {
+  const _DismissDeleteBackground();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      alignment: Alignment.centerRight,
+      padding: const EdgeInsets.only(right: AppSpacing.xLarge),
+      decoration: BoxDecoration(
+        color: AppColors.error.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(12),
       ),
-      itemCount: _items.length + (_loadingMore ? 1 : 0),
-      itemBuilder: (context, index) {
-        if (index >= _items.length) {
-          return const Padding(
-            padding: EdgeInsets.all(AppSpacing.large),
-            child: Center(child: CircularProgressIndicator()),
-          );
-        }
-        final n = _items[index];
-        return Padding(
-          padding: const EdgeInsets.only(bottom: AppSpacing.medium),
-          child: Material(
-            color: n.isUnread
-                ? AppColors.primary.withValues(alpha: 0.06)
-                : AppColors.surface,
-            borderRadius: BorderRadius.circular(12),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(12),
-              onTap: () => _onTapItem(n),
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.large),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          const Icon(Icons.delete_outline_rounded, color: Colors.white, size: 22),
+          const SizedBox(width: 6),
+          Text(
+            'Delete',
+            style: AppTextStyles.bodyMedium.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NotificationTile extends StatelessWidget {
+  final NotificationDto notification;
+  final String timestamp;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
+
+  const _NotificationTile({
+    required this.notification,
+    required this.timestamp,
+    required this.onTap,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final n = notification;
+    return Material(
+      color: n.isUnread
+          ? AppColors.primary.withValues(alpha: 0.06)
+          : AppColors.surface,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.large,
+            AppSpacing.medium,
+            AppSpacing.small,
+            AppSpacing.medium,
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -329,8 +557,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
                           child: Text(
                             n.title,
                             style: AppTextStyles.bodyMedium.copyWith(
-                              fontWeight:
-                                  n.isUnread ? FontWeight.w700 : FontWeight.w600,
+                              fontWeight: n.isUnread
+                                  ? FontWeight.w700
+                                  : FontWeight.w600,
                             ),
                           ),
                         ),
@@ -352,7 +581,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                       Text(
                         n.actorDisplayName!,
                         style: AppTextStyles.bodySecondary.copyWith(
-                          fontWeight: FontWeight.w500,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ],
@@ -365,7 +594,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                     ],
                     const SizedBox(height: AppSpacing.small),
                     Text(
-                      _formatTime(n.createdAt),
+                      timestamp,
                       style: AppTextStyles.bodySmall.copyWith(
                         color: AppColors.textSecondary,
                       ),
@@ -373,10 +602,36 @@ class _NotificationsPageState extends State<NotificationsPage> {
                   ],
                 ),
               ),
-            ),
+              PopupMenuButton<String>(
+                icon: Icon(
+                  Icons.more_vert_rounded,
+                  color: AppColors.textSecondary.withValues(alpha: 0.85),
+                ),
+                padding: EdgeInsets.zero,
+                onSelected: (value) {
+                  if (value == 'delete') onDelete();
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem<String>(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        const Icon(Icons.delete_outline,
+                            color: AppColors.error, size: 20),
+                        const SizedBox(width: AppSpacing.small),
+                        Text(
+                          'Delete',
+                          style: TextStyle(color: AppColors.error),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 }

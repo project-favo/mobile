@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../utils/load_profile_image_bytes.dart';
+import 'skeleton_loader.dart';
 
 /// Ağ veya data URI profil görseli: önce [memoryBytes], sonra kimlik doğrulamalı indirme.
 class ProfileAvatar extends StatefulWidget {
@@ -83,16 +84,11 @@ class _ProfileAvatarState extends State<ProfileAvatar> {
     }
 
     if (_loading) {
-      return CircleAvatar(
-        radius: widget.radius,
-        backgroundColor: AppColors.surface,
-        child: SizedBox(
-          width: widget.radius,
-          height: widget.radius,
-          child: const CircularProgressIndicator(
-            strokeWidth: 2,
-            color: AppColors.primary,
-          ),
+      return ClipOval(
+        child: SkeletonLoader(
+          width: widget.radius * 2,
+          height: widget.radius * 2,
+          borderRadius: BorderRadius.circular(widget.radius),
         ),
       );
     }
@@ -218,18 +214,11 @@ class _ProfileAvatarImageState extends State<ProfileAvatarImage> {
     }
 
     if (_loading) {
-      return SizedBox(
-        width: widget.size,
-        height: widget.size,
-        child: Center(
-          child: SizedBox(
-            width: widget.size * 0.45,
-            height: widget.size * 0.45,
-            child: const CircularProgressIndicator(
-              strokeWidth: 2,
-              color: AppColors.primary,
-            ),
-          ),
+      return ClipOval(
+        child: SkeletonLoader(
+          width: widget.size,
+          height: widget.size,
+          borderRadius: BorderRadius.circular(radius),
         ),
       );
     }

@@ -7,7 +7,8 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/session_helper.dart';
 import '../../../core/notifications/notification_realtime_service.dart';
-import '../../../core/widgets/notification_profile_nav_icon.dart';
+import '../../../core/widgets/main_bottom_nav_items.dart';
+import '../../../features/activity/presentation/activity_page.dart';
 import '../data/models/product_dto.dart';
 import '../data/models/tag_dto.dart';
 import '../data/repositories/product_repository.dart';
@@ -457,45 +458,37 @@ class _SearchPageState extends State<SearchPage> {
                 ),
       bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
-        currentIndex: 1,
+        currentIndex: 0,
         selectedItemColor: AppColors.primary,
         unselectedItemColor: AppColors.textSecondary,
         showSelectedLabels: false,
         showUnselectedLabels: false,
         onTap: (index) {
-          if (index == 1) return;
-          // 0: Add (+) → şimdilik hiçbir yere gitme / placeholder
           if (index == 0) return;
+          if (index == 1) return;
           if (index == 2) {
-            Navigator.pushReplacement(context, _noAnimationRoute(const HomePage()));
+            Navigator.pushReplacement(
+              context,
+              _noAnimationRoute(const HomePage()),
+            );
+            return;
+          }
+          if (index == 3) {
+            Navigator.pushReplacement(
+              context,
+              _noAnimationRoute(const ActivityPage()),
+            );
             return;
           }
           if (index == 4) {
-            Navigator.pushReplacement(context, _noAnimationRoute(const ProfilePage()));
+            Navigator.pushReplacement(
+              context,
+              _noAnimationRoute(const ProfilePage()),
+            );
             return;
           }
         },
-        items: [
-          const BottomNavigationBarItem(
-            icon: Icon(Icons.add),
-            label: 'Add',
-          ),
-          const BottomNavigationBarItem(
-              icon: Icon(Icons.search), label: 'Search'),
-          const BottomNavigationBarItem(
-            icon: Icon(
-              Icons.home,
-              size: 32,
-            ),
-            label: 'Home',
-          ),
-          const BottomNavigationBarItem(
-              icon: Icon(Icons.favorite_border), label: 'Favorites'),
-          BottomNavigationBarItem(
-            icon: NotificationProfileNavIcon(),
-            label: 'Profile',
-          ),
-        ],
+        items: MainBottomNavItems.barItems,
       ),
     );
   }

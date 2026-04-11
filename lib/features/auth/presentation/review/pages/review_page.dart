@@ -21,6 +21,7 @@ import '../../../data/services/auth_service.dart';
 import 'add_review_page.dart';
 import 'review_detail_page.dart';
 import 'compare_product_select_page.dart';
+import '../../messages/product_ai_chat_page.dart';
 import '../../profile/pages/user_profile_page.dart';
 
 class ReviewPage extends StatefulWidget {
@@ -381,6 +382,27 @@ class _ReviewPageState extends State<ReviewPage> {
         elevation: 0,
         iconTheme: const IconThemeData(color: AppColors.primary),
         actions: [
+          IconButton(
+            tooltip: 'Ürün asistanı',
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ProductAiChatPage(
+                    productId: _currentProduct.id,
+                    productName: _currentProduct.name,
+                  ),
+                ),
+              );
+            },
+            icon: Image.asset(
+              'assets/images/Chatbot.png',
+              width: 26,
+              height: 26,
+              fit: BoxFit.contain,
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: TextButton(

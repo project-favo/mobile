@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/network/firebase_auth_api_interceptor.dart';
 import '../models/product_dto.dart';
 import '../models/product_search_result_dto.dart';
 import 'interaction_repository.dart';
@@ -9,26 +10,34 @@ class ProductRepository {
   final ApiClient _apiClient = ApiClient();
   final InteractionRepository _interactionRepository = InteractionRepository();
 
-  /// Paginated home feed from GET /api/products/home?page={page}&size={size}
-  Future<ProductSearchResultDto> getHomeFeed({
+  /// Ortak sayfalı feed: `ProductSearchResultDto` + rating/like zenginleştirme.
+  /// [size] sunucuda en fazla 50 ile sınırlanır.
+  Future<ProductSearchResultDto> _getEnrichedPagedFeed({
+    required String path,
     required int page,
     int size = 20,
     String? firebaseIdToken,
+    bool skipFirebaseAuthOnFeedRequest = false,
   }) async {
+    final safeSize = size.clamp(1, 50);
     try {
       final response = await _apiClient.dio.get(
-        '/api/products/home',
+        path,
         queryParameters: {
           'page': page,
-          'size': size,
+          'size': safeSize,
         },
+        options: skipFirebaseAuthOnFeedRequest
+            ? Options(
+                extra: const {kDioExtraSkipFirebaseAuth: true},
+              )
+            : null,
       );
 
       final result = ProductSearchResultDto.fromJson(
         response.data as Map<String, dynamic>,
       );
 
-      // Optionally enrich with rating/like info (parallel)
       if (result.content.isEmpty) return result;
 
       final enrichedContent = await _enrichProductsWithInteractionInfo(
@@ -49,12 +58,70 @@ class ProductRepository {
         final errorMessage = errorData is Map
             ? (errorData['message'] ??
                 errorData['error'] ??
-                'Failed to fetch home feed')
-            : errorData?.toString() ?? 'Failed to fetch home feed';
+                'Failed to load feed')
+            : errorData?.toString() ?? 'Failed to load feed';
         throw Exception(errorMessage);
       }
       throw Exception('Network error: ${e.message}');
     }
+  }
+
+  /// Paginated home feed from GET /api/products/home?page={page}&size={size}
+  Future<ProductSearchResultDto> getHomeFeed({
+    required int page,
+    int size = 20,
+    String? firebaseIdToken,
+  }) async {
+    return _getEnrichedPagedFeed(
+      path: '/api/products/home',
+      page: page,
+      size: size,
+      firebaseIdToken: firebaseIdToken,
+    );
+  }
+
+  /// GET /api/products/feed/trending-reviews — public; son 7 gün yorum trendi.
+  Future<ProductSearchResultDto> getTrendingReviewsFeed({
+    required int page,
+    int size = 20,
+    String? firebaseIdToken,
+  }) async {
+    return _getEnrichedPagedFeed(
+      path: '/api/products/feed/trending-reviews',
+      page: page,
+      size: size,
+      firebaseIdToken: firebaseIdToken,
+      skipFirebaseAuthOnFeedRequest: true,
+    );
+  }
+
+  /// GET /api/products/feed/trending-likes-week — public; bu hafta LIKE trendi.
+  Future<ProductSearchResultDto> getTrendingLikesWeekFeed({
+    required int page,
+    int size = 20,
+    String? firebaseIdToken,
+  }) async {
+    return _getEnrichedPagedFeed(
+      path: '/api/products/feed/trending-likes-week',
+      page: page,
+      size: size,
+      firebaseIdToken: firebaseIdToken,
+      skipFirebaseAuthOnFeedRequest: true,
+    );
+  }
+
+  /// GET /api/products/feed/personalized — Bearer zorunlu.
+  Future<ProductSearchResultDto> getPersonalizedFeed({
+    required int page,
+    int size = 20,
+    required String firebaseIdToken,
+  }) async {
+    return _getEnrichedPagedFeed(
+      path: '/api/products/feed/personalized',
+      page: page,
+      size: size,
+      firebaseIdToken: firebaseIdToken,
+    );
   }
 
   /// Same as search but no rating/like (fast). For compare list.

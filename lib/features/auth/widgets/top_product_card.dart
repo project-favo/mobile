@@ -5,19 +5,7 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/routes/custom_page_transitions.dart';
 import '../data/models/product_dto.dart';
-import '../data/repositories/review_repository.dart';
 import '../presentation/review/pages/review_page.dart';
-
-/// Basit, in-memory review count cache (sadece app çalışırken tutulur).
-class _TopReviewCountCache {
-  static final Map<String, int> _cache = {};
-
-  static int? get(String productId) => _cache[productId];
-
-  static void set(String productId, int count) {
-    _cache[productId] = count;
-  }
-}
 
 class TopProductList extends StatefulWidget {
   final ProductDto product;
@@ -34,36 +22,12 @@ class TopProductList extends StatefulWidget {
 }
 
 class _TopProductListState extends State<TopProductList> {
-  int? _reviewCount;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadReviewCount();
-  }
-
-  Future<void> _loadReviewCount() async {
-    _reviewCount = _TopReviewCountCache.get(widget.product.id);
-    try {
-      final reviewRepository = ReviewRepository();
-      final reviews = await reviewRepository.getReviewsByProductId(
-        widget.product.id,
-        firebaseIdToken: null,
-      );
-      final count = reviews.length;
-      _TopReviewCountCache.set(widget.product.id, count);
-      setState(() {
-        _reviewCount = count;
-      });
-    } catch (e) {
-      setState(() {
-        _reviewCount ??= 0;
-      });
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final topImgW = (200 * dpr).round().clamp(120, 600);
+    final topImgH = (130 * dpr).round().clamp(100, 500);
+
     final rating = widget.product.averageRating ?? 0.0;
     final normalizedRating = (rating.isNaN || rating.isInfinite)
         ? 0.0
@@ -86,7 +50,7 @@ class _TopProductListState extends State<TopProductList> {
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: AppColors.primary.withOpacity(0.3),
+              color: AppColors.primary.withValues(alpha: 0.3),
               blurRadius: 12,
               offset: const Offset(0, 4),
             ),
@@ -113,6 +77,9 @@ class _TopProductListState extends State<TopProductList> {
                     child: Image.network(
                       widget.product.imageURL,
                       fit: BoxFit.contain,
+                      cacheWidth: topImgW,
+                      cacheHeight: topImgH,
+                      filterQuality: FilterQuality.medium,
                       errorBuilder: (context, error, stackTrace) {
                         return Container(
                           color: Colors.white,
@@ -137,7 +104,7 @@ class _TopProductListState extends State<TopProductList> {
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
+                          color: Colors.black.withValues(alpha: 0.2),
                           blurRadius: 4,
                           offset: const Offset(0, 2),
                         ),
@@ -161,7 +128,7 @@ class _TopProductListState extends State<TopProductList> {
                   child: Container(
                     padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.9),
+                      color: Colors.white.withValues(alpha: 0.9),
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
@@ -265,15 +232,13 @@ class _TopProductListState extends State<TopProductList> {
                       Icon(
                         Icons.reviews_outlined,
                         size: 12,
-                        color: Colors.white.withOpacity(0.8),
+                        color: Colors.white.withValues(alpha: 0.8),
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        _reviewCount == null
-                            ? 'reviews'
-                            : '${_reviewCount ?? 0} reviews',
+                        'Reviews',
                         style: AppTextStyles.bodySmall.copyWith(
-                          color: Colors.white.withOpacity(0.9),
+                          color: Colors.white.withValues(alpha: 0.9),
                           fontSize: 11,
                         ),
                       ),

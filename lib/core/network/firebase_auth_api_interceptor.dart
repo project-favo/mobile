@@ -3,17 +3,28 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import 'api_client.dart';
 
-/// Her istekten hemen önce oturum varsa Firebase **ID token**'ı [getIdToken(true)] ile yeniler.
+/// [Options.extra] içinde `true` ise bu istekte Bearer eklenmez (anonim public uçlar için).
+const kDioExtraSkipFirebaseAuth = 'skipFirebaseAuth';
+
+/// Her istekten önce oturum varsa Firebase ID token eklenir. [getIdToken(false)]
+/// önbellekteki geçerli token’ı kullanır; her istekte zorunlu yenileme uygulamayı ciddi yavaşlatır.
 ///
 /// Oturum yokken eski [Authorization] başlığını kaldırır; aksi halde Dio’daki kalıntı Bearer
 /// bazı uçlarda (ör. permitAll + token doğrulaması) 401 üretebilir.
+///
+/// Public feed gibi uçlar için [kDioExtraSkipFirebaseAuth] kullanın.
 void attachFirebaseIdTokenToAllRequests() {
   ApiClient().dio.interceptors.add(
         InterceptorsWrapper(
           onRequest: (options, handler) async {
+            if (options.extra[kDioExtraSkipFirebaseAuth] == true) {
+              options.headers.remove('Authorization');
+              handler.next(options);
+              return;
+            }
             final user = FirebaseAuth.instance.currentUser;
             if (user != null) {
-              final t = await user.getIdToken(true);
+              final t = await user.getIdToken();
               if (t != null) {
                 options.headers['Authorization'] = 'Bearer $t';
               }
