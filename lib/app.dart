@@ -3,6 +3,10 @@ import 'routes/app_routes.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/auth_splash_gate.dart';
 
+final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
+final GlobalKey<ScaffoldMessengerState> appScaffoldMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
+
 class MyApp extends StatelessWidget {
   final bool onboardingCompleted;
 
@@ -17,6 +21,8 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Favo',
       theme: AppTheme.lightTheme,
+      navigatorKey: appNavigatorKey,
+      scaffoldMessengerKey: appScaffoldMessengerKey,
       routes: AppRoutes.routes,
       home: AuthSplashGate(onboardingCompleted: onboardingCompleted),
     );

@@ -2,6 +2,8 @@ import 'package:dio/dio.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import 'api_client.dart';
+import '../utils/exceptions.dart';
+import '../utils/session_helper.dart';
 
 /// [Options.extra] içinde `true` ise bu istekte Bearer eklenmez (anonim public uçlar için).
 const kDioExtraSkipFirebaseAuth = 'skipFirebaseAuth';
@@ -14,6 +16,7 @@ const kDioExtraSkipFirebaseAuth = 'skipFirebaseAuth';
 ///
 /// Public feed gibi uçlar için [kDioExtraSkipFirebaseAuth] kullanın.
 void attachFirebaseIdTokenToAllRequests() {
+  final sessionHelper = SessionHelper();
   ApiClient().dio.interceptors.add(
         InterceptorsWrapper(
           onRequest: (options, handler) async {
@@ -32,6 +35,25 @@ void attachFirebaseIdTokenToAllRequests() {
               options.headers.remove('Authorization');
             }
             handler.next(options);
+          },
+          onError: (e, handler) async {
+            final body = dioResponseDataAsSearchString(e.response?.data);
+            final message = e.message ?? '';
+            final combined = '$body $message';
+            if (looksLikeDeactivatedAccountMessage(combined)) {
+              await sessionHelper.handleDeactivatedAccount();
+              handler.reject(
+                DioException(
+                  requestOptions: e.requestOptions,
+                  response: e.response,
+                  type: e.type,
+                  error: const DeactivatedAccountException(),
+                  message: e.message,
+                ),
+              );
+              return;
+            }
+            handler.next(e);
           },
         ),
       );

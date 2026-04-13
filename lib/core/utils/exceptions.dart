@@ -54,3 +54,20 @@ class IncompleteBackendRegistrationException implements Exception {
   @override
   String toString() => 'IncompleteBackendRegistrationException';
 }
+
+class DeactivatedAccountException implements Exception {
+  const DeactivatedAccountException();
+
+  @override
+  String toString() => 'DeactivatedAccountException';
+}
+
+bool looksLikeDeactivatedAccountMessage(String value) {
+  final s = value.toLowerCase();
+  if (s.contains('deactivated')) return true;
+  if (s.contains('inactive')) return true;
+  if (s.contains('suspend')) return true;
+  if (s.contains('account_disabled')) return true;
+  if (s.contains('user_disabled')) return true;
+  return false;
+}

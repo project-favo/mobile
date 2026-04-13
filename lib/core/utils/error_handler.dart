@@ -54,12 +54,19 @@ class ErrorHandler {
 
   /// Converts any exception to a user-friendly error message
   static String getUserFriendlyMessage(dynamic error) {
+    if (error is DeactivatedAccountException) {
+      return 'This account is deactivated. Please contact support.';
+    }
+
     if (error is IncompleteBackendRegistrationException) {
       return 'No app profile is linked to this account yet. Register with the '
           'same email, enter the 5-digit code from Favo, then sign in.';
     }
 
     final raw = error.toString().toUpperCase();
+    if (looksLikeDeactivatedAccountMessage(raw)) {
+      return 'This account is deactivated. Please contact support.';
+    }
     if (raw.contains('EMAIL_NOT_VERIFIED')) {
       return 'Your email is not verified on the server yet. Enter the 5-digit code '
           'sent to your inbox, or tap Resend code.';

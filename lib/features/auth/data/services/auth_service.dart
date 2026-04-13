@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../../../core/utils/session_helper.dart';
 import '../../../../core/utils/exceptions.dart';
 import '../models/user_response_dto.dart';
 import '../models/user_update_request_dto.dart';
@@ -32,6 +33,7 @@ bool _dioLooksLikeNoBackendUser(DioException e) {
 class AuthService {
   final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
   final AuthRepository _authRepository = AuthRepository();
+  final SessionHelper _sessionHelper = SessionHelper();
 
   /// Kayıt formundan doğrulama ekranına taşınan veri (tüm AuthService örnekleri için ortak).
   static RegisterRequestDto? _registerFormDraft;
@@ -90,8 +92,17 @@ class AuthService {
 
       final idToken = await _getFreshIdToken(user);
       try {
-        return await _backendLoginWithIdToken(idToken);
+        final login = await _backendLoginWithIdToken(idToken);
+        _sessionHelper.markBackendLoginSucceeded();
+        return login;
       } on DioException catch (e) {
+        if (looksLikeDeactivatedAccountMessage(
+          dioResponseDataAsSearchString(e.response?.data),
+        )) {
+          await _firebaseAuth.signOut();
+          _sessionHelper.clearSession();
+          throw const DeactivatedAccountException();
+        }
         if (dioExceptionBodyContains(e, 'EMAIL_NOT_VERIFIED')) {
           throw EmailNotVerifiedException(user.email ?? email.trim());
         }
@@ -152,7 +163,7 @@ class AuthService {
     }
     if (requireFirebaseEmailVerified && !user.emailVerified) {
       throw Exception(
-        'Önce e-postanızdaki doğrulama bağlantısını açın, ardından Devam’a basın.',
+        'Open the verification link in your email, then tap Continue.',
       );
     }
     final email = user.email?.trim();
@@ -285,6 +296,12 @@ class AuthService {
     return _authRepository.verifyEmail(token, code);
   }
 
+  /// Şifre sıfırlama: backend `POST /api/auth/forgot-password` (public, Bearer yok).
+  /// Firebase reset linki e-postaya gider; hesap yoksa da aynı başarı yanıtı.
+  Future<String> requestPasswordReset(String email) async {
+    return _authRepository.forgotPassword(email);
+  }
+
   /// `POST /api/auth/resend-verification` — gövdede [email] (Spring’de yaygın).
   Future<void> resendVerification() async {
     final user = _firebaseAuth.currentUser;
@@ -353,6 +370,7 @@ class AuthService {
 
   /// Çıkış yapar
   Future<void> signOut() async {
+    _sessionHelper.clearSession();
     await _firebaseAuth.signOut();
   }
 
