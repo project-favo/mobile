@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../core/theme/app_colors.dart';
 
 /// Custom page route with smooth fade and scale transition
 class FadeScaleRoute<T> extends PageRouteBuilder<T> {

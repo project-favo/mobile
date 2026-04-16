@@ -673,8 +673,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                 if (!(_user!.isEmailVerified)) ...[
                   const SizedBox(height: AppSpacing.medium),
                   Text(
-                    'E-posta doğrulaması bekleniyor. Önce gelen kutunuzdaki '
-                    'Firebase bağlantısını açın.',
+                    'Email verification pending. Open the link in your inbox.',
                     style: AppTextStyles.bodySmall.copyWith(
                       color: AppColors.textSecondary,
                     ),

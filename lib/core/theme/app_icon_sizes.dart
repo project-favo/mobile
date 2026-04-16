@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 
 class AppIconSizes {
   static const double favorite = 22;

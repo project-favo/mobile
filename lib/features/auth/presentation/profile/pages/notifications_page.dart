@@ -9,6 +9,7 @@ import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/utils/error_handler.dart';
+import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../../data/models/notification_dto.dart';
 import '../../../data/models/notification_section.dart';
 import '../../../data/repositories/notification_repository.dart';
@@ -321,9 +322,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
     if (_loadingFirst) {
       return ListView(
         physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.only(top: AppSpacing.large),
         children: [
-          const SizedBox(height: 120),
-          const Center(child: CircularProgressIndicator()),
+          for (var i = 0; i < 8; i++) const NotificationTileSkeleton(),
         ],
       );
     }
@@ -466,7 +467,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
       sectionWidgets.add(
         const Padding(
           padding: EdgeInsets.all(AppSpacing.large),
-          child: Center(child: CircularProgressIndicator()),
+          child: Center(child: ListLoadMoreSkeleton()),
         ),
       );
     }

@@ -15,6 +15,7 @@ class ApiConfig {
   static const String registerPath = '/api/auth/register';
   static const String verifyEmailPath = '/api/auth/verify-email';
   static const String resendVerificationPath = '/api/auth/resend-verification';
+  static const String forgotPasswordPath = '/api/auth/forgot-password';
   static const String mePath = '/api/auth/me';
 
   /// Native STOMP endpoint (bildirimler: `/user/queue/notifications`). Mesajlar `/ws` kullanır.

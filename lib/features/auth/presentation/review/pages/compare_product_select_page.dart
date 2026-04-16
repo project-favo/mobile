@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
+import '../../../../../core/theme/app_decorations.dart';
 import '../../../../../core/utils/session_helper.dart';
+import '../../../../../core/utils/product_rating_display.dart';
+import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/repositories/product_repository.dart';
 import 'product_comparison_page.dart';
@@ -173,7 +176,15 @@ class _CompareProductSelectPageState extends State<CompareProductSelectPage> {
           ),
           Expanded(
             child: _isLoadingProducts
-                ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                ? ListView(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.xLarge,
+                    ),
+                    children: [
+                      for (var i = 0; i < 8; i++)
+                        const CompareProductRowSkeleton(),
+                    ],
+                  )
                 : _errorMessage != null
                     ? Center(
                         child: Padding(
@@ -214,12 +225,17 @@ class _CompareProductSelectPageState extends State<CompareProductSelectPage> {
                             separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.medium),
                             itemBuilder: (context, index) {
                               final p = _filteredProducts[index];
-                              return Material(
-                                color: AppColors.surface,
-                                borderRadius: BorderRadius.circular(12),
-                                child: InkWell(
+                              return Container(
+                                decoration: BoxDecoration(
+                                  color: AppColors.surface,
+                                  borderRadius: BorderRadius.circular(16),
+                                  boxShadow: AppDecorations.softCardShadow,
+                                ),
+                                child: Material(
+                                  color: Colors.transparent,
+                                  child: InkWell(
                                   onTap: () => _onProductSelected(p),
-                                  borderRadius: BorderRadius.circular(12),
+                                  borderRadius: BorderRadius.circular(16),
                                   child: Padding(
                                     padding: const EdgeInsets.all(AppSpacing.large),
                                     child: Row(
@@ -255,15 +271,24 @@ class _CompareProductSelectPageState extends State<CompareProductSelectPage> {
                                                 p.tag.name,
                                                 style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary),
                                               ),
-                                              if (p.averageRating != null) ...[
+                                              if (productHasMeaningfulRating(
+                                                  p.averageRating)) ...[
                                                 const SizedBox(height: 4),
                                                 Row(
                                                   children: [
-                                                    const Icon(Icons.star, size: 14, color: AppColors.primary),
+                                                    const Icon(Icons.star,
+                                                        size: 14,
+                                                        color: AppColors.primary),
                                                     const SizedBox(width: 4),
                                                     Text(
-                                                      (p.averageRating!).toStringAsFixed(1),
-                                                      style: AppTextStyles.bodySmall.copyWith(fontWeight: FontWeight.w600),
+                                                      p.averageRating!
+                                                          .toStringAsFixed(1),
+                                                      style: AppTextStyles
+                                                          .bodySmall
+                                                          .copyWith(
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w600),
                                                     ),
                                                   ],
                                                 ),
@@ -275,6 +300,7 @@ class _CompareProductSelectPageState extends State<CompareProductSelectPage> {
                                       ],
                                     ),
                                   ),
+                                ),
                                 ),
                               );
                             },

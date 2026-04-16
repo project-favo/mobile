@@ -4,6 +4,8 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_icon_sizes.dart';
 import '../../../../core/theme/app_decorations.dart';
 import '../../../../core/theme/app_spacing.dart';
+import '../../../../core/utils/product_rating_display.dart';
+import '../../../../core/widgets/new_product_badge.dart';
 import '../data/repositories/review_repository.dart';
 
 /// Basit, in-memory review count cache (sadece app çalışırken tutulur).
@@ -174,71 +176,62 @@ class _ProductCardState extends State<ProductCard> {
 
             const SizedBox(height: AppSpacing.medium),
 
-            // Yıldız gösterimi ve rating/review info
             Builder(
               builder: (context) {
-                // Rating değerini normalize et
                 final rawRating = widget.rating;
-                final normalizedRating = (rawRating.isNaN || rawRating.isInfinite || rawRating <= 0) 
-                    ? 0.0 
+                if (!productHasMeaningfulRating(rawRating)) {
+                  return const Align(
+                    alignment: Alignment.centerLeft,
+                    child: NewProductBadge(),
+                  );
+                }
+                final normalizedRating = (rawRating.isNaN || rawRating.isInfinite)
+                    ? 0.0
                     : rawRating.clamp(0.0, 5.0);
-                
-                // Yıldız boyutu küçültüldü (14px)
                 const double starSize = 14.0;
-                
                 return Row(
                   children: [
-                    // Stars
-                    ...List.generate(
-                      5,
-                      (index) {
-                        // Tam dolu yıldız kontrolü: rating >= index + 1
-                        if (normalizedRating >= index + 1) {
-                          return const Icon(
-                            Icons.star,
-                            size: starSize,
-                            color: AppColors.primary,
-                          );
-                        } 
-                        // Yarı dolu yıldız kontrolü: rating > index && rating < index + 1
-                        else if (normalizedRating > index && normalizedRating < index + 1) {
-                          return SizedBox(
-                            width: starSize,
-                            height: starSize,
-                            child: Stack(
-                              children: [
-                                const Icon(
-                                  Icons.star_border,
-                                  size: starSize,
-                                  color: AppColors.textSecondary,
-                                ),
-                                ClipRect(
-                                  child: Align(
-                                    alignment: Alignment.centerLeft,
-                                    widthFactor: normalizedRating - index,
-                                    child: const Icon(
-                                      Icons.star,
-                                      size: starSize,
-                                      color: AppColors.primary,
-                                    ),
+                    ...List.generate(5, (index) {
+                      if (normalizedRating >= index + 1) {
+                        return const Icon(
+                          Icons.star,
+                          size: starSize,
+                          color: AppColors.primary,
+                        );
+                      } else if (normalizedRating > index &&
+                          normalizedRating < index + 1) {
+                        return SizedBox(
+                          width: starSize,
+                          height: starSize,
+                          child: Stack(
+                            children: [
+                              const Icon(
+                                Icons.star_border,
+                                size: starSize,
+                                color: AppColors.textSecondary,
+                              ),
+                              ClipRect(
+                                child: Align(
+                                  alignment: Alignment.centerLeft,
+                                  widthFactor: normalizedRating - index,
+                                  child: const Icon(
+                                    Icons.star,
+                                    size: starSize,
+                                    color: AppColors.primary,
                                   ),
                                 ),
-                              ],
-                            ),
-                          );
-                        } 
-                        // Boş yıldız
-                        else {
-                          return const Icon(
-                            Icons.star_border,
-                            size: starSize,
-                            color: AppColors.textSecondary,
-                          );
-                        }
-                      },
-                    ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+                      return const Icon(
+                        Icons.star_border,
+                        size: starSize,
+                        color: AppColors.textSecondary,
+                      );
+                    }),
                     const SizedBox(width: 6),
-                    // Rating text
                     Text(
                       normalizedRating.toStringAsFixed(1),
                       style: AppTextStyles.bodySmall.copyWith(
@@ -265,7 +258,9 @@ class _ProductCardState extends State<ProductCard> {
                   Text(
                     _reviewCount == null
                         ? 'Reviews'
-                        : '${_reviewCount ?? 0} Reviews',
+                        : (_reviewCount == 0
+                            ? 'No reviews yet'
+                            : '$_reviewCount ${_reviewCount == 1 ? 'review' : 'reviews'}'),
                     style: AppTextStyles.bodySmall.copyWith(
                       color: AppColors.textSecondary,
                       fontSize: 11,

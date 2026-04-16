@@ -8,6 +8,7 @@ import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/utils/exceptions.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
+import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../../../../core/utils/resolve_media_url.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
 import '../../../../../routes/app_routes.dart';
@@ -462,9 +463,19 @@ class _UserProfilePageState extends State<UserProfilePage>
               ),
               const SizedBox(height: AppSpacing.xxLarge),
               if (_isLoadingReviews)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: AppSpacing.xxLarge),
-                  child: CircularProgressIndicator(color: AppColors.primary),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.xLarge,
+                  ),
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < 3; i++)
+                        const Padding(
+                          padding: EdgeInsets.only(bottom: AppSpacing.large),
+                          child: ReviewCardSkeleton(),
+                        ),
+                    ],
+                  ),
                 )
               else if (_reviews.isEmpty)
                 Padding(

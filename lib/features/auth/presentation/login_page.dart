@@ -7,6 +7,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/exceptions.dart';
 import 'backend_email_verification_page.dart';
+import 'forgot_password_page.dart';
 import '../data/services/auth_service.dart';
 
 
@@ -23,6 +24,10 @@ class _LoginPageState extends State<LoginPage> {
 
   final _email = TextEditingController();
   final _password = TextEditingController();
+  final _emailFocus = FocusNode();
+  final _passwordFocus = FocusNode();
+  final _emailFieldKey = GlobalKey();
+  final _passwordFieldKey = GlobalKey();
 
   bool _obscure = true;
   bool _submitted = false;
@@ -33,7 +38,24 @@ class _LoginPageState extends State<LoginPage> {
   void dispose() {
     _email.dispose();
     _password.dispose();
+    _emailFocus.dispose();
+    _passwordFocus.dispose();
     super.dispose();
+  }
+
+  void _scrollFieldIntoView(GlobalKey fieldKey) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final ctx = fieldKey.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          alignment: 0.22,
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
+        );
+      }
+    });
   }
 
   String? _emailValidator(String? v) {
@@ -129,7 +151,16 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  void _onForgotPassword() {}
+  void _onForgotPassword() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => ForgotPasswordPage(
+          initialEmail: _email.text.trim(),
+        ),
+      ),
+    );
+  }
 
   @override
 Widget build(BuildContext context) {
@@ -192,33 +223,46 @@ Widget build(BuildContext context) {
                           ),
                           const SizedBox(height: 18),
 
-                          AppInput(
-                            controller: _email,
-                            hint: "Email Address",
-                            keyboardType: TextInputType.emailAddress,
-                            validator: _emailValidator,
-                            onChanged: () {
-                              // Email değiştiğinde auth error'u temizle
-                              if (_authError != null) {
-                                setState(() => _authError = null);
-                              }
-                            },
+                          KeyedSubtree(
+                            key: _emailFieldKey,
+                            child: AppInput(
+                              controller: _email,
+                              focusNode: _emailFocus,
+                              hint: "Email Address",
+                              keyboardType: TextInputType.emailAddress,
+                              textInputAction: TextInputAction.next,
+                              onFieldSubmitted: (_) {
+                                _passwordFocus.requestFocus();
+                                _scrollFieldIntoView(_passwordFieldKey);
+                              },
+                              validator: _emailValidator,
+                              onChanged: () {
+                                if (_authError != null) {
+                                  setState(() => _authError = null);
+                                }
+                              },
+                            ),
                           ),
                           const SizedBox(height: 14),
 
-                          AppInput(
-                            controller: _password,
-                            hint: "Password",
-                            obscure: _obscure,
-                            onToggleObscure: () =>
-                                setState(() => _obscure = !_obscure),
-                            validator: _passwordValidator,
-                            onChanged: () {
-                              // Password değiştiğinde auth error'u temizle
-                              if (_authError != null) {
-                                setState(() => _authError = null);
-                              }
-                            },
+                          KeyedSubtree(
+                            key: _passwordFieldKey,
+                            child: AppInput(
+                              controller: _password,
+                              focusNode: _passwordFocus,
+                              hint: "Password",
+                              obscure: _obscure,
+                              textInputAction: TextInputAction.done,
+                              onFieldSubmitted: (_) => _onLogin(),
+                              onToggleObscure: () =>
+                                  setState(() => _obscure = !_obscure),
+                              validator: _passwordValidator,
+                              onChanged: () {
+                                if (_authError != null) {
+                                  setState(() => _authError = null);
+                                }
+                              },
+                            ),
                           ),
 
                           const SizedBox(height: 6),

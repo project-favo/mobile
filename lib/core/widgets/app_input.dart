@@ -12,6 +12,11 @@ class AppInput extends StatelessWidget {
   final Widget? suffixIcon;
   final VoidCallback? onChanged;
   final List<TextInputFormatter>? inputFormatters;
+  final FocusNode? focusNode;
+  final TextInputAction? textInputAction;
+  final void Function(String)? onFieldSubmitted;
+  final EdgeInsets scrollPadding;
+  final bool readOnly;
 
   const AppInput({
     super.key,
@@ -24,16 +29,26 @@ class AppInput extends StatelessWidget {
     this.suffixIcon,
     this.onChanged,
     this.inputFormatters,
+    this.focusNode,
+    this.textInputAction,
+    this.onFieldSubmitted,
+    this.scrollPadding = const EdgeInsets.only(bottom: 120, top: 56),
+    this.readOnly = false,
   });
 
   @override
   Widget build(BuildContext context) {
     return TextFormField(
       controller: controller,
+      focusNode: focusNode,
+      textInputAction: textInputAction,
+      onFieldSubmitted: onFieldSubmitted,
+      scrollPadding: scrollPadding,
       validator: validator,
       keyboardType: keyboardType,
       inputFormatters: inputFormatters,
       obscureText: obscure,
+      readOnly: readOnly,
       onChanged: onChanged != null ? (_) => onChanged!() : null,
       style: const TextStyle(
         fontSize: 14,

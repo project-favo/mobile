@@ -3,6 +3,7 @@ import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
+import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../data/models/conversation_dto.dart';
 import '../../../data/repositories/interaction_repository.dart';
@@ -121,7 +122,15 @@ class _FollowListPageState extends State<FollowListPage> {
         centerTitle: true,
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+          ? ListView(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.xLarge,
+                vertical: AppSpacing.large,
+              ),
+              children: [
+                for (var i = 0; i < 10; i++) const FollowUserRowSkeleton(),
+              ],
+            )
           : _users.isEmpty
               ? Center(
                   child: Padding(
@@ -148,9 +157,7 @@ class _FollowListPageState extends State<FollowListPage> {
                       if (index == _users.length) {
                         return const Padding(
                           padding: EdgeInsets.symmetric(vertical: AppSpacing.large),
-                          child: Center(
-                            child: CircularProgressIndicator(color: AppColors.primary),
-                          ),
+                          child: Center(child: ListLoadMoreSkeleton()),
                         );
                       }
                       final user = _users[index];

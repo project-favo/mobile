@@ -4,6 +4,10 @@ import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
+import '../../../../../core/widgets/skeleton_loader.dart';
+import '../../../../../core/utils/product_rating_display.dart';
+import '../../../../../core/widgets/new_product_badge.dart';
+import '../../../../../core/theme/app_decorations.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/models/review_dto.dart';
 import '../../../data/repositories/review_repository.dart';
@@ -114,11 +118,13 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
             // Sadece review kısmı scroll olsun
             Expanded(
               child: _loadingReviews
-                  ? const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(AppSpacing.xxLarge),
-                        child: CircularProgressIndicator(color: AppColors.primary),
-                      ),
+                  ? Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Expanded(child: ReviewCardSkeleton()),
+                        const SizedBox(width: AppSpacing.medium),
+                        const Expanded(child: ReviewCardSkeleton()),
+                      ],
                     )
                   : SingleChildScrollView(
                       child: Column(
@@ -174,6 +180,7 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
 
   Widget _buildProductCard(ProductDto p, bool isWinner) {
     final rating = _rating(p);
+    final hasRating = productHasMeaningfulRating(p.averageRating);
     final baseColor = isWinner ? AppColors.success : AppColors.error;
     final cardColor = baseColor.withOpacity(0.06);
     final borderColor = baseColor.withOpacity(0.35);
@@ -187,23 +194,17 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
             SlideRightRoute(page: ReviewPage(product: p)),
           );
         },
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         child: Container(
           padding: const EdgeInsets.all(AppSpacing.large),
           decoration: BoxDecoration(
             color: cardColor,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: borderColor,
               width: 1,
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.06),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
+            boxShadow: AppDecorations.softCardShadow,
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -212,7 +213,7 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
               AspectRatio(
                 aspectRatio: 3 / 4,
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(12),
                   child: Image.network(
                     p.imageURL,
                     width: double.infinity,
@@ -243,21 +244,24 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: AppSpacing.medium),
-              Row(
-                children: [
-                  const Icon(Icons.star, size: 20, color: AppColors.primary),
-                  const SizedBox(width: 6),
-                  Text(
-                    rating.toStringAsFixed(1),
-                    style: AppTextStyles.heading3.copyWith(color: AppColors.primary),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '/ 5',
-                    style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary),
-                  ),
-                ],
-              ),
+              if (hasRating)
+                Row(
+                  children: [
+                    const Icon(Icons.star, size: 20, color: AppColors.primary),
+                    const SizedBox(width: 6),
+                    Text(
+                      rating.toStringAsFixed(1),
+                      style: AppTextStyles.heading3.copyWith(color: AppColors.primary),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '/ 5',
+                      style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary),
+                    ),
+                  ],
+                )
+              else
+                const NewProductBadge(),
             ],
           ),
         ),

@@ -31,6 +31,22 @@ class _RegisterPageState extends State<RegisterPage> {
   final _surname = TextEditingController();
   final _birthdate = TextEditingController();
 
+  final _userNameFocus = FocusNode();
+  final _nameFocus = FocusNode();
+  final _surnameFocus = FocusNode();
+  final _birthdateFocus = FocusNode();
+  final _emailFocus = FocusNode();
+  final _passwordFocus = FocusNode();
+  final _confirmPasswordFocus = FocusNode();
+
+  final _userNameFieldKey = GlobalKey();
+  final _nameFieldKey = GlobalKey();
+  final _surnameFieldKey = GlobalKey();
+  final _birthdateFieldKey = GlobalKey();
+  final _emailFieldKey = GlobalKey();
+  final _passwordFieldKey = GlobalKey();
+  final _confirmPasswordFieldKey = GlobalKey();
+
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   bool _submitted = false;
@@ -50,7 +66,29 @@ class _RegisterPageState extends State<RegisterPage> {
     _name.dispose();
     _surname.dispose();
     _birthdate.dispose();
+    _userNameFocus.dispose();
+    _nameFocus.dispose();
+    _surnameFocus.dispose();
+    _birthdateFocus.dispose();
+    _emailFocus.dispose();
+    _passwordFocus.dispose();
+    _confirmPasswordFocus.dispose();
     super.dispose();
+  }
+
+  void _scrollFieldIntoView(GlobalKey fieldKey) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final ctx = fieldKey.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          alignment: 0.2,
+          duration: const Duration(milliseconds: 280),
+          curve: Curves.easeOutCubic,
+        );
+      }
+    });
   }
 
   String? _emailValidator(String? v) {
@@ -420,75 +458,138 @@ class _RegisterPageState extends State<RegisterPage> {
                   ),
                   const SizedBox(height: 24),
 
-                  AppInput(
-                    controller: _userName,
-                    hint: "Username",
-                    validator: _userNameValidator,
-                    onChanged: () {
-                      if (_registerError != null) {
-                        setState(() => _registerError = null);
-                      }
-                    },
+                  KeyedSubtree(
+                    key: _userNameFieldKey,
+                    child: AppInput(
+                      controller: _userName,
+                      focusNode: _userNameFocus,
+                      hint: "Username",
+                      textInputAction: TextInputAction.next,
+                      onFieldSubmitted: (_) {
+                        _nameFocus.requestFocus();
+                        _scrollFieldIntoView(_nameFieldKey);
+                      },
+                      validator: _userNameValidator,
+                      onChanged: () {
+                        if (_registerError != null) {
+                          setState(() => _registerError = null);
+                        }
+                      },
+                    ),
                   ),
                   const SizedBox(height: 14),
 
-                  AppInput(
-                    controller: _name,
-                    hint: "Name",
-                    validator: _nameValidator,
+                  KeyedSubtree(
+                    key: _nameFieldKey,
+                    child: AppInput(
+                      controller: _name,
+                      focusNode: _nameFocus,
+                      hint: "Name",
+                      textInputAction: TextInputAction.next,
+                      onFieldSubmitted: (_) {
+                        _surnameFocus.requestFocus();
+                        _scrollFieldIntoView(_surnameFieldKey);
+                      },
+                      validator: _nameValidator,
+                    ),
                   ),
                   const SizedBox(height: 14),
 
-                  AppInput(
-                    controller: _surname,
-                    hint: "Surname",
-                    validator: _surnameValidator,
+                  KeyedSubtree(
+                    key: _surnameFieldKey,
+                    child: AppInput(
+                      controller: _surname,
+                      focusNode: _surnameFocus,
+                      hint: "Surname",
+                      textInputAction: TextInputAction.next,
+                      onFieldSubmitted: (_) {
+                        _birthdateFocus.requestFocus();
+                        _scrollFieldIntoView(_birthdateFieldKey);
+                      },
+                      validator: _surnameValidator,
+                    ),
                   ),
                   const SizedBox(height: 14),
 
-                  GestureDetector(
-                    onTap: () => _selectDate(context),
-                    child: AbsorbPointer(
-                      child: AppInput(
-                        controller: _birthdate,
-                        hint: "Birthdate",
-                        validator: _birthdateValidator,
-                        suffixIcon: const Icon(Icons.calendar_today, color: AppColors.textSecondary),
+                  KeyedSubtree(
+                    key: _birthdateFieldKey,
+                    child: GestureDetector(
+                      onTap: () => _selectDate(context),
+                      child: AbsorbPointer(
+                        child: AppInput(
+                          controller: _birthdate,
+                          focusNode: _birthdateFocus,
+                          hint: "Birthdate",
+                          readOnly: true,
+                          textInputAction: TextInputAction.next,
+                          onFieldSubmitted: (_) {
+                            _emailFocus.requestFocus();
+                            _scrollFieldIntoView(_emailFieldKey);
+                          },
+                          validator: _birthdateValidator,
+                          suffixIcon: const Icon(Icons.calendar_today,
+                              color: AppColors.textSecondary),
+                        ),
                       ),
                     ),
                   ),
                   const SizedBox(height: 14),
 
-                  AppInput(
-                    controller: _email,
-                    hint: "Email Address",
-                    keyboardType: TextInputType.emailAddress,
-                    validator: _emailValidator,
-                    onChanged: () {
-                      if (_registerError != null) {
-                        setState(() => _registerError = null);
-                      }
-                    },
+                  KeyedSubtree(
+                    key: _emailFieldKey,
+                    child: AppInput(
+                      controller: _email,
+                      focusNode: _emailFocus,
+                      hint: "Email Address",
+                      keyboardType: TextInputType.emailAddress,
+                      textInputAction: TextInputAction.next,
+                      onFieldSubmitted: (_) {
+                        _passwordFocus.requestFocus();
+                        _scrollFieldIntoView(_passwordFieldKey);
+                      },
+                      validator: _emailValidator,
+                      onChanged: () {
+                        if (_registerError != null) {
+                          setState(() => _registerError = null);
+                        }
+                      },
+                    ),
                   ),
                   const SizedBox(height: 14),
 
-                  AppInput(
-                    controller: _password,
-                    hint: "Password",
-                    obscure: _obscurePassword,
-                    onToggleObscure: () =>
-                        setState(() => _obscurePassword = !_obscurePassword),
-                    validator: _passwordValidator,
+                  KeyedSubtree(
+                    key: _passwordFieldKey,
+                    child: AppInput(
+                      controller: _password,
+                      focusNode: _passwordFocus,
+                      hint: "Password",
+                      obscure: _obscurePassword,
+                      textInputAction: TextInputAction.next,
+                      onFieldSubmitted: (_) {
+                        _confirmPasswordFocus.requestFocus();
+                        _scrollFieldIntoView(_confirmPasswordFieldKey);
+                      },
+                      onToggleObscure: () =>
+                          setState(() => _obscurePassword = !_obscurePassword),
+                      validator: _passwordValidator,
+                    ),
                   ),
                   const SizedBox(height: 14),
 
-                  AppInput(
-                    controller: _confirmPassword,
-                    hint: "Confirm Password",
-                    obscure: _obscureConfirmPassword,
-                    onToggleObscure: () => setState(
-                        () => _obscureConfirmPassword = !_obscureConfirmPassword),
-                    validator: _confirmPasswordValidator,
+                  KeyedSubtree(
+                    key: _confirmPasswordFieldKey,
+                    child: AppInput(
+                      controller: _confirmPassword,
+                      focusNode: _confirmPasswordFocus,
+                      hint: "Confirm Password",
+                      obscure: _obscureConfirmPassword,
+                      textInputAction: TextInputAction.done,
+                      onFieldSubmitted: (_) => _onRegister(),
+                      onToggleObscure: () => setState(
+                          () => _obscureConfirmPassword =
+                              !_obscureConfirmPassword),
+                      validator: _confirmPasswordValidator,
+                    ),
                   ),
 
                   const SizedBox(height: 20),

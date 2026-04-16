@@ -56,6 +56,7 @@ class _RegisterFirebaseVerifyGatePageState
             navigateHomeOnSuccess: true,
             popWithSuccessResult: false,
             refreshProfileOnlyOnContinue: false,
+            requestVerificationEmailOnOpen: false,
           ),
         ),
       );

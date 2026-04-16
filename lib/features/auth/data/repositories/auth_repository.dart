@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import '../../../../core/config/api_config.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/network/firebase_auth_api_interceptor.dart';
 import '../../../../core/utils/exceptions.dart';
 import '../models/user_response_dto.dart';
 import '../models/user_update_request_dto.dart';
@@ -196,6 +197,52 @@ class AuthRepository {
           ? (errorData['error'] ?? errorData['message'] ?? 'VERIFICATION_FAILED')
           : 'VERIFICATION_FAILED';
       throw Exception(errorCode.toString());
+    }
+  }
+
+  /// `POST /api/auth/forgot-password` — public; Authorization gönderilmez.
+  /// Başarı: 202 + `{ "message": "..." }`; hesap yoksa da aynı (enumeration yok).
+  Future<String> forgotPassword(String email) async {
+    final addr = email.trim();
+    if (addr.isEmpty) {
+      throw Exception('Email is required');
+    }
+    final dio = _apiClient.dio;
+    try {
+      // Oturum açıkken bile Bearer gönderilmemeli: [attachFirebaseIdTokenToAllRequests] bunu atlar.
+      final response = await dio.post(
+        ApiConfig.forgotPasswordPath,
+        data: {'email': addr},
+        options: Options(
+          extra: {kDioExtraSkipFirebaseAuth: true},
+        ),
+      );
+      final status = response.statusCode ?? 0;
+      if (status == 202 || (status >= 200 && status < 300)) {
+        final raw = response.data;
+        if (raw is Map) {
+          final m = raw['message']?.toString().trim();
+          if (m != null && m.isNotEmpty) return m;
+        }
+        return 'If an account exists for this email, password reset instructions were sent.';
+      }
+      throw Exception('Request could not be completed');
+    } on DioException catch (e) {
+      final code = e.response?.statusCode;
+      final data = e.response?.data;
+      if (code == 400) {
+        final msg = data is Map
+            ? (data['message'] ?? data['error'] ?? 'Invalid email')
+            : 'Invalid email';
+        throw Exception(msg.toString());
+      }
+      if (e.response != null) {
+        final msg = data is Map
+            ? (data['message'] ?? data['error'] ?? 'Request failed')
+            : data?.toString() ?? 'Request failed';
+        throw Exception(msg.toString());
+      }
+      throw Exception(e.message ?? 'Network error');
     }
   }
 

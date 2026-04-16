@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:dio/dio.dart';
 import '../../../../../core/theme/app_colors.dart';
+import '../../../../../core/theme/app_decorations.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/utils/error_handler.dart';
@@ -454,21 +455,15 @@ class _ProductChip extends StatelessWidget {
         width: 110,
         decoration: BoxDecoration(
           color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 6,
-              offset: const Offset(0, 2),
-            ),
-          ],
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: AppDecorations.softCardShadow,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ClipRRect(
               borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(12)),
+                  const BorderRadius.vertical(top: Radius.circular(16)),
               child: Container(
                 height: 80,
                 width: 110,
@@ -497,26 +492,46 @@ class _ProductChip extends StatelessWidget {
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: Row(
-                children: [
-                  const Icon(Icons.star_rounded,
-                      size: 12, color: Colors.amber),
-                  const SizedBox(width: 2),
-                  Text(
-                    product.averageRating.toStringAsFixed(1),
-                    style: AppTextStyles.bodySmall.copyWith(fontSize: 11),
-                  ),
-                  if (product.reviewCount > 0) ...[
-                    const SizedBox(width: 3),
-                    Text(
-                      '(${product.reviewCount})',
+              child: Builder(
+                builder: (context) {
+                  final hasRating = product.averageRating > 0.001 &&
+                      !product.averageRating.isNaN &&
+                      !product.averageRating.isInfinite;
+                  if (!hasRating && product.reviewCount <= 0) {
+                    return Text(
+                      'New',
                       style: AppTextStyles.bodySmall.copyWith(
                         fontSize: 10,
-                        color: AppColors.textSecondary,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.primary,
                       ),
-                    ),
-                  ],
-                ],
+                    );
+                  }
+                  return Row(
+                    children: [
+                      if (hasRating) ...[
+                        const Icon(Icons.star_rounded,
+                            size: 12, color: Colors.amber),
+                        const SizedBox(width: 2),
+                        Text(
+                          product.averageRating.toStringAsFixed(1),
+                          style:
+                              AppTextStyles.bodySmall.copyWith(fontSize: 11),
+                        ),
+                      ],
+                      if (product.reviewCount > 0) ...[
+                        if (hasRating) const SizedBox(width: 3),
+                        Text(
+                          '(${product.reviewCount})',
+                          style: AppTextStyles.bodySmall.copyWith(
+                            fontSize: 10,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ],
+                  );
+                },
               ),
             ),
           ],

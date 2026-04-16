@@ -161,6 +161,7 @@ class _CompleteAppProfilePageState extends State<CompleteAppProfilePage> {
             popWithSuccessResult: true,
             navigateHomeOnSuccess: false,
             refreshProfileOnlyOnContinue: false,
+            requestVerificationEmailOnOpen: false,
           ),
         ),
       );

@@ -9,6 +9,8 @@ import '../../../../../core/widgets/custom_refresh_indicator.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
 import '../../../../../core/utils/error_handler.dart';
+import '../../../../../core/utils/product_rating_display.dart';
+import '../../../../../core/widgets/new_product_badge.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/models/review_dto.dart';
@@ -514,33 +516,29 @@ class _ReviewPageState extends State<ReviewPage> {
               ),
               const SizedBox(height: AppSpacing.xLarge),
 
-              /// RATING STARS with rating and review count
+              /// Rating / “New” rozeti + özet satırı
               Builder(
                 builder: (context) {
                   final rawRating = _currentProduct.averageRating ?? 0.0;
+                  final hasRating = productHasMeaningfulRating(rawRating);
                   final rating = (rawRating.isNaN || rawRating.isInfinite)
                       ? 0.0
                       : rawRating.clamp(0.0, 5.0);
-                  
+
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        children: [
-                          // Stars
-                          ...List.generate(
-                            5,
-                            (index) {
-                              // Tam dolu yıldız kontrolü: rating >= index + 1
+                      if (hasRating)
+                        Row(
+                          children: [
+                            ...List.generate(5, (index) {
                               if (rating >= index + 1) {
                                 return const Icon(
                                   Icons.star,
                                   size: 24,
                                   color: AppColors.primary,
                                 );
-                              } 
-                              // Yarı dolu yıldız kontrolü: rating > index && rating < index + 1
-                              else if (rating > index && rating < index + 1) {
+                              } else if (rating > index && rating < index + 1) {
                                 return SizedBox(
                                   width: 24,
                                   height: 24,
@@ -565,52 +563,46 @@ class _ReviewPageState extends State<ReviewPage> {
                                     ],
                                   ),
                                 );
-                              } 
-                              // Boş yıldız
-                              else {
-                                return const Icon(
-                                  Icons.star_border,
-                                  size: 24,
-                                  color: AppColors.textSecondary,
-                                );
                               }
-                            },
-                          ),
-                          const SizedBox(width: 8),
-                          // Rating text
-                          Text(
-                            rating.toStringAsFixed(1),
-                            style: AppTextStyles.bodyBold.copyWith(
-                              color: AppColors.textPrimary,
-                              fontSize: 16,
+                              return const Icon(
+                                Icons.star_border,
+                                size: 24,
+                                color: AppColors.textSecondary,
+                              );
+                            }),
+                            const SizedBox(width: 8),
+                            Text(
+                              rating.toStringAsFixed(1),
+                              style: AppTextStyles.bodyBold.copyWith(
+                                color: AppColors.textPrimary,
+                                fontSize: 16,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      // Review count + like count
+                          ],
+                        )
+                      else
+                        const NewProductBadge(),
+                      const SizedBox(height: 8),
                       Row(
                         children: [
-                          Icon(
-                            Icons.reviews_outlined,
-                            size: 14,
-                            color: AppColors.textSecondary,
-                          ),
-                          const SizedBox(width: 4),
                           if (!_hasLoadedReviewSummary) ...[
-                            const SkeletonLoader(
-                              width: 70,
-                              height: 12,
+                            const SkeletonLoader(width: 120, height: 12),
+                            const SizedBox(width: 16),
+                          ] else if (_reviews.isNotEmpty) ...[
+                            Icon(
+                              Icons.reviews_outlined,
+                              size: 14,
+                              color: AppColors.textSecondary,
                             ),
-                          ] else ...[
+                            const SizedBox(width: 4),
                             Text(
                               '${_reviews.length} review${_reviews.length != 1 ? 's' : ''}',
                               style: AppTextStyles.bodySmall.copyWith(
                                 color: AppColors.textSecondary,
                               ),
                             ),
+                            const SizedBox(width: 16),
                           ],
-                          const SizedBox(width: 16),
                           Icon(
                             Icons.favorite,
                             size: 14,
@@ -618,10 +610,7 @@ class _ReviewPageState extends State<ReviewPage> {
                           ),
                           const SizedBox(width: 4),
                           if (!_hasLoadedReviewSummary) ...[
-                            const SkeletonLoader(
-                              width: 50,
-                              height: 12,
-                            ),
+                            const SkeletonLoader(width: 50, height: 12),
                           ] else ...[
                             Text(
                               '$_likeCount likes',

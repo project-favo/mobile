@@ -15,6 +15,7 @@ import '../../../core/widgets/main_bottom_nav_items.dart';
 import '../../../features/activity/presentation/activity_page.dart';
 import '../../../core/widgets/custom_refresh_indicator.dart';
 import '../../../core/widgets/skeleton_loader.dart';
+import '../../../core/widgets/home_hero_carousel.dart';
 import '../../../core/routes/custom_page_transitions.dart';
 import '../widgets/product_card.dart';
 import '../widgets/top_product_card.dart';
@@ -430,7 +431,7 @@ class _HomePageState extends State<HomePage> {
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(AppSpacing.xLarge),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 /// Feed mode chips skeleton (Discover / Trending / …)
                 SizedBox(
@@ -446,6 +447,18 @@ class _HomePageState extends State<HomePage> {
                       borderRadius: BorderRadius.all(Radius.circular(20)),
                     ),
                   ),
+                ),
+                const SizedBox(height: AppSpacing.large),
+                SkeletonLoader(
+                  width: double.infinity,
+                  height: 148,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                const SizedBox(height: AppSpacing.medium),
+                SkeletonLoader(
+                  width: 80,
+                  height: 8,
+                  borderRadius: BorderRadius.circular(4),
                 ),
                 const SizedBox(height: AppSpacing.large),
                 /// TOP 10 SKELETON
@@ -690,6 +703,11 @@ class _HomePageState extends State<HomePage> {
                         ),
                     ],
                   ),
+                ),
+                const SizedBox(height: AppSpacing.large),
+                const SizedBox(
+                  width: double.infinity,
+                  child: HomeHeroCarousel(),
                 ),
                 const SizedBox(height: AppSpacing.large),
               ],
@@ -981,13 +999,7 @@ class _HomePageState extends State<HomePage> {
                                   vertical: AppSpacing.large,
                                 ),
                                 child: Center(
-                                  child: SizedBox(
-                                    height: 20,
-                                    width: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 1.8,
-                                    ),
-                                  ),
+                                  child: ListLoadMoreSkeleton(),
                                 ),
                               )
                             else if (_totalElements > _filteredProducts.length)
@@ -1060,13 +1072,13 @@ class _CategoryChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final decoration =
-        AppChipStyles.categoryChipDecoration(selected: selected);
+    final decoration = isSubCategory
+        ? AppChipStyles.subCategoryChipDecoration(selected: selected)
+        : AppChipStyles.categoryChipDecoration(selected: selected);
 
-    final textStyle =
-        AppChipStyles.categoryChipText(selected: selected).copyWith(
-      fontSize: isSubCategory ? 12 : null,
-    );
+    final textStyle = isSubCategory
+        ? AppChipStyles.subCategoryChipText(selected: selected)
+        : AppChipStyles.categoryChipText(selected: selected);
 
     final horizontalPadding =
         isSubCategory ? AppSpacing.large : AppSpacing.xLarge;

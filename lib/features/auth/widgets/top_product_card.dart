@@ -3,6 +3,8 @@ import '../../../../core/theme/app_decorations.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/product_rating_display.dart';
+import '../../../../core/widgets/new_product_badge.dart';
 import '../../../../core/routes/custom_page_transitions.dart';
 import '../data/models/product_dto.dart';
 import '../presentation/review/pages/review_page.dart';
@@ -29,6 +31,7 @@ class _TopProductListState extends State<TopProductList> {
     final topImgH = (130 * dpr).round().clamp(100, 500);
 
     final rating = widget.product.averageRating ?? 0.0;
+    final showRating = productHasMeaningfulRating(rating);
     final normalizedRating = (rating.isNaN || rating.isInfinite)
         ? 0.0
         : rating.clamp(0.0, 5.0);
@@ -48,13 +51,7 @@ class _TopProductListState extends State<TopProductList> {
         decoration: BoxDecoration(
           color: AppColors.primary,
           borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.primary.withValues(alpha: 0.3),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
+          boxShadow: AppDecorations.softPrimaryGlow(AppColors.primary),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -164,21 +161,18 @@ class _TopProductListState extends State<TopProductList> {
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 6),
-                  
-                  // Stars and rating
-                  Row(
-                    children: [
-                      // Stars
-                      ...List.generate(
-                        5,
-                        (index) {
+                  if (showRating) ...[
+                    Row(
+                      children: [
+                        ...List.generate(5, (index) {
                           if (normalizedRating >= index + 1) {
                             return const Icon(
                               Icons.star,
                               size: 14,
                               color: Colors.white,
                             );
-                          } else if (normalizedRating > index && normalizedRating < index + 1) {
+                          } else if (normalizedRating > index &&
+                              normalizedRating < index + 1) {
                             return SizedBox(
                               width: 14,
                               height: 14,
@@ -203,47 +197,29 @@ class _TopProductListState extends State<TopProductList> {
                                 ],
                               ),
                             );
-                          } else {
-                            return const Icon(
-                              Icons.star_border,
-                              size: 14,
-                              color: Colors.white70,
-                            );
                           }
-                        },
-                      ),
-                      const SizedBox(width: 6),
-                      // Rating text
-                      Text(
-                        normalizedRating.toStringAsFixed(1),
-                        style: AppTextStyles.bodySmall.copyWith(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
+                          return const Icon(
+                            Icons.star_border,
+                            size: 14,
+                            color: Colors.white70,
+                          );
+                        }),
+                        const SizedBox(width: 6),
+                        Text(
+                          normalizedRating.toStringAsFixed(1),
+                          style: AppTextStyles.bodySmall.copyWith(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  
-                  // Review count
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.reviews_outlined,
-                        size: 12,
-                        color: Colors.white.withValues(alpha: 0.8),
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Reviews',
-                        style: AppTextStyles.bodySmall.copyWith(
-                          color: Colors.white.withValues(alpha: 0.9),
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                  ] else ...[
+                    const NewProductBadge(onDarkBackground: true),
+                    const SizedBox(height: 4),
+                  ],
                 ],
               ),
             ),

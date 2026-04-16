@@ -14,6 +14,7 @@ import '../data/models/tag_dto.dart';
 import '../data/repositories/product_repository.dart';
 import '../data/repositories/tag_repository.dart';
 import '../widgets/product_card.dart';
+import '../../../core/widgets/skeleton_loader.dart';
 import 'home_page.dart';
 import 'profile/pages/profile_page.dart';
 import 'review/pages/review_page.dart';
@@ -269,7 +270,7 @@ class _SearchPageState extends State<SearchPage> {
         title: const Text('Search', style: AppTextStyles.heading2),
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const SearchPageBodySkeleton()
           : _errorMessage != null
               ? Center(
                   child: Padding(
@@ -301,7 +302,7 @@ class _SearchPageState extends State<SearchPage> {
                       Expanded(
                         child: _searchController.text.trim().isNotEmpty
                             ? (_isSearching
-                            ? const Center(child: CircularProgressIndicator())
+                            ? const Center(child: ListLoadMoreSkeleton())
                             : _searchResults.isEmpty
                                     ? const Center(
                                         child: Text(
@@ -409,7 +410,17 @@ class _SearchPageState extends State<SearchPage> {
                                         ],
                                       )
                                 : _isLoadingCategories
-                                    ? const Center(child: CircularProgressIndicator())
+                                    ? ListView.separated(
+                                        padding: EdgeInsets.zero,
+                                        itemCount: 8,
+                                        separatorBuilder: (_, __) =>
+                                            const SizedBox(height: AppSpacing.small),
+                                        itemBuilder: (_, __) => SkeletonLoader(
+                                          width: double.infinity,
+                                          height: 52,
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                      )
                                     : Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
