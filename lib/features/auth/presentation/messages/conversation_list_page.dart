@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import '../../../../core/utils/session_helper.dart';
 import '../../../../core/utils/resolve_media_url.dart';
 import '../../../../core/widgets/skeleton_loader.dart';
 import '../../../../core/widgets/profile_avatar.dart';
+import '../../../../core/utils/load_profile_image_bytes.dart';
 import '../../data/repositories/message_repository.dart';
 import '../../data/models/conversation_dto.dart';
 import '../../data/services/auth_service.dart';
@@ -60,12 +62,22 @@ class _ConversationListPageState extends State<ConversationListPage> {
         _isLoading = false;
       });
       _enrichConversationAvatars(sorted);
+      _warmAvatarCacheForConversations(sorted);
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
         _isLoading = false;
       });
+    }
+  }
+
+  void _warmAvatarCacheForConversations(List<ConversationDto> list) {
+    for (final c in list) {
+      final raw = c.otherParticipant.profilePhotoUrl;
+      if (raw != null && raw.trim().isNotEmpty) {
+        unawaited(loadProfileImageBytesFromRaw(raw));
+      }
     }
   }
 
@@ -77,25 +89,46 @@ class _ConversationListPageState extends State<ConversationListPage> {
   }
 
   Future<void> _enrichConversationAvatars(List<ConversationDto> list) async {
-    final updates = <int, ({String? url, Uint8List? bytes})>{};
+    final byId = <int, ConversationUserDto>{};
     for (final c in list) {
       final op = c.otherParticipant;
-      if (op.id <= 0) continue;
-      if (_participantHasLoadableAvatar(op)) continue;
-      if (_avatarExtras.containsKey(op.id)) continue;
-      try {
-        final u = await _authService.getUserById(op.id.toString());
-        if (u == null) continue;
-        final bytes = decodeProfilePhotoBytes(u.profilePhotoData);
-        final url = u.profileImageUrl?.trim();
-        if ((url != null && url.isNotEmpty) ||
-            (bytes != null && bytes.isNotEmpty)) {
-          updates[op.id] = (url: url, bytes: bytes);
-        }
-      } catch (_) {}
+      if (op.id > 0) byId[op.id] = op;
+    }
+    final pending =
+        byId.entries.where((e) {
+          if (_participantHasLoadableAvatar(e.value)) return false;
+          if (_avatarExtras.containsKey(e.key)) return false;
+          return true;
+        }).toList();
+
+    final fetched = await Future.wait(
+      pending.map((e) async {
+        try {
+          final u = await _authService.getUserById(e.key.toString());
+          if (u == null) return null;
+          final bytes = decodeProfilePhotoBytes(u.profilePhotoData);
+          final url = u.profileImageUrl?.trim();
+          if ((url != null && url.isNotEmpty) ||
+              (bytes != null && bytes.isNotEmpty)) {
+            return MapEntry(e.key, (url: url, bytes: bytes));
+          }
+        } catch (_) {}
+        return null;
+      }),
+    );
+
+    final updates = <int, ({String? url, Uint8List? bytes})>{};
+    for (final r in fetched) {
+      if (r != null) updates[r.key] = r.value;
     }
     if (updates.isNotEmpty && mounted) {
       setState(() => _avatarExtras.addAll(updates));
+      for (final e in updates.values) {
+        final u = e.url;
+        if (u != null && u.trim().isNotEmpty) {
+          unawaited(loadProfileImageBytesFromRaw(u));
+        }
+      }
     }
   }
 

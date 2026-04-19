@@ -210,22 +210,19 @@ class UpdateReviewRequestDto {
   }
 }
 
-/// POST `/api/reviews/{id}/report` gövdesi (backend alan adlarıyla uyumlu).
+/// Review şikayeti gövdesi (`/flag` ve uyumluluk için `/report`).
 class ReportReviewRequestDto {
   final String reason;
-  final String? description;
+  final String? notes;
 
   ReportReviewRequestDto({
     required this.reason,
-    this.description,
+    this.notes,
   });
 
-  Map<String, dynamic> toJson() {
-    final d = description?.trim();
-    return {
-      'reason': reason,
-      if (d != null && d.isNotEmpty) 'description': d,
-    };
-  }
+  Map<String, dynamic> toJson() => {
+        'reason': reason,
+        'notes': notes?.trim() ?? '',
+      };
 }
 

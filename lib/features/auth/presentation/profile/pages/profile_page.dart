@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import '../../../../../core/notifications/notification_realtime_service.dart';
+import '../../../../../core/cache/product_memory_cache.dart';
 import '../../../../../core/widgets/main_bottom_nav_items.dart';
 import '../../../../../features/activity/presentation/activity_page.dart';
 import '../../../../../core/theme/app_colors.dart';
@@ -14,11 +14,14 @@ import '../../../../auth/data/services/auth_service.dart';
 import '../../../../auth/data/models/user_response_dto.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/models/review_dto.dart';
+import '../../../data/models/tag_dto.dart';
 import '../../../data/repositories/interaction_repository.dart';
+import '../../../data/repositories/product_repository.dart';
 import '../../../data/repositories/review_repository.dart';
 import '../../../widgets/product_card.dart';
 import '../../home_page.dart';
 import '../../search_page.dart';
+import '../../review/pages/review_detail_page.dart';
 import '../../review/pages/review_page.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
@@ -29,7 +32,7 @@ import '../../../../../routes/app_routes.dart';
 import '../../complete_app_profile_page.dart';
 import 'settings_page.dart';
 import 'follow_list_page.dart';
-import 'notifications_page.dart';
+import '../widgets/profile_review_row_card.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -38,11 +41,13 @@ class ProfilePage extends StatefulWidget {
   State<ProfilePage> createState() => _ProfilePageState();
 }
 
-class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStateMixin {
+class _ProfilePageState extends State<ProfilePage>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final AuthService _authService = AuthService();
   final InteractionRepository _interactionRepository = InteractionRepository();
   final ReviewRepository _reviewRepository = ReviewRepository();
+  final ProductRepository _productRepository = ProductRepository();
   final SessionHelper _sessionHelper = SessionHelper();
   UserResponseDto? _user;
   bool _isLoading = true;
@@ -52,12 +57,14 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
   bool _isLoadingWishlist = false;
   String? _wishlistError;
   List<ReviewDto> _myReviews = [];
+
+  /// My Reviews satırlarında ürün görseli için (prefetch).
+  final Map<String, ProductDto> _reviewProductHints = {};
   bool _isLoadingMyReviews = false;
   String? _myReviewsError;
   String _selectedDateSort = 'Newest';
   int _followerCount = 0;
   int _followingCount = 0;
-  bool _notificationSvcAttached = false;
 
   Route _noAnimationRoute(Widget page) {
     return PageRouteBuilder(
@@ -112,7 +119,9 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
     // Profil açılır açılmaz My Reviews'ı yükle (ilk sekme)
     _loadMyReviews();
     _tabController.addListener(() {
-      if (_tabController.index == 1 && _wishlistProducts.isEmpty && !_isLoadingWishlist) {
+      if (_tabController.index == 1 &&
+          _wishlistProducts.isEmpty &&
+          !_isLoadingWishlist) {
         _loadWishlist();
       }
       setState(() {});
@@ -136,8 +145,10 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
         setState(() {
           _myReviews = reviews;
           _isLoadingMyReviews = false;
+          _reviewProductHints.clear();
         });
         _sortMyReviews();
+        unawaited(_prefetchProductsForReviews(reviews));
       }
     } catch (e) {
       if (mounted) {
@@ -147,6 +158,50 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
         });
       }
     }
+  }
+
+  Future<void> _prefetchProductsForReviews(List<ReviewDto> reviews) async {
+    final ids =
+        reviews.map((r) => r.productId).where((s) => s.isNotEmpty).toSet();
+    if (ids.isEmpty) return;
+    final token = await _sessionHelper.getTokenAndSetHeader();
+    final list = ids.toList();
+    const batch = 5;
+    for (var i = 0; i < list.length; i += batch) {
+      if (!mounted) return;
+      final end = (i + batch > list.length) ? list.length : i + batch;
+      final slice = list.sublist(i, end);
+      await Future.wait(
+        slice.map((id) async {
+          try {
+            final p = await _productRepository.getProductById(
+              id,
+              firebaseIdToken: token,
+            );
+            if (mounted) {
+              setState(() => _reviewProductHints[id] = p);
+            }
+          } catch (_) {}
+        }),
+      );
+    }
+  }
+
+  String _myReviewsAverageLabel() {
+    if (_myReviews.isEmpty) return '—';
+    final sum = _myReviews.fold<double>(0, (a, r) => a + r.rating);
+    return (sum / _myReviews.length).toStringAsFixed(1);
+  }
+
+  ProductDto _productForReviewDetail(ReviewDto review, ProductDto? hint) {
+    if (hint != null) return hint;
+    return ProductDto(
+      id: review.productId,
+      name: review.productName,
+      imageURL: '',
+      description: null,
+      tag: TagDto(id: '', name: ''),
+    );
   }
 
   Widget _buildMyReviewsTab() {
@@ -174,10 +229,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: AppSpacing.large),
-              TextButton(
-                onPressed: _loadMyReviews,
-                child: const Text('Retry'),
-              ),
+              TextButton(onPressed: _loadMyReviews, child: const Text('Retry')),
             ],
           ),
         ),
@@ -187,10 +239,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(AppSpacing.xLarge),
-          child: Text(
-            'Henüz yorum yok',
-            style: AppTextStyles.bodySecondary,
-          ),
+          child: Text('Henüz yorum yok', style: AppTextStyles.bodySecondary),
         ),
       );
     }
@@ -202,61 +251,25 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
       separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.medium),
       itemBuilder: (context, index) {
         final review = _myReviews[index];
-        return InkWell(
+        final hint = _reviewProductHints[review.productId];
+        return ProfileReviewRowCard(
+          review: review,
+          productImageUrl: hint?.imageURL,
           onTap: () {
-            // Sayfa hemen açılsın; ürün ReviewPage içinde yüklenecek
+            final cached =
+                ProductMemoryCache.instance.peek(review.productId) ??
+                _reviewProductHints[review.productId];
+            final product = _productForReviewDetail(review, cached);
             Navigator.push(
               context,
               SlideRightRoute(
-                page: ReviewPage(
-                  productId: review.productId,
-                  productName: review.productName,
+                page: ReviewDetailPage(
+                  review: review,
+                  product: product,
                 ),
               ),
             );
           },
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            padding: const EdgeInsets.all(AppSpacing.large),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  review.productName,
-                  style: AppTextStyles.heading3,
-                ),
-                const SizedBox(height: AppSpacing.small),
-                Text(
-                  review.title,
-                  style: AppTextStyles.bodyMedium,
-                ),
-                if (review.description != null && review.description!.isNotEmpty) ...[
-                  const SizedBox(height: AppSpacing.small),
-                  Text(
-                    review.description!,
-                    style: AppTextStyles.bodySecondary,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-                const SizedBox(height: AppSpacing.small),
-                Row(
-                  children: [
-                    Icon(Icons.star, size: 16, color: AppColors.primary),
-                    const SizedBox(width: 4),
-                    Text(
-                      '${review.rating} / 5',
-                      style: AppTextStyles.bodySecondary,
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
         );
       },
     );
@@ -284,12 +297,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
         }
       });
       if (user.id.isNotEmpty) {
-        _loadFollowCounts(user.id);
-        if (!_notificationSvcAttached) {
-          _notificationSvcAttached = true;
-          NotificationRealtimeService.instance.attach();
-          unawaited(NotificationRealtimeService.instance.refreshUnread());
-        }
+        unawaited(_loadFollowCounts(user.id));
       }
     } catch (e) {
       setState(() {
@@ -304,10 +312,9 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
     _sessionHelper.clearSession();
     await FirebaseAuth.instance.signOut();
     if (!mounted) return;
-    Navigator.of(context).pushNamedAndRemoveUntil(
-      AppRoutes.login,
-      (_) => false,
-    );
+    Navigator.of(
+      context,
+    ).pushNamedAndRemoveUntil(AppRoutes.login, (_) => false);
   }
 
   Future<void> _loadFollowCounts(String userId) async {
@@ -324,64 +331,8 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
 
   @override
   void dispose() {
-    if (_notificationSvcAttached) {
-      NotificationRealtimeService.instance.detach();
-    }
     _tabController.dispose();
     super.dispose();
-  }
-
-  Widget _notificationsLeadingButton() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.small),
-      child: Stack(
-        clipBehavior: Clip.none,
-        alignment: Alignment.center,
-        children: [
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined),
-            color: AppColors.primary,
-            onPressed: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const NotificationsPage(),
-                ),
-              );
-              if (mounted) {
-                await NotificationRealtimeService.instance.refreshUnread();
-              }
-            },
-          ),
-          ValueListenableBuilder<int>(
-            valueListenable: NotificationRealtimeService.instance.unreadCount,
-            builder: (context, count, _) {
-              if (count <= 0) return const SizedBox.shrink();
-              return Positioned(
-                right: 2,
-                top: 4,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    count > 9 ? '9+' : '$count',
-                    style: AppTextStyles.bodySecondary.copyWith(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        ],
-      ),
-    );
   }
 
   Future<void> _loadWishlist() async {
@@ -403,6 +354,9 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
         _wishlistProductsOriginalOrder = List.from(products);
         _isLoadingWishlist = false;
       });
+      for (final p in products) {
+        ProductMemoryCache.instance.remember(p);
+      }
       _sortWishlist();
     } catch (e) {
       if (!mounted) return;
@@ -462,9 +416,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
           onTap: () {
             Navigator.push(
               context,
-              MaterialPageRoute(
-                builder: (_) => ReviewPage(product: product),
-              ),
+              MaterialPageRoute(builder: (_) => ReviewPage(product: product)),
             );
           },
           onFavoriteTap: () => _toggleWishlistLike(product),
@@ -492,7 +444,10 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
         throw Exception('Failed to get Firebase ID token');
       }
 
-      final liked = await _interactionRepository.toggleProductLike(token, product.id);
+      final liked = await _interactionRepository.toggleProductLike(
+        token,
+        product.id,
+      );
 
       setState(() {
         if (!liked) {
@@ -502,7 +457,9 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
           // Hâlâ likelıysa durumu güncelle
           final idx = _wishlistProducts.indexWhere((p) => p.id == product.id);
           if (idx != -1) {
-            _wishlistProducts[idx] = _wishlistProducts[idx].copyWith(isLiked: liked);
+            _wishlistProducts[idx] = _wishlistProducts[idx].copyWith(
+              isLiked: liked,
+            );
           }
         }
       });
@@ -553,8 +510,12 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
     if (_myReviews.isEmpty) return;
     final sorted = List<ReviewDto>.from(_myReviews);
     sorted.sort((a, b) {
-      final da = DateTime.tryParse(a.createdAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
-      final db = DateTime.tryParse(b.createdAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final da =
+          DateTime.tryParse(a.createdAt) ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      final db =
+          DateTime.tryParse(b.createdAt) ??
+          DateTime.fromMillisecondsSinceEpoch(0);
       if (_selectedDateSort == 'Newest') {
         return db.compareTo(da);
       }
@@ -567,16 +528,13 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-    return Scaffold(
+      return Scaffold(
         backgroundColor: AppColors.background,
-      appBar: AppBar(
+        appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
           automaticallyImplyLeading: false,
-          title: const Text(
-            'Profile',
-            style: AppTextStyles.HomeHeader,
-          ),
+          title: const Text('Profile', style: AppTextStyles.HomeHeader),
           centerTitle: true,
         ),
         body: const _ProfilePageSkeleton(),
@@ -591,11 +549,8 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
           backgroundColor: Colors.transparent,
           elevation: 0,
           automaticallyImplyLeading: false,
-          title: const Text(
-            'Profile',
-            style: AppTextStyles.HomeHeader,
-          ),
-        centerTitle: true,
+          title: const Text('Profile', style: AppTextStyles.HomeHeader),
+          centerTitle: true,
         ),
         body: Center(
           child: Column(
@@ -625,10 +580,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
           backgroundColor: Colors.transparent,
           elevation: 0,
           automaticallyImplyLeading: false,
-          title: const Text(
-            'Profile',
-            style: AppTextStyles.HomeHeader,
-          ),
+          title: const Text('Profile', style: AppTextStyles.HomeHeader),
           centerTitle: true,
         ),
         body: SafeArea(
@@ -721,22 +673,16 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
         backgroundColor: Colors.transparent,
         elevation: 0,
         automaticallyImplyLeading: false,
-        leading: _notificationsLeadingButton(),
-        title: const Text(
-          'Profile',
-          style: AppTextStyles.HomeHeader,
-          ),
+        title: const Text('Profile', style: AppTextStyles.HomeHeader),
         centerTitle: true,
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
-                color: AppColors.primary,
+            color: AppColors.primary,
             onPressed: () async {
               final result = await Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => const SettingsPage(),
-                ),
+                MaterialPageRoute(builder: (_) => const SettingsPage()),
               );
               if (result == true || mounted) {
                 _loadUserData();
@@ -764,7 +710,9 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
               const SizedBox(height: AppSpacing.small),
               Text(
                 '@${_user!.userName.toLowerCase().replaceAll(' ', '')}',
-                style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary),
+                style: AppTextStyles.bodySmall.copyWith(
+                  color: AppColors.textSecondary,
+                ),
               ),
             ] else ...[
               Text(
@@ -773,82 +721,110 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
               ),
             ],
             const SizedBox(height: AppSpacing.xxLarge),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                GestureDetector(
-                  onTap: () => Navigator.push(
-                    context,
-                    SlideRightRoute(
-                      page: FollowListPage(
-                        userId: _user!.id,
-                        title: 'Followers',
-                        isFollowers: true,
-                      ),
-                    ),
-                  ),
-                  child: _StatItem(count: _followerCount, label: 'Followers'),
-                ),
-                const SizedBox(width: AppSpacing.xxLarge),
-                GestureDetector(
-                  onTap: () => Navigator.push(
-                    context,
-                    SlideRightRoute(
-                      page: FollowListPage(
-                        userId: _user!.id,
-                        title: 'Following',
-                        isFollowers: false,
-                      ),
-                    ),
-                  ),
-                  child: _StatItem(count: _followingCount, label: 'Following'),
-                ),
-                const SizedBox(width: AppSpacing.xxLarge),
-                _StatItem(count: _myReviews.length, label: 'Reviews'),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.xxLarge),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.medium,
+              ),
               child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Expanded(
-                    child: _SummaryCard(title: 'AVERAGE RATING', content: '4.2 /5.0'),
+                    child: GestureDetector(
+                      onTap:
+                          () => Navigator.push(
+                            context,
+                            SlideRightRoute(
+                              page: FollowListPage(
+                                userId: _user!.id,
+                                title: 'Followers',
+                                isFollowers: true,
+                              ),
+                            ),
+                          ),
+                      child: _StatItem(
+                        count: _followerCount,
+                        label: 'Followers',
+                      ),
+                    ),
                   ),
-                  const SizedBox(width: AppSpacing.xLarge),
                   Expanded(
-                    child: _SummaryCard(
-                      title: 'TOP CATEGORY',
-                      content: 'Electronics 35%\nBeauty 30%\nFashion 20%',
+                    child: GestureDetector(
+                      onTap:
+                          () => Navigator.push(
+                            context,
+                            SlideRightRoute(
+                              page: FollowListPage(
+                                userId: _user!.id,
+                                title: 'Following',
+                                isFollowers: false,
+                              ),
+                            ),
+                          ),
+                      child: _StatItem(
+                        count: _followingCount,
+                        label: 'Following',
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: _StatItem(
+                      count: _myReviews.length,
+                      label: 'Reviews',
+                    ),
+                  ),
+                  Expanded(
+                    child: Tooltip(
+                      message:
+                          'Yorumlarınızdaki yıldız ortalaması (5 üzerinden)',
+                      child: _StatTextItem(
+                        value: _myReviewsAverageLabel(),
+                        label: 'Review avg',
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: AppSpacing.xxLarge),
-            TabBar(
-              controller: _tabController,
-              labelColor: AppColors.primary,
-              unselectedLabelColor: AppColors.textSecondary,
-              indicatorColor: AppColors.primary,
-              indicatorWeight: 2,
-              tabs: const [
-                Tab(text: 'My Reviews'),
-                Tab(text: 'Wishlist'),
-              ],
+            Material(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(14),
+              clipBehavior: Clip.antiAlias,
+              child: TabBar(
+                controller: _tabController,
+                labelColor: AppColors.primary,
+                unselectedLabelColor: AppColors.textSecondary,
+                indicatorColor: AppColors.primary,
+                indicatorWeight: 2.5,
+                dividerColor: Colors.transparent,
+                labelStyle: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                ),
+                unselectedLabelStyle: const TextStyle(
+                  fontWeight: FontWeight.w500,
+                  fontSize: 14,
+                ),
+                tabs: const [Tab(text: 'My Reviews'), Tab(text: 'Wishlist')],
+              ),
             ),
             const SizedBox(height: AppSpacing.large),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.xLarge,
+              ),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'SORT BY DATE',
-                    style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textSecondary),
+                    'Sort by date',
+                    style: AppTextStyles.bodySmall.copyWith(
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.2,
+                    ),
                   ),
+                  const Spacer(),
                   _SortDropdown(
-                    label: 'Date',
                     items: const ['Newest', 'Oldest'],
                     value: _selectedDateSort,
                     onChanged: (value) {
@@ -909,56 +885,30 @@ class _ProfilePageSkeleton extends StatelessWidget {
             borderRadius: BorderRadius.circular(4),
           ),
           const SizedBox(height: AppSpacing.xxLarge),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _profileStatSkeleton(),
-              const SizedBox(width: AppSpacing.xxLarge),
-              _profileStatSkeleton(),
-              const SizedBox(width: AppSpacing.xxLarge),
-              _profileStatSkeleton(),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.xxLarge),
           Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.medium),
             child: Row(
               children: [
-                Expanded(child: _profileSummaryCardSkeleton()),
-                const SizedBox(width: AppSpacing.xLarge),
-                Expanded(child: _profileSummaryCardSkeleton()),
+                Expanded(child: _profileStatSkeleton()),
+                Expanded(child: _profileStatSkeleton()),
+                Expanded(child: _profileStatSkeleton()),
+                Expanded(child: _profileStatSkeleton()),
               ],
             ),
           ),
           const SizedBox(height: AppSpacing.xxLarge),
-          Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
-            child: Row(
-              children: [
-                Expanded(
-                  child: SkeletonLoader(
-                    width: double.infinity,
-                    height: 36,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.large),
-                Expanded(
-                  child: SkeletonLoader(
-                    width: double.infinity,
-                    height: 36,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-              ],
-            ),
+          LayoutBuilder(
+            builder: (context, c) {
+              return SkeletonLoader(
+                width: c.maxWidth,
+                height: 46,
+                borderRadius: BorderRadius.circular(14),
+              );
+            },
           ),
           const SizedBox(height: AppSpacing.large),
           Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -977,8 +927,7 @@ class _ProfilePageSkeleton extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xxLarge),
           Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
             child: Column(
               children: [
                 const ReviewCardSkeleton(),
@@ -1010,32 +959,6 @@ class _ProfilePageSkeleton extends StatelessWidget {
       ],
     );
   }
-
-  static Widget _profileSummaryCardSkeleton() {
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.xLarge),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SkeletonLoader(
-            width: 110,
-            height: 12,
-            borderRadius: BorderRadius.circular(4),
-          ),
-          const SizedBox(height: AppSpacing.medium),
-          SkeletonLoader(
-            width: 72,
-            height: 22,
-            borderRadius: BorderRadius.circular(4),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _StatItem extends StatelessWidget {
@@ -1051,60 +974,52 @@ class _StatItem extends StatelessWidget {
         Text(
           count.toString(),
           style: AppTextStyles.heading3,
+          textAlign: TextAlign.center,
         ),
         const SizedBox(height: AppSpacing.small),
-        Text(label, style: AppTextStyles.bodySecondary),
+        Text(
+          label,
+          style: AppTextStyles.bodySecondary,
+          textAlign: TextAlign.center,
+          maxLines: 2,
+        ),
       ],
     );
   }
 }
 
-class _SummaryCard extends StatelessWidget {
-  final String title;
-  final String content;
+class _StatTextItem extends StatelessWidget {
+  final String value;
+  final String label;
 
-  const _SummaryCard({
-    required this.title,
-    required this.content,
-  });
+  const _StatTextItem({required this.value, required this.label});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.xLarge),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: AppTextStyles.bodySecondary.copyWith(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.medium),
-          Text(
-            content,
-            style: AppTextStyles.heading3,
-          ),
-        ],
-      ),
+    return Column(
+      children: [
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(value, style: AppTextStyles.heading3, maxLines: 1),
+        ),
+        const SizedBox(height: AppSpacing.small),
+        Text(
+          label,
+          style: AppTextStyles.bodySecondary,
+          textAlign: TextAlign.center,
+          maxLines: 2,
+        ),
+      ],
     );
   }
 }
 
 class _SortDropdown extends StatelessWidget {
-  final String label;
   final List<String> items;
   final String value;
   final ValueChanged<String?> onChanged;
 
   const _SortDropdown({
-    required this.label,
     required this.items,
     required this.value,
     required this.onChanged,
@@ -1114,16 +1029,24 @@ class _SortDropdown extends StatelessWidget {
   Widget build(BuildContext context) {
     return DropdownButton<String>(
       value: value,
-      underline: Container(),
-      style: AppTextStyles.bodyMedium,
-      items: items.map((String item) {
-        return DropdownMenuItem<String>(
-          value: item,
-          child: Text(item),
-        );
-      }).toList(),
+      isDense: true,
+      underline: const SizedBox.shrink(),
+      borderRadius: BorderRadius.circular(10),
+      iconSize: 20,
+      style: AppTextStyles.bodySmall.copyWith(
+        color: AppColors.textPrimary,
+        fontWeight: FontWeight.w600,
+      ),
+      items:
+          items.map((String item) {
+            return DropdownMenuItem<String>(value: item, child: Text(item));
+          }).toList(),
       onChanged: onChanged,
-      icon: const Icon(Icons.arrow_drop_down, color: AppColors.textSecondary),
+      icon: const Icon(
+        Icons.expand_more_rounded,
+        size: 20,
+        color: AppColors.textSecondary,
+      ),
     );
   }
 }

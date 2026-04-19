@@ -55,17 +55,11 @@ class _ActivityPageState extends State<ActivityPage>
         if (index == 3) return;
         if (index == 1) return;
         if (index == 0) {
-          Navigator.pushReplacement(
-            context,
-            _instantRoute(const SearchPage()),
-          );
+          Navigator.pushReplacement(context, _instantRoute(const SearchPage()));
           return;
         }
         if (index == 2) {
-          Navigator.pushReplacement(
-            context,
-            _instantRoute(const HomePage()),
-          );
+          Navigator.pushReplacement(context, _instantRoute(const HomePage()));
           return;
         }
         if (index == 4) {
@@ -82,15 +76,26 @@ class _ActivityPageState extends State<ActivityPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _tabController.addListener(_onTabChanged);
     _controller = ActivityController();
     NotificationRealtimeService.instance.attach();
-    _pushSub =
-        NotificationRealtimeService.instance.pushStream.listen(_onRealtimePush);
+    _pushSub = NotificationRealtimeService.instance.pushStream.listen(
+      _onRealtimePush,
+    );
     _scrollController.addListener(_onScroll);
-    unawaited(_controller.loadFirstPage());
-    unawaited(NotificationRealtimeService.instance.refreshUnread());
+    unawaited(_bootstrapActivity());
+  }
+
+  Future<void> _bootstrapActivity() async {
+    await _controller.loadFirstPage();
+    if (!mounted) return;
+    if (_controller.errorMessage == null) {
+      await _controller.markEntireFeedViewed();
+    }
+    if (mounted) {
+      await NotificationRealtimeService.instance.refreshUnread();
+    }
   }
 
   void _onTabChanged() {
@@ -121,8 +126,6 @@ class _ActivityPageState extends State<ActivityPage>
       case 2:
         return all.where((e) => e.type == ActivityType.like).toList();
       case 3:
-        return all.where((e) => e.type == ActivityType.comment).toList();
-      case 4:
         return all.where((e) => e.type == ActivityType.review).toList();
       default:
         return all;
@@ -174,11 +177,12 @@ class _ActivityPageState extends State<ActivityPage>
         if (item.user.id.isEmpty) return;
         Navigator.of(context).push(
           MaterialPageRoute<void>(
-            builder: (_) => UserProfilePage(
-              userId: item.user.id,
-              userName: item.user.username,
-              profileImageUrl: item.user.avatarUrl,
-            ),
+            builder:
+                (_) => UserProfilePage(
+                  userId: item.user.id,
+                  userName: item.user.username,
+                  profileImageUrl: item.user.avatarUrl,
+                ),
           ),
         );
         break;
@@ -189,10 +193,11 @@ class _ActivityPageState extends State<ActivityPage>
         if (pid != null && pid.isNotEmpty) {
           Navigator.of(context).push(
             MaterialPageRoute<void>(
-              builder: (_) => ReviewPage(
-                productId: pid,
-                productName: item.targetContent?.title,
-              ),
+              builder:
+                  (_) => ReviewPage(
+                    productId: pid,
+                    productName: item.targetContent?.title,
+                  ),
             ),
           );
         }
@@ -217,21 +222,28 @@ class _ActivityPageState extends State<ActivityPage>
 
   Future<void> _onRefresh() async {
     await _controller.loadFirstPage();
-    await NotificationRealtimeService.instance.refreshUnread();
+    if (mounted && _controller.errorMessage == null) {
+      await _controller.markEntireFeedViewed();
+    }
+    if (mounted) {
+      await NotificationRealtimeService.instance.refreshUnread();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: AppColors.background.withValues(alpha: 0.96),
       appBar: AppBar(
-        backgroundColor: AppColors.background,
+        backgroundColor: AppColors.surface,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
+        shadowColor: Colors.transparent,
         toolbarHeight: AppSpacing.toolbarHeight,
         centerTitle: true,
         title: const Text('Activity', style: AppTextStyles.HomeHeader),
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(48),
+          preferredSize: const Size.fromHeight(50),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -239,13 +251,17 @@ class _ActivityPageState extends State<ActivityPage>
                 controller: _tabController,
                 isScrollable: true,
                 tabAlignment: TabAlignment.start,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
                 labelColor: AppColors.primary,
                 unselectedLabelColor: AppColors.textSecondary,
                 indicatorColor: AppColors.primary,
-                indicatorWeight: 2,
+                indicatorWeight: 2.5,
+                indicatorSize: TabBarIndicatorSize.label,
+                dividerColor: Colors.transparent,
                 labelStyle: const TextStyle(
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w700,
                   fontSize: 13,
+                  letterSpacing: 0.2,
                 ),
                 unselectedLabelStyle: const TextStyle(
                   fontWeight: FontWeight.w500,
@@ -255,14 +271,13 @@ class _ActivityPageState extends State<ActivityPage>
                   Tab(text: 'All'),
                   Tab(text: 'Follow'),
                   Tab(text: 'Likes'),
-                  Tab(text: 'Comments'),
                   Tab(text: 'Reviews'),
                 ],
               ),
               Divider(
                 height: 1,
                 thickness: 1,
-                color: AppColors.textSecondary.withValues(alpha: 0.2),
+                color: AppColors.textSecondary.withValues(alpha: 0.12),
               ),
             ],
           ),
@@ -272,9 +287,7 @@ class _ActivityPageState extends State<ActivityPage>
         listenable: _controller,
         builder: (context, _) {
           if (_controller.loadingFirst) {
-            return _ActivityFeedSkeletonList(
-              controller: _scrollController,
-            );
+            return _ActivityFeedSkeletonList(controller: _scrollController);
           }
 
           if (_controller.errorMessage != null) {
@@ -365,23 +378,27 @@ class _ActivityPageState extends State<ActivityPage>
             child: ListView.separated(
               controller: _scrollController,
               physics: const AlwaysScrollableScrollPhysics(),
-              itemCount:
-                  visible.length + (_controller.loadingMore ? 1 : 0),
-              separatorBuilder: (_, __) => Divider(
-                height: 1,
-                thickness: 1,
-                color: AppColors.textSecondary.withValues(alpha: 0.12),
-              ),
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 20),
+              itemCount: visible.length + (_controller.loadingMore ? 1 : 0),
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
               itemBuilder: (context, index) {
                 if (index >= visible.length) {
                   return const _ActivityLoadMoreSkeleton();
                 }
                 final item = visible[index];
-                return ActivityFeedRow(
-                  item: item,
-                  following: _controller.isFollowingUser(item.user.id),
-                  onToggleFollow: () => _onToggleFollow(context, item.user.id),
-                  onOpen: () => _onOpenItem(context, item),
+                return Material(
+                  color: AppColors.surface,
+                  elevation: 0,
+                  shadowColor: Colors.black26,
+                  borderRadius: BorderRadius.circular(14),
+                  clipBehavior: Clip.antiAlias,
+                  child: ActivityFeedRow(
+                    item: item,
+                    following: _controller.isFollowingUser(item.user.id),
+                    onToggleFollow:
+                        () => _onToggleFollow(context, item.user.id),
+                    onOpen: () => _onOpenItem(context, item),
+                  ),
                 );
               },
             ),
@@ -408,11 +425,12 @@ class _ActivityFeedSkeletonList extends StatelessWidget {
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.only(top: 4),
       itemCount: 9,
-      separatorBuilder: (_, __) => Divider(
-        height: 1,
-        thickness: 1,
-        color: AppColors.textSecondary.withValues(alpha: _dividerAlpha),
-      ),
+      separatorBuilder:
+          (_, __) => Divider(
+            height: 1,
+            thickness: 1,
+            color: AppColors.textSecondary.withValues(alpha: _dividerAlpha),
+          ),
       itemBuilder: (context, index) {
         final showThumb = index % 3 != 1;
         final line2Width = index % 2 == 0 ? 220.0 : 150.0;

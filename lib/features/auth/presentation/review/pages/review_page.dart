@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../widgets/review_card.dart';
@@ -12,6 +14,7 @@ import '../../../../../core/routes/custom_page_transitions.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/utils/product_rating_display.dart';
 import '../../../../../core/widgets/new_product_badge.dart';
+import '../../../../../core/cache/product_memory_cache.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/models/review_dto.dart';
@@ -49,27 +52,37 @@ class _ReviewPageState extends State<ReviewPage> {
   String? _currentUsername;
   String? _currentUserId;
   late ProductDto _currentProduct;
-  bool _isLoadingProduct = false; // productId ile açıldıysa ürün yüklenene kadar
+  bool _isLoadingProduct =
+      false; // productId ile açıldıysa ürün yüklenene kadar
   List<ReviewDto> _reviews = [];
   bool _isLoadingReviews = true;
   String? _errorMessage;
   int _likeCount = 0;
   bool _hasLoadedLikeCount = false;
 
-  bool get _hasLoadedReviewSummary =>
-      !_isLoadingReviews && _hasLoadedLikeCount;
+  bool get _hasLoadedReviewSummary => !_isLoadingReviews && _hasLoadedLikeCount;
 
   @override
   void initState() {
     super.initState();
     if (widget.product != null) {
       _currentProduct = widget.product!;
+      ProductMemoryCache.instance.remember(_currentProduct);
       _loadReviews();
       _refreshProductData();
       return;
     }
+    final pid = widget.productId!;
+    final warm = ProductMemoryCache.instance.peek(pid);
+    if (warm != null) {
+      _currentProduct = warm;
+      _isLoadingProduct = false;
+      _loadReviews();
+      unawaited(_refreshProductData());
+      return;
+    }
     // productId ile açıldı: placeholder ile hemen göster, arka planda ürünü yükle
-    _currentProduct = _placeholderProduct(widget.productId!, widget.productName ?? '');
+    _currentProduct = _placeholderProduct(pid, widget.productName ?? '');
     _isLoadingProduct = true;
     _loadReviews();
     _loadProductById();
@@ -107,7 +120,9 @@ class _ReviewPageState extends State<ReviewPage> {
 
   Future<void> _loadLikeCount() async {
     try {
-      final count = await _interactionRepository.getProductLikeCount(_currentProduct.id);
+      final count = await _interactionRepository.getProductLikeCount(
+        _currentProduct.id,
+      );
       if (!mounted) return;
       setState(() {
         _likeCount = count;
@@ -172,7 +187,9 @@ class _ReviewPageState extends State<ReviewPage> {
                     Navigator.of(context).pop();
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text('Message sent to @${review.ownerUserName}'),
+                        content: Text(
+                          'Message sent to @${review.ownerUserName}',
+                        ),
                       ),
                     );
                   }
@@ -213,16 +230,17 @@ class _ReviewPageState extends State<ReviewPage> {
                     alignment: Alignment.centerRight,
                     child: ElevatedButton(
                       onPressed: isSending ? null : send,
-                      child: isSending
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Text('Send'),
+                      child:
+                          isSending
+                              ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                              : const Text('Send'),
                     ),
                   ),
                 ],
@@ -244,6 +262,7 @@ class _ReviewPageState extends State<ReviewPage> {
       final updatedProduct = await _productRepository.getProductById(
         _currentProduct.id,
         firebaseIdToken: token,
+        bypassCache: true,
       );
 
       setState(() {
@@ -331,9 +350,7 @@ class _ReviewPageState extends State<ReviewPage> {
     // Optimistic update - UI'ı hemen güncelle (loading indicator yok)
     final previousLikeStatus = _currentProduct.isLiked ?? false;
     setState(() {
-      _currentProduct = _currentProduct.copyWith(
-        isLiked: !previousLikeStatus,
-      );
+      _currentProduct = _currentProduct.copyWith(isLiked: !previousLikeStatus);
     });
 
     try {
@@ -351,19 +368,15 @@ class _ReviewPageState extends State<ReviewPage> {
 
       // Backend'den gelen gerçek durumu güncelle (arka planda, kullanıcı fark etmez)
       setState(() {
-        _currentProduct = _currentProduct.copyWith(
-          isLiked: newLikeStatus,
-        );
+        _currentProduct = _currentProduct.copyWith(isLiked: newLikeStatus);
       });
       await _loadLikeCount();
     } catch (e) {
       // Hata durumunda optimistic update'i geri al
       setState(() {
-        _currentProduct = _currentProduct.copyWith(
-          isLiked: previousLikeStatus,
-        );
+        _currentProduct = _currentProduct.copyWith(isLiked: previousLikeStatus);
       });
-      
+
       if (mounted) {
         final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -373,6 +386,89 @@ class _ReviewPageState extends State<ReviewPage> {
           ),
         );
       }
+    }
+  }
+
+  Future<void> _onReportProductPressed() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please sign in to report a product'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (ctx) => AlertDialog(
+            backgroundColor: AppColors.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: Text(
+              'Report product',
+              style: AppTextStyles.heading3.copyWith(
+                color: AppColors.textPrimary,
+              ),
+            ),
+            content: Text(
+              'Report "${_currentProduct.name}" to our team?',
+              style: AppTextStyles.body.copyWith(color: AppColors.textPrimary),
+            ),
+            actions: [
+              TextButton(
+                style: TextButton.styleFrom(foregroundColor: AppColors.primary),
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Report'),
+              ),
+            ],
+          ),
+    );
+    if (!mounted) return;
+    if (confirmed != true) return;
+
+    try {
+      final token = await _sessionHelper.ensureSession();
+      if (!mounted) return;
+      if (token == null) {
+        throw Exception('Please sign in to report a product');
+      }
+      final reported = await _interactionRepository.reportProduct(
+        token,
+        _currentProduct.id,
+      );
+      if (!mounted) return;
+      if (reported) {
+        await showBrandedOkDialog(context, title: 'Successfully reported');
+      } else {
+        await showBrandedOkDialog(
+          context,
+          title: 'Already reported',
+          message: 'You have already reported this product.',
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(ErrorHandler.getUserFriendlyMessage(e)),
+          backgroundColor: AppColors.error,
+        ),
+      );
     }
   }
 
@@ -386,16 +482,23 @@ class _ReviewPageState extends State<ReviewPage> {
         iconTheme: const IconThemeData(color: AppColors.primary),
         actions: [
           IconButton(
-            tooltip: 'Ürün asistanı',
+            tooltip: 'Report product',
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            onPressed: _isLoadingProduct ? null : _onReportProductPressed,
+            icon: const Icon(Icons.flag_outlined, color: AppColors.primary),
+          ),
+          IconButton(
+            tooltip: 'Product assistant',
             padding: const EdgeInsets.symmetric(horizontal: 4),
             onPressed: () {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => ProductAiChatPage(
-                    productId: _currentProduct.id,
-                    productName: _currentProduct.name,
-                  ),
+                  builder:
+                      (_) => ProductAiChatPage(
+                        productId: _currentProduct.id,
+                        productName: _currentProduct.name,
+                      ),
                 ),
               );
             },
@@ -411,7 +514,10 @@ class _ReviewPageState extends State<ReviewPage> {
             child: TextButton(
               style: TextButton.styleFrom(
                 backgroundColor: AppColors.primary.withOpacity(0.06),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(999),
                 ),
@@ -420,7 +526,9 @@ class _ReviewPageState extends State<ReviewPage> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => CompareProductSelectPage(product1: _currentProduct),
+                    builder:
+                        (_) =>
+                            CompareProductSelectPage(product1: _currentProduct),
                   ),
                 );
               },
@@ -449,10 +557,7 @@ class _ReviewPageState extends State<ReviewPage> {
       ),
       body: CustomRefreshIndicator(
         onRefresh: () async {
-          await Future.wait([
-            _loadReviews(),
-            _refreshProductData(),
-          ]);
+          await Future.wait([_loadReviews(), _refreshProductData()]);
         },
         child: SingleChildScrollView(
           child: Padding(
@@ -460,236 +565,240 @@ class _ReviewPageState extends State<ReviewPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-
-              /// PRODUCT IMAGE SECTION with Hero animation
-              Hero(
-                tag: 'product_image_${_currentProduct.id}_${_currentProduct.imageURL}',
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: Image.network(
-                    _currentProduct.imageURL,
-                    height: 230,
-                    width: double.infinity,
-                    fit: BoxFit.fitHeight,
-                    errorBuilder: (context, error, stackTrace) {
-                      return Container(
-                        height: 230,
-                        width: double.infinity,
-                        color: AppColors.textSecondary.withOpacity(0.1),
-                        child: const Icon(
-                          Icons.image_not_supported,
-                          color: AppColors.textSecondary,
-                          size: 48,
-                        ),
-                      );
-                    },
+                /// PRODUCT IMAGE SECTION with Hero animation
+                Hero(
+                  tag:
+                      'product_image_${_currentProduct.id}_${_currentProduct.imageURL}',
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Image.network(
+                      _currentProduct.imageURL,
+                      height: 230,
+                      width: double.infinity,
+                      fit: BoxFit.contain,
+                      alignment: Alignment.center,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          height: 230,
+                          width: double.infinity,
+                          color: AppColors.textSecondary.withOpacity(0.1),
+                          child: const Icon(
+                            Icons.image_not_supported,
+                            color: AppColors.textSecondary,
+                            size: 48,
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: AppSpacing.xLarge),
+                const SizedBox(height: AppSpacing.xLarge),
 
-              /// TITLE + FAVORITE
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Text(
-                      _currentProduct.name,
-                      style: AppTextStyles.heading1,
-                      maxLines: 2,
+                /// TITLE + FAVORITE
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _currentProduct.name,
+                        style: AppTextStyles.heading1,
+                        maxLines: 2,
+                      ),
                     ),
-                  ),
-                  GestureDetector(
-                    onTap: _toggleLike,
-                    child: Icon(
-                      _currentProduct.isLiked ?? false
-                          ? Icons.favorite
-                          : Icons.favorite_border,
-                      color: AppColors.primary,
-                      size: 30,
+                    GestureDetector(
+                      onTap: _toggleLike,
+                      child: Icon(
+                        _currentProduct.isLiked ?? false
+                            ? Icons.favorite
+                            : Icons.favorite_border,
+                        color: AppColors.primary,
+                        size: 30,
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              Text(
-                _currentProduct.tag.name.toUpperCase(),
-                style: AppTextStyles.productCardCategory,
-              ),
-              const SizedBox(height: AppSpacing.xLarge),
+                  ],
+                ),
+                Text(
+                  _currentProduct.tag.name.toUpperCase(),
+                  style: AppTextStyles.productCardCategory,
+                ),
+                const SizedBox(height: AppSpacing.xLarge),
 
-              /// Rating / “New” rozeti + özet satırı
-              Builder(
-                builder: (context) {
-                  final rawRating = _currentProduct.averageRating ?? 0.0;
-                  final hasRating = productHasMeaningfulRating(rawRating);
-                  final rating = (rawRating.isNaN || rawRating.isInfinite)
-                      ? 0.0
-                      : rawRating.clamp(0.0, 5.0);
+                /// Rating / “New” rozeti + özet satırı
+                Builder(
+                  builder: (context) {
+                    final rawRating = _currentProduct.averageRating ?? 0.0;
+                    final hasRating = productHasMeaningfulRating(rawRating);
+                    final rating =
+                        (rawRating.isNaN || rawRating.isInfinite)
+                            ? 0.0
+                            : rawRating.clamp(0.0, 5.0);
 
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (hasRating)
-                        Row(
-                          children: [
-                            ...List.generate(5, (index) {
-                              if (rating >= index + 1) {
-                                return const Icon(
-                                  Icons.star,
-                                  size: 24,
-                                  color: AppColors.primary,
-                                );
-                              } else if (rating > index && rating < index + 1) {
-                                return SizedBox(
-                                  width: 24,
-                                  height: 24,
-                                  child: Stack(
-                                    children: [
-                                      const Icon(
-                                        Icons.star_border,
-                                        size: 24,
-                                        color: AppColors.textSecondary,
-                                      ),
-                                      ClipRect(
-                                        child: Align(
-                                          alignment: Alignment.centerLeft,
-                                          widthFactor: rating - index,
-                                          child: const Icon(
-                                            Icons.star,
-                                            size: 24,
-                                            color: AppColors.primary,
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (hasRating)
+                          Row(
+                            children: [
+                              ...List.generate(5, (index) {
+                                if (rating >= index + 1) {
+                                  return const Icon(
+                                    Icons.star,
+                                    size: 24,
+                                    color: AppColors.primary,
+                                  );
+                                } else if (rating > index &&
+                                    rating < index + 1) {
+                                  return SizedBox(
+                                    width: 24,
+                                    height: 24,
+                                    child: Stack(
+                                      children: [
+                                        const Icon(
+                                          Icons.star_border,
+                                          size: 24,
+                                          color: AppColors.textSecondary,
+                                        ),
+                                        ClipRect(
+                                          child: Align(
+                                            alignment: Alignment.centerLeft,
+                                            widthFactor: rating - index,
+                                            child: const Icon(
+                                              Icons.star,
+                                              size: 24,
+                                              color: AppColors.primary,
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                    ],
-                                  ),
+                                      ],
+                                    ),
+                                  );
+                                }
+                                return const Icon(
+                                  Icons.star_border,
+                                  size: 24,
+                                  color: AppColors.textSecondary,
                                 );
-                              }
-                              return const Icon(
-                                Icons.star_border,
-                                size: 24,
-                                color: AppColors.textSecondary,
-                              );
-                            }),
-                            const SizedBox(width: 8),
-                            Text(
-                              rating.toStringAsFixed(1),
-                              style: AppTextStyles.bodyBold.copyWith(
-                                color: AppColors.textPrimary,
-                                fontSize: 16,
+                              }),
+                              const SizedBox(width: 8),
+                              Text(
+                                rating.toStringAsFixed(1),
+                                style: AppTextStyles.bodyBold.copyWith(
+                                  color: AppColors.textPrimary,
+                                  fontSize: 16,
+                                ),
                               ),
-                            ),
-                          ],
-                        )
-                      else
-                        const NewProductBadge(),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          if (!_hasLoadedReviewSummary) ...[
-                            const SkeletonLoader(width: 120, height: 12),
-                            const SizedBox(width: 16),
-                          ] else if (_reviews.isNotEmpty) ...[
+                            ],
+                          )
+                        else
+                          const NewProductBadge(),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            if (!_hasLoadedReviewSummary) ...[
+                              const SkeletonLoader(width: 120, height: 12),
+                              const SizedBox(width: 16),
+                            ] else if (_reviews.isNotEmpty) ...[
+                              Icon(
+                                Icons.reviews_outlined,
+                                size: 14,
+                                color: AppColors.textSecondary,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${_reviews.length} review${_reviews.length != 1 ? 's' : ''}',
+                                style: AppTextStyles.bodySmall.copyWith(
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                            ],
                             Icon(
-                              Icons.reviews_outlined,
+                              Icons.favorite,
                               size: 14,
-                              color: AppColors.textSecondary,
+                              color: AppColors.primary,
                             ),
                             const SizedBox(width: 4),
-                            Text(
-                              '${_reviews.length} review${_reviews.length != 1 ? 's' : ''}',
-                              style: AppTextStyles.bodySmall.copyWith(
-                                color: AppColors.textSecondary,
+                            if (!_hasLoadedReviewSummary) ...[
+                              const SkeletonLoader(width: 50, height: 12),
+                            ] else ...[
+                              Text(
+                                '$_likeCount likes',
+                                style: AppTextStyles.bodySmall.copyWith(
+                                  color: AppColors.textSecondary,
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 16),
+                            ],
                           ],
-                          Icon(
-                            Icons.favorite,
-                            size: 14,
-                            color: AppColors.primary,
-                          ),
-                          const SizedBox(width: 4),
-                          if (!_hasLoadedReviewSummary) ...[
-                            const SkeletonLoader(width: 50, height: 12),
-                          ] else ...[
-                            Text(
-                              '$_likeCount likes',
-                              style: AppTextStyles.bodySmall.copyWith(
-                                color: AppColors.textSecondary,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ],
-                  );
-                },
-              ),
-
-              /// DESCRIPTION
-              Text(
-                _currentProduct.description ?? "",
-                style: AppTextStyles.bodySmall,
-              ),
-              const SizedBox(height: AppSpacing.xLarge),
-
-              /// REVIEWS TITLE
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text("Reviews", style: AppTextStyles.heading2),
-                  if (_reviews.isNotEmpty)
-                    Text(
-                      '${_reviews.length} review${_reviews.length > 1 ? 's' : ''}',
-                      style: AppTextStyles.bodySecondary,
-                    ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.medium),
-
-              /// REVIEWS LIST
-              if (_isLoadingReviews)
-                ...List.generate(
-                  3,
-                  (index) => Padding(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.large),
-                    child: ReviewCardSkeleton(),
-                  ),
-                )
-              else if (_errorMessage != null)
-                Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(AppSpacing.xxLarge),
-                    child: Column(
-                      children: [
-                        Text(
-                          'Failed to load reviews: $_errorMessage',
-                          style: AppTextStyles.body,
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: AppSpacing.large),
-                        ElevatedButton(
-                          onPressed: _loadReviews,
-                          child: const Text('Retry'),
                         ),
                       ],
+                    );
+                  },
+                ),
+
+                /// DESCRIPTION
+                Text(
+                  _currentProduct.description ?? "",
+                  style: AppTextStyles.bodySmall,
+                ),
+                const SizedBox(height: AppSpacing.xLarge),
+
+                /// REVIEWS TITLE
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text("Reviews", style: AppTextStyles.heading2),
+                    if (_reviews.isNotEmpty)
+                      Text(
+                        '${_reviews.length} review${_reviews.length > 1 ? 's' : ''}',
+                        style: AppTextStyles.bodySecondary,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.medium),
+
+                /// REVIEWS LIST
+                if (_isLoadingReviews)
+                  ...List.generate(
+                    3,
+                    (index) => Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.large),
+                      child: ReviewCardSkeleton(),
                     ),
-                  ),
-                )
-              else if (_reviews.isEmpty)
-                Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(AppSpacing.xxLarge),
-                    child: Text(
-                      'No reviews yet. Be the first to review!',
-                      style: AppTextStyles.bodySecondary,
-                      textAlign: TextAlign.center,
+                  )
+                else if (_errorMessage != null)
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(AppSpacing.xxLarge),
+                      child: Column(
+                        children: [
+                          Text(
+                            'Failed to load reviews: $_errorMessage',
+                            style: AppTextStyles.body,
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: AppSpacing.large),
+                          ElevatedButton(
+                            onPressed: _loadReviews,
+                            child: const Text('Retry'),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                )
-              else
-                ..._reviews.map((review) => Padding(
+                  )
+                else if (_reviews.isEmpty)
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(AppSpacing.xxLarge),
+                      child: Text(
+                        'No reviews yet. Be the first to review!',
+                        style: AppTextStyles.bodySecondary,
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  )
+                else
+                  ..._reviews.map(
+                    (review) => Padding(
                       padding: const EdgeInsets.only(bottom: AppSpacing.large),
                       child: ReviewCard(
                         username: '@${review.ownerUserName}',
@@ -698,47 +807,25 @@ class _ReviewPageState extends State<ReviewPage> {
                         isSponsored: review.isCollaborative,
                         likeCount: review.likeCount,
                         isLiked: review.isLikedByCurrentUser,
-                        showChatIcon: _currentUsername != null &&
+                        showChatIcon:
+                            _currentUsername != null &&
                             review.ownerUserName.toLowerCase() !=
                                 _currentUsername!.toLowerCase(),
-                        onReportTap: _currentUserId != null &&
-                                review.ownerId.trim() ==
-                                    _currentUserId!.trim()
-                            ? null
-                            : () async {
-                                final user =
-                                    FirebaseAuth.instance.currentUser;
-                                if (user == null) {
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context)
-                                        .showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                            'Please sign in to report a review'),
-                                        backgroundColor: AppColors.error,
-                                      ),
-                                    );
-                                  }
-                                  return;
-                                }
-                                final ok = await showReportReviewSheet(
-                                  context,
-                                  reviewId: review.id,
-                                );
-                                if (mounted && ok) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                          'Thanks — your report was sent'),
-                                    ),
+                        onReportTap:
+                            _currentUserId != null &&
+                                    review.ownerId.trim() ==
+                                        _currentUserId!.trim()
+                                ? null
+                                : () async {
+                                  await openReviewReportFlow(
+                                    context,
+                                    reviewId: review.id,
                                   );
-                                }
-                              },
+                                },
                         onChatTap: () => _onChatIconTap(review),
                         onUsernameTap: () {
                           if (_currentUserId != null &&
-                              review.ownerId.trim() ==
-                                  _currentUserId!.trim()) {
+                              review.ownerId.trim() == _currentUserId!.trim()) {
                             return;
                           }
                           Navigator.push(
@@ -774,7 +861,9 @@ class _ReviewPageState extends State<ReviewPage> {
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                  content: Text('Please login to upvote reviews'),
+                                  content: Text(
+                                    'Please login to upvote reviews',
+                                  ),
                                   backgroundColor: AppColors.error,
                                 ),
                               );
@@ -783,11 +872,15 @@ class _ReviewPageState extends State<ReviewPage> {
                           }
 
                           // Optimistic update - UI'ı hemen güncelle
-                          final reviewIndex = _reviews.indexWhere((r) => r.id == review.id);
+                          final reviewIndex = _reviews.indexWhere(
+                            (r) => r.id == review.id,
+                          );
                           if (reviewIndex != -1) {
-                            final previousLikeStatus = _reviews[reviewIndex].isLikedByCurrentUser;
-                            final previousLikeCount = _reviews[reviewIndex].likeCount;
-                            
+                            final previousLikeStatus =
+                                _reviews[reviewIndex].isLikedByCurrentUser;
+                            final previousLikeCount =
+                                _reviews[reviewIndex].likeCount;
+
                             setState(() {
                               _reviews[reviewIndex] = ReviewDto(
                                 id: review.id,
@@ -801,9 +894,12 @@ class _ReviewPageState extends State<ReviewPage> {
                                 ownerId: review.ownerId,
                                 ownerUserName: review.ownerUserName,
                                 mediaList: review.mediaList,
-                                likeCount: previousLikeStatus 
-                                    ? (previousLikeCount > 0 ? previousLikeCount - 1 : 0)
-                                    : previousLikeCount + 1,
+                                likeCount:
+                                    previousLikeStatus
+                                        ? (previousLikeCount > 0
+                                            ? previousLikeCount - 1
+                                            : 0)
+                                        : previousLikeCount + 1,
                                 isLikedByCurrentUser: !previousLikeStatus,
                               );
                             });
@@ -811,23 +907,25 @@ class _ReviewPageState extends State<ReviewPage> {
 
                           try {
                             // Token al (session zaten var)
-                            final token = await _sessionHelper.getTokenAndSetHeader();
+                            final token =
+                                await _sessionHelper.getTokenAndSetHeader();
                             if (token == null) {
-                              throw Exception('Failed to get Firebase ID token');
+                              throw Exception(
+                                'Failed to get Firebase ID token',
+                              );
                             }
 
                             // Upvote toggle yap
-                            final newLikeStatus = await _interactionRepository.toggleReviewLike(
-                              token,
-                              review.id,
-                            );
+                            final newLikeStatus = await _interactionRepository
+                                .toggleReviewLike(token, review.id);
 
                             // Review'ı backend'den yeniden çek (güncel like durumu için)
                             try {
-                              final updatedReview = await _reviewRepository.getReviewById(
-                                review.id,
-                                firebaseIdToken: token,
-                              );
+                              final updatedReview = await _reviewRepository
+                                  .getReviewById(
+                                    review.id,
+                                    firebaseIdToken: token,
+                                  );
 
                               // Review listesini güncelle
                               if (reviewIndex != -1) {
@@ -844,7 +942,8 @@ class _ReviewPageState extends State<ReviewPage> {
                                     id: currentReview.id,
                                     title: currentReview.title,
                                     description: currentReview.description,
-                                    isCollaborative: currentReview.isCollaborative,
+                                    isCollaborative:
+                                        currentReview.isCollaborative,
                                     rating: currentReview.rating,
                                     createdAt: currentReview.createdAt,
                                     productId: currentReview.productId,
@@ -852,9 +951,12 @@ class _ReviewPageState extends State<ReviewPage> {
                                     ownerId: currentReview.ownerId,
                                     ownerUserName: currentReview.ownerUserName,
                                     mediaList: currentReview.mediaList,
-                                    likeCount: newLikeStatus
-                                        ? (currentReview.likeCount + 1)
-                                        : (currentReview.likeCount > 0 ? currentReview.likeCount - 1 : 0),
+                                    likeCount:
+                                        newLikeStatus
+                                            ? (currentReview.likeCount + 1)
+                                            : (currentReview.likeCount > 0
+                                                ? currentReview.likeCount - 1
+                                                : 0),
                                     isLikedByCurrentUser: newLikeStatus,
                                   );
                                 });
@@ -868,7 +970,8 @@ class _ReviewPageState extends State<ReviewPage> {
                               });
                             }
                             if (mounted) {
-                              final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
+                              final errorMessage =
+                                  ErrorHandler.getUserFriendlyMessage(e);
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(errorMessage),
@@ -879,14 +982,16 @@ class _ReviewPageState extends State<ReviewPage> {
                           }
                         },
                       ),
-                    )),
+                    ),
+                  ),
 
-              const SizedBox(height: AppSpacing.xxLarge),
-            ],
+                const SizedBox(height: AppSpacing.xxLarge),
+              ],
+            ),
           ),
         ),
       ),
-      ),
+
       /// ADD REVIEW BUTTON
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.all(AppSpacing.large),
@@ -895,16 +1000,11 @@ class _ReviewPageState extends State<ReviewPage> {
           onPressed: () async {
             final result = await Navigator.push(
               context,
-              SlideUpRoute(
-                page: AddReviewPage(product: _currentProduct),
-              ),
+              SlideUpRoute(page: AddReviewPage(product: _currentProduct)),
             );
             // Eğer review oluşturulduysa, review listesini ve product verilerini (rating dahil) yenile
             if (result == true) {
-              await Future.wait([
-                _loadReviews(),
-                _refreshProductData(),
-              ]);
+              await Future.wait([_loadReviews(), _refreshProductData()]);
             }
           },
           isLoading: false,

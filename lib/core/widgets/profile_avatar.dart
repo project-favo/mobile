@@ -31,6 +31,7 @@ class _ProfileAvatarState extends State<ProfileAvatar> {
   @override
   void initState() {
     super.initState();
+    _networkBytes = peekProfileImageBytes(widget.imageUrl);
     _kickLoad();
   }
 
@@ -39,13 +40,14 @@ class _ProfileAvatarState extends State<ProfileAvatar> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.imageUrl != widget.imageUrl ||
         oldWidget.memoryBytes != widget.memoryBytes) {
-      _networkBytes = null;
+      _networkBytes = peekProfileImageBytes(widget.imageUrl);
       _kickLoad();
     }
   }
 
   void _kickLoad() {
     if (widget.memoryBytes != null && widget.memoryBytes!.isNotEmpty) return;
+    if (_networkBytes != null && _networkBytes!.isNotEmpty) return;
     final raw = widget.imageUrl;
     if (raw == null || raw.trim().isEmpty) return;
     _loadBytes();
@@ -151,6 +153,7 @@ class _ProfileAvatarImageState extends State<ProfileAvatarImage> {
   @override
   void initState() {
     super.initState();
+    _networkBytes = peekProfileImageBytes(widget.imageUrl);
     _kickLoad();
   }
 
@@ -159,7 +162,7 @@ class _ProfileAvatarImageState extends State<ProfileAvatarImage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.imageUrl != widget.imageUrl ||
         oldWidget.memoryBytes != widget.memoryBytes) {
-      _networkBytes = null;
+      _networkBytes = peekProfileImageBytes(widget.imageUrl);
       _kickLoad();
     }
   }
@@ -168,6 +171,7 @@ class _ProfileAvatarImageState extends State<ProfileAvatarImage> {
     if (widget.memoryBytes != null && widget.memoryBytes!.isNotEmpty) {
       return;
     }
+    if (_networkBytes != null && _networkBytes!.isNotEmpty) return;
     final raw = widget.imageUrl;
     if (raw == null || raw.trim().isEmpty) return;
     _loadBytes();

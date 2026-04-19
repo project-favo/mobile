@@ -1,9 +1,13 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../../../../app.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/utils/error_handler.dart';
+import '../../../../../core/utils/exceptions.dart';
+import '../../../../../core/utils/review_report_storage.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../data/models/review_dto.dart';
 import '../../../data/repositories/review_repository.dart';
@@ -15,16 +19,58 @@ class _ReasonOption {
   final String apiValue;
 }
 
+bool _reviewReportFlowBusy = false;
+
 const List<_ReasonOption> _kReasons = [
-  _ReasonOption(label: 'Spam or misleading', apiValue: 'SPAM'),
-  _ReasonOption(label: 'Harassment or hate', apiValue: 'HARASSMENT'),
-  _ReasonOption(label: 'Inappropriate content', apiValue: 'INAPPROPRIATE'),
-  _ReasonOption(label: 'Misleading review', apiValue: 'MISLEADING'),
+  _ReasonOption(label: 'Toxic language', apiValue: 'TOXIC_LANGUAGE'),
+  _ReasonOption(label: 'Spam or bot', apiValue: 'SPAM_BOT'),
+  _ReasonOption(label: 'NSFW or inappropriate photo', apiValue: 'NSFW_PHOTO'),
+  _ReasonOption(label: 'Scam or dangerous link', apiValue: 'SCAM_LINK'),
+  _ReasonOption(label: 'Misleading', apiValue: 'MISLEADING'),
+  _ReasonOption(label: 'Harassment', apiValue: 'HARASSMENT'),
   _ReasonOption(label: 'Other', apiValue: 'OTHER'),
 ];
 
-/// Review raporu: neden + isteğe bağlı açıklama, `ReviewRepository.reportReview`.
-/// Başarılı gönderimde `true` döner (çağıran SnackBar gösterebilir).
+/// Bayrak: giriş + daha önce raporlanmadıysa sheet; sonra başarı diyaloğu.
+Future<void> openReviewReportFlow(
+  BuildContext context, {
+  required String reviewId,
+}) async {
+  if (_reviewReportFlowBusy) return;
+  _reviewReportFlowBusy = true;
+  try {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please sign in to report a review'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+    await ReviewReportStorage.hydrateForCurrentUser();
+    if (!context.mounted) return;
+    if (ReviewReportStorage.hasReportedSync(reviewId)) {
+      await showBrandedOkDialog(
+        context,
+        title: 'Already reported',
+        message: 'You have already reported this review.',
+      );
+      return;
+    }
+    if (!context.mounted) return;
+    final ok = await showReportReviewSheet(context, reviewId: reviewId);
+    if (!context.mounted) return;
+    if (ok) await showReviewReportSuccessDialog(context);
+  } finally {
+    _reviewReportFlowBusy = false;
+  }
+}
+
+/// Review raporu (flag): neden + isteğe bağlı not, `ReviewRepository.reportReview`.
+/// Başarılı gönderimde `true` döner; çağıran `openReviewReportFlow` veya başarı diyaloğu kullanabilir.
 Future<bool> showReportReviewSheet(
   BuildContext context, {
   required String reviewId,
@@ -75,15 +121,27 @@ class _ReportReviewSheetBodyState extends State<_ReportReviewSheetBody> {
       await _repository.reportReview(
         token,
         widget.reviewId,
-        ReportReviewRequestDto(
-          reason: _reason,
-          description: _details.text,
-        ),
+        ReportReviewRequestDto(reason: _reason, notes: _details.text),
       );
+      await ReviewReportStorage.markReported(widget.reviewId);
       if (!mounted) return;
       Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;
+      if (e is ReviewAlreadyReportedException) {
+        await ReviewReportStorage.markReported(widget.reviewId);
+        if (!mounted) return;
+        Navigator.pop(context, false);
+        final root = appNavigatorKey.currentContext;
+        if (root != null && root.mounted) {
+          await showBrandedOkDialog(
+            root,
+            title: 'Already reported',
+            message: 'You have already reported this review.',
+          );
+        }
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(ErrorHandler.getUserFriendlyMessage(e)),
@@ -126,12 +184,13 @@ class _ReportReviewSheetBodyState extends State<_ReportReviewSheetBody> {
                   dense: true,
                   value: r.apiValue,
                   groupValue: _reason,
-                  onChanged: _submitting
-                      ? null
-                      : (v) {
-                          if (v == null) return;
-                          setState(() => _reason = v);
-                        },
+                  onChanged:
+                      _submitting
+                          ? null
+                          : (v) {
+                            if (v == null) return;
+                            setState(() => _reason = v);
+                          },
                   title: Text(r.label, style: AppTextStyles.body),
                 );
               }),
@@ -156,16 +215,17 @@ class _ReportReviewSheetBodyState extends State<_ReportReviewSheetBody> {
                   backgroundColor: AppColors.primary,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
-                child: _submitting
-                    ? const SizedBox(
-                        height: 22,
-                        width: 22,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Text('Submit report'),
+                child:
+                    _submitting
+                        ? const SizedBox(
+                          height: 22,
+                          width: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                        : const Text('Submit report'),
               ),
             ],
           ),
@@ -173,4 +233,54 @@ class _ReportReviewSheetBodyState extends State<_ReportReviewSheetBody> {
       ),
     );
   }
+}
+
+/// Marka renkli, tek OK’li basit diyalog (review / ürün raporu sonrası).
+Future<void> showBrandedOkDialog(
+  BuildContext context, {
+  required String title,
+  String? message,
+}) async {
+  if (!context.mounted) return;
+  await showDialog<void>(
+    context: context,
+    builder:
+        (ctx) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Text(
+            title,
+            style: AppTextStyles.heading3.copyWith(
+              color: AppColors.textPrimary,
+            ),
+          ),
+          content:
+              message != null && message.isNotEmpty
+                  ? Text(
+                    message,
+                    style: AppTextStyles.body.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  )
+                  : null,
+          actionsAlignment: MainAxisAlignment.end,
+          actions: [
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+  );
+}
+
+/// Review flag API başarılı olduktan sonra merkez diyalog.
+Future<void> showReviewReportSuccessDialog(BuildContext context) {
+  return showBrandedOkDialog(context, title: 'Successfully reported');
 }

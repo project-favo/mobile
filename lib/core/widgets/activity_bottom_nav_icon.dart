@@ -4,9 +4,9 @@ import '../notifications/notification_realtime_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 
-/// Alt menüdeki Profil sekmesi için okunmamış bildirim rozeti.
-class NotificationProfileNavIcon extends StatelessWidget {
-  const NotificationProfileNavIcon({super.key});
+/// Alt gezinmede Activity (yıldırım): okunmamış bildirim sayısı sağ-alt rozet.
+class ActivityBottomNavIcon extends StatelessWidget {
+  const ActivityBottomNavIcon({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -17,25 +17,33 @@ class NotificationProfileNavIcon extends StatelessWidget {
           clipBehavior: Clip.none,
           alignment: Alignment.center,
           children: [
-            const Icon(Icons.person_outline),
+            const Icon(Icons.bolt_rounded, size: 26),
             if (count > 0)
               Positioned(
                 right: -6,
-                top: -4,
+                bottom: -4,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 2,
+                  ),
+                  constraints: const BoxConstraints(
+                    minWidth: 18,
+                    minHeight: 18,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.primary,
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.surface, width: 1.5),
                   ),
-                  constraints: const BoxConstraints(minWidth: 16),
+                  alignment: Alignment.center,
                   child: Text(
-                    count > 9 ? '9+' : count.toString(),
-                    textAlign: TextAlign.center,
+                    count > 99 ? '99+' : '$count',
                     style: AppTextStyles.bodySecondary.copyWith(
                       color: Colors.white,
-                      fontSize: 9,
+                      fontSize: 10,
                       fontWeight: FontWeight.w700,
+                      height: 1,
                     ),
                   ),
                 ),

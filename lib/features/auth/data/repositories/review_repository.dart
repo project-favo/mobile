@@ -1,6 +1,23 @@
 import 'package:dio/dio.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/utils/exceptions.dart';
 import '../models/review_dto.dart';
+
+bool _dioMeansReviewAlreadyReported(DioException e) {
+  final code = e.response?.statusCode;
+  if (code == 409) return true;
+  final s = dioResponseDataAsSearchString(e.response?.data).toLowerCase();
+  if (s.contains('duplicate')) return true;
+  if (s.contains('zaten')) return true;
+  if (s.contains('already') &&
+      (s.contains('flag') ||
+          s.contains('report') ||
+          s.contains('şikayet') ||
+          s.contains('sikayet'))) {
+    return true;
+  }
+  return false;
+}
 
 class ReviewRepository {
   final ApiClient _apiClient = ApiClient();
@@ -189,7 +206,7 @@ class ReviewRepository {
     }
   }
 
-  /// Review şikayeti — POST `/api/reviews/{reviewId}/report`
+  /// Review şikayeti — önce `POST .../report` (mevcut backend), yoksa `POST .../flag`.
   Future<void> reportReview(
     String firebaseIdToken,
     String reviewId,
@@ -197,12 +214,35 @@ class ReviewRepository {
   ) async {
     try {
       _apiClient.setAuthToken(firebaseIdToken);
-      final encoded = Uri.encodeComponent(reviewId);
-      await _apiClient.dio.post(
-        '/api/reviews/$encoded/report',
-        data: request.toJson(),
-      );
+      final id = reviewId.trim();
+      final notes = request.notes?.trim() ?? '';
+      final reportBody = <String, dynamic>{'reason': request.reason};
+      if (notes.isNotEmpty) {
+        reportBody['description'] = notes;
+        reportBody['notes'] = notes;
+      }
+
+      try {
+        await _apiClient.dio.post(
+          '/api/reviews/$id/flag',
+          data: request.toJson(),
+        );
+      } on DioException catch (e) {
+        final code = e.response?.statusCode;
+        // Eski uç: yalnızca `/report`. Bazı kurulumlarda `/flag` yokken 404/405/401 görülebiliyor.
+        if (code == 404 || code == 405 || code == 401) {
+          await _apiClient.dio.post(
+            '/api/reviews/$id/report',
+            data: reportBody,
+          );
+          return;
+        }
+        rethrow;
+      }
     } on DioException catch (e) {
+      if (_dioMeansReviewAlreadyReported(e)) {
+        throw const ReviewAlreadyReportedException();
+      }
       if (e.response != null) {
         final errorData = e.response?.data;
         final errorMessage = errorData is Map

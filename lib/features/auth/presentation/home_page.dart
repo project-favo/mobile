@@ -50,7 +50,7 @@ class _HomePageState extends State<HomePage> {
   final InteractionRepository _interactionRepository = InteractionRepository();
   final SessionHelper _sessionHelper = SessionHelper();
   final MessageRepository _messageRepository = MessageRepository();
-  
+
   List<TagDto> _tags = [];
   List<TagDto> _subTags = [];
   List<ProductDto> _filteredProducts = []; // Current page products
@@ -309,23 +309,27 @@ class _HomePageState extends State<HomePage> {
 
     // Önce ürünleri yükle (kullanıcı hemen sonuç görsün), alt kategoriler arka planda gelsin
     final token = await _sessionHelper.ensureSession();
-    unawaited(Future(() async {
-      try {
-        final childrenResponse =
-            await _tagRepository.getTagChildren(rootTag.id, token);
-        if (!mounted) return;
-        setState(() {
-          _subTags = childrenResponse.children;
-          _isLoadingSubTags = false;
-        });
-      } catch (_) {
-        if (!mounted) return;
-        setState(() {
-          _isLoadingSubTags = false;
-          _subTags = [];
-        });
-      }
-    }));
+    unawaited(
+      Future(() async {
+        try {
+          final childrenResponse = await _tagRepository.getTagChildren(
+            rootTag.id,
+            token,
+          );
+          if (!mounted) return;
+          setState(() {
+            _subTags = childrenResponse.children;
+            _isLoadingSubTags = false;
+          });
+        } catch (_) {
+          if (!mounted) return;
+          setState(() {
+            _isLoadingSubTags = false;
+            _subTags = [];
+          });
+        }
+      }),
+    );
 
     await _loadProductsPage(0);
   }
@@ -340,9 +344,12 @@ class _HomePageState extends State<HomePage> {
       final updatedProduct = await _productRepository.getProductById(
         productId,
         firebaseIdToken: token,
+        bypassCache: true,
       );
 
-      final filteredIndex = _filteredProducts.indexWhere((p) => p.id == productId);
+      final filteredIndex = _filteredProducts.indexWhere(
+        (p) => p.id == productId,
+      );
       if (filteredIndex != -1) {
         setState(() {
           _filteredProducts[filteredIndex] = updatedProduct;
@@ -439,13 +446,14 @@ class _HomePageState extends State<HomePage> {
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     itemCount: 4,
-                    separatorBuilder: (_, __) =>
-                        const SizedBox(width: AppSpacing.large),
-                    itemBuilder: (context, index) => const SkeletonLoader(
-                      width: 88,
-                      height: AppSpacing.categoryChipHeight - 8,
-                      borderRadius: BorderRadius.all(Radius.circular(20)),
-                    ),
+                    separatorBuilder:
+                        (_, __) => const SizedBox(width: AppSpacing.large),
+                    itemBuilder:
+                        (context, index) => const SkeletonLoader(
+                          width: 88,
+                          height: AppSpacing.categoryChipHeight - 8,
+                          borderRadius: BorderRadius.all(Radius.circular(20)),
+                        ),
                   ),
                 ),
                 const SizedBox(height: AppSpacing.large),
@@ -461,23 +469,23 @@ class _HomePageState extends State<HomePage> {
                   borderRadius: BorderRadius.circular(4),
                 ),
                 const SizedBox(height: AppSpacing.large),
+
                 /// TOP 10 SKELETON
-                Text(
-                  _feedMode.topStripTitle,
-                  style: AppTextStyles.heading2,
-                ),
+                Text(_feedMode.topStripTitle, style: AppTextStyles.heading2),
                 const SizedBox(height: AppSpacing.large),
                 SizedBox(
                   height: 190,
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     itemCount: 10,
-                    separatorBuilder: (_, __) =>
-                        const SizedBox(width: AppSpacing.xLarge),
-                    itemBuilder: (context, index) => const TopProductCardSkeleton(),
+                    separatorBuilder:
+                        (_, __) => const SizedBox(width: AppSpacing.xLarge),
+                    itemBuilder:
+                        (context, index) => const TopProductCardSkeleton(),
                   ),
                 ),
                 const SizedBox(height: AppSpacing.xxLarge),
+
                 /// PRODUCTS SKELETON
                 ...List.generate(
                   3,
@@ -531,11 +539,7 @@ class _HomePageState extends State<HomePage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(
-                  Icons.error_outline,
-                  size: 64,
-                  color: AppColors.error,
-                ),
+                Icon(Icons.error_outline, size: 64, color: AppColors.error),
                 const SizedBox(height: AppSpacing.large),
                 Text(
                   _errorMessage ?? 'An error occurred',
@@ -583,9 +587,7 @@ class _HomePageState extends State<HomePage> {
           onPressed: () {
             Navigator.push(
               context,
-              MaterialPageRoute(
-                builder: (_) => const AiChatPage(),
-              ),
+              MaterialPageRoute(builder: (_) => const AiChatPage()),
             );
           },
         ),
@@ -670,15 +672,15 @@ class _HomePageState extends State<HomePage> {
                     children: [
                       for (final mode in HomeFeedMode.values)
                         Padding(
-                          padding:
-                              const EdgeInsets.only(right: AppSpacing.large),
+                          padding: const EdgeInsets.only(
+                            right: AppSpacing.large,
+                          ),
                           child: _FeedModeChip(
                             title: mode.chipLabel,
                             selected: _feedMode == mode,
                             onTap: () async {
                               if (mode == HomeFeedMode.personalized) {
-                                final t =
-                                    await _sessionHelper.ensureSession();
+                                final t = await _sessionHelper.ensureSession();
                                 if (!mounted) return;
                                 if (t == null) {
                                   ScaffoldMessenger.of(context).showSnackBar(
@@ -711,24 +713,18 @@ class _HomePageState extends State<HomePage> {
                 ),
                 const SizedBox(height: AppSpacing.large),
               ],
-              Text(
-                _feedMode.topStripTitle,
-                style: AppTextStyles.heading2,
-              ),
+              Text(_feedMode.topStripTitle, style: AppTextStyles.heading2),
               const SizedBox(height: AppSpacing.large),
               SizedBox(
                 height: 240,
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: top10Products.length,
-                  separatorBuilder: (_, __) =>
-                      const SizedBox(width: AppSpacing.xLarge),
+                  separatorBuilder:
+                      (_, __) => const SizedBox(width: AppSpacing.xLarge),
                   itemBuilder: (context, index) {
                     final product = top10Products[index];
-                    return TopProductList(
-                      product: product,
-                      rank: index + 1,
-                    );
+                    return TopProductList(product: product, rank: index + 1);
                   },
                 ),
               ),
@@ -773,13 +769,14 @@ class _HomePageState extends State<HomePage> {
                     child: ListView.separated(
                       scrollDirection: Axis.horizontal,
                       itemCount: 4,
-                      separatorBuilder: (_, __) =>
-                          const SizedBox(width: AppSpacing.large),
-                      itemBuilder: (context, index) => const SkeletonLoader(
-                        width: 70,
-                        height: AppSpacing.categoryChipHeight - 8,
-                        borderRadius: BorderRadius.all(Radius.circular(20)),
-                      ),
+                      separatorBuilder:
+                          (_, __) => const SizedBox(width: AppSpacing.large),
+                      itemBuilder:
+                          (context, index) => const SkeletonLoader(
+                            width: 70,
+                            height: AppSpacing.categoryChipHeight - 8,
+                            borderRadius: BorderRadius.all(Radius.circular(20)),
+                          ),
                     ),
                   )
                 else if (_subTags.isNotEmpty)
@@ -796,8 +793,7 @@ class _HomePageState extends State<HomePage> {
                             final rootTag = _tags[_selectedCategoryIndex];
                             setState(() {
                               _selectedSubCategoryIndex = -1;
-                              _activeCategoryPathPrefix =
-                                  rootTag.categoryPath;
+                              _activeCategoryPathPrefix = rootTag.categoryPath;
                               _isFiltering = true;
                             });
                             await _loadProductsPage(0);
@@ -813,8 +809,7 @@ class _HomePageState extends State<HomePage> {
                             onTap: () async {
                               setState(() {
                                 _selectedSubCategoryIndex = subIndex;
-                                _activeCategoryPathPrefix =
-                                    subTag.categoryPath;
+                                _activeCategoryPathPrefix = subTag.categoryPath;
                                 _isFiltering = true;
                               });
                               await _loadProductsPage(0);
@@ -829,189 +824,163 @@ class _HomePageState extends State<HomePage> {
               _isFiltering
                   // Kategori / sayfa değişirken, gerçek grid yapısına benzeyen skeleton grid göster
                   ? GridView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        crossAxisSpacing: AppSpacing.xLarge,
-                        mainAxisSpacing: AppSpacing.xLarge,
-                        childAspectRatio: 0.6,
-                      ),
-                      itemCount: 4,
-                      itemBuilder: (context, index) =>
-                          const ProductCardSkeleton(),
-                    )
-                  : _filteredProducts.isEmpty
-                      ? Center(
-                          child: Padding(
-                            padding:
-                                const EdgeInsets.all(AppSpacing.xxLarge),
-                            child: Text(
-                              'No products found',
-                              style: AppTextStyles.bodySecondary,
-                            ),
-                          ),
-                        )
-                      : Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            GridView.builder(
-                              shrinkWrap: true,
-                              physics:
-                                  const NeverScrollableScrollPhysics(),
-                              gridDelegate:
-                                  const SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: 2,
-                                crossAxisSpacing: AppSpacing.xLarge,
-                                mainAxisSpacing: AppSpacing.xLarge,
-                                childAspectRatio: 0.6,
-                              ),
-                              itemCount: _filteredProducts.length,
-                              itemBuilder: (context, index) {
-                                final product = _filteredProducts[index];
-                                return ProductCard(
-                                  key: ValueKey(
-                                    'product_${product.id}_${product.isLiked}_${product.averageRating}',
-                                  ),
-                                  productId: product.id,
-                                  imageUrl: product.imageURL,
-                                  title: product.name,
-                                  category: product.tag.name,
-                                  rating: product.averageRating ?? 0.0,
-                                  desc: product.description ?? '',
-                                  isFavorite: product.isLiked ?? false,
-                                  onTap: () async {
-                                    final updatedProduct =
-                                        await Navigator.push<ProductDto>(
-                                      context,
-                                      SlideRightRoute(
-                                        page: ReviewPage(product: product),
-                                      ),
-                                    );
-                                    if (updatedProduct != null) {
-                                      final filteredIndex =
-                                          _filteredProducts.indexWhere(
-                                        (p) => p.id == updatedProduct.id,
-                                      );
-                                      if (filteredIndex != -1) {
-                                        setState(() {
-                                          _filteredProducts[filteredIndex] =
-                                              updatedProduct;
-                                        });
-                                      }
-                                    } else {
-                                      await _refreshProductLikeStatus(
-                                        product.id,
-                                      );
-                                    }
-                                  },
-                                  onFavoriteTap: () async {
-                                    final user =
-                                        FirebaseAuth.instance.currentUser;
-                                    if (user == null) {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'Please login to like products',
-                                          ),
-                                          backgroundColor:
-                                              AppColors.error,
-                                        ),
-                                      );
-                                      return;
-                                    }
-                                    final filteredIndex =
-                                        _filteredProducts.indexWhere(
-                                      (p) => p.id == product.id,
-                                    );
-                                    if (filteredIndex != -1) {
-                                      final currentLikeStatus =
-                                          _filteredProducts[filteredIndex]
-                                                  .isLiked ??
-                                              false;
-                                      setState(() {
-                                        _filteredProducts[filteredIndex] =
-                                            _filteredProducts[filteredIndex]
-                                                .copyWith(
-                                          isLiked: !currentLikeStatus,
-                                        );
-                                      });
-                                    }
-                                    try {
-                                      final token =
-                                          await _sessionHelper
-                                              .getTokenAndSetHeader();
-                                      if (token == null) {
-                                        throw Exception(
-                                          'Failed to get Firebase ID token',
-                                        );
-                                      }
-                                      final newLikeStatus =
-                                          await _interactionRepository
-                                              .toggleProductLike(
-                                        token,
-                                        product.id,
-                                      );
-                                      if (filteredIndex != -1) {
-                                        setState(() {
-                                          _filteredProducts[filteredIndex] =
-                                              _filteredProducts[filteredIndex]
-                                                  .copyWith(
-                                            isLiked: newLikeStatus,
-                                          );
-                                        });
-                                      }
-                                    } catch (e) {
-                                      if (filteredIndex != -1) {
-                                        setState(() {
-                                          _filteredProducts[filteredIndex] =
-                                              _filteredProducts[filteredIndex]
-                                                  .copyWith(
-                                            isLiked: product.isLiked,
-                                          );
-                                        });
-                                      }
-                                      if (mounted) {
-                                        final errorMessage =
-                                            ErrorHandler
-                                                .getUserFriendlyMessage(
-                                          e,
-                                        );
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(
-                                          SnackBar(
-                                            content: Text(errorMessage),
-                                            backgroundColor:
-                                                AppColors.error,
-                                          ),
-                                        );
-                                      }
-                                    }
-                                  },
-                                );
-                              },
-                            ),
-                            if (_isLoadingMore)
-                              const Padding(
-                                padding: EdgeInsets.symmetric(
-                                  vertical: AppSpacing.large,
-                                ),
-                                child: Center(
-                                  child: ListLoadMoreSkeleton(),
-                                ),
-                              )
-                            else if (_totalElements > _filteredProducts.length)
-                              Padding(
-                                padding: const EdgeInsets.all(AppSpacing.small),
-                                child: Text(
-                                  '${_filteredProducts.length} / $_totalElements',
-                                  style: AppTextStyles.bodySecondary,
-                                ),
-                              ),
-                          ],
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: AppSpacing.xLarge,
+                          mainAxisSpacing: AppSpacing.xLarge,
+                          childAspectRatio: 0.6,
                         ),
+                    itemCount: 4,
+                    itemBuilder:
+                        (context, index) => const ProductCardSkeleton(),
+                  )
+                  : _filteredProducts.isEmpty
+                  ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(AppSpacing.xxLarge),
+                      child: Text(
+                        'No products found',
+                        style: AppTextStyles.bodySecondary,
+                      ),
+                    ),
+                  )
+                  : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      GridView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              crossAxisSpacing: AppSpacing.xLarge,
+                              mainAxisSpacing: AppSpacing.xLarge,
+                              childAspectRatio: 0.6,
+                            ),
+                        itemCount: _filteredProducts.length,
+                        itemBuilder: (context, index) {
+                          final product = _filteredProducts[index];
+                          return ProductCard(
+                            key: ValueKey(
+                              'product_${product.id}_${product.isLiked}_${product.averageRating}',
+                            ),
+                            productId: product.id,
+                            imageUrl: product.imageURL,
+                            title: product.name,
+                            category: product.tag.name,
+                            rating: product.averageRating ?? 0.0,
+                            desc: product.description ?? '',
+                            isFavorite: product.isLiked ?? false,
+                            onTap: () async {
+                              final updatedProduct =
+                                  await Navigator.push<ProductDto>(
+                                    context,
+                                    SlideRightRoute(
+                                      page: ReviewPage(product: product),
+                                    ),
+                                  );
+                              if (updatedProduct != null) {
+                                final filteredIndex = _filteredProducts
+                                    .indexWhere(
+                                      (p) => p.id == updatedProduct.id,
+                                    );
+                                if (filteredIndex != -1) {
+                                  setState(() {
+                                    _filteredProducts[filteredIndex] =
+                                        updatedProduct;
+                                  });
+                                }
+                              } else {
+                                await _refreshProductLikeStatus(product.id);
+                              }
+                            },
+                            onFavoriteTap: () async {
+                              final user = FirebaseAuth.instance.currentUser;
+                              if (user == null) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Please login to like products',
+                                    ),
+                                    backgroundColor: AppColors.error,
+                                  ),
+                                );
+                                return;
+                              }
+                              final filteredIndex = _filteredProducts
+                                  .indexWhere((p) => p.id == product.id);
+                              if (filteredIndex != -1) {
+                                final currentLikeStatus =
+                                    _filteredProducts[filteredIndex].isLiked ??
+                                    false;
+                                setState(() {
+                                  _filteredProducts[filteredIndex] =
+                                      _filteredProducts[filteredIndex].copyWith(
+                                        isLiked: !currentLikeStatus,
+                                      );
+                                });
+                              }
+                              try {
+                                final token =
+                                    await _sessionHelper.getTokenAndSetHeader();
+                                if (token == null) {
+                                  throw Exception(
+                                    'Failed to get Firebase ID token',
+                                  );
+                                }
+                                final newLikeStatus =
+                                    await _interactionRepository
+                                        .toggleProductLike(token, product.id);
+                                if (filteredIndex != -1) {
+                                  setState(() {
+                                    _filteredProducts[filteredIndex] =
+                                        _filteredProducts[filteredIndex]
+                                            .copyWith(isLiked: newLikeStatus);
+                                  });
+                                }
+                              } catch (e) {
+                                if (filteredIndex != -1) {
+                                  setState(() {
+                                    _filteredProducts[filteredIndex] =
+                                        _filteredProducts[filteredIndex]
+                                            .copyWith(isLiked: product.isLiked);
+                                  });
+                                }
+                                if (mounted) {
+                                  final errorMessage =
+                                      ErrorHandler.getUserFriendlyMessage(e);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(errorMessage),
+                                      backgroundColor: AppColors.error,
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                          );
+                        },
+                      ),
+                      if (_isLoadingMore)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(
+                            vertical: AppSpacing.large,
+                          ),
+                          child: Center(child: ListLoadMoreSkeleton()),
+                        )
+                      else if (_totalElements > _filteredProducts.length)
+                        Padding(
+                          padding: const EdgeInsets.all(AppSpacing.small),
+                          child: Text(
+                            '${_filteredProducts.length} / $_totalElements',
+                            style: AppTextStyles.bodySecondary,
+                          ),
+                        ),
+                    ],
+                  ),
             ],
           ),
         ),
@@ -1027,16 +996,11 @@ class _FeedModeChip extends StatelessWidget {
   final bool selected;
   final VoidCallback? onTap;
 
-  const _FeedModeChip({
-    required this.title,
-    this.selected = false,
-    this.onTap,
-  });
+  const _FeedModeChip({required this.title, this.selected = false, this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final decoration =
-        AppChipStyles.categoryChipDecoration(selected: selected);
+    final decoration = AppChipStyles.categoryChipDecoration(selected: selected);
     final textStyle = AppChipStyles.categoryChipText(selected: selected);
 
     return GestureDetector(
@@ -1072,13 +1036,15 @@ class _CategoryChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final decoration = isSubCategory
-        ? AppChipStyles.subCategoryChipDecoration(selected: selected)
-        : AppChipStyles.categoryChipDecoration(selected: selected);
+    final decoration =
+        isSubCategory
+            ? AppChipStyles.subCategoryChipDecoration(selected: selected)
+            : AppChipStyles.categoryChipDecoration(selected: selected);
 
-    final textStyle = isSubCategory
-        ? AppChipStyles.subCategoryChipText(selected: selected)
-        : AppChipStyles.categoryChipText(selected: selected);
+    final textStyle =
+        isSubCategory
+            ? AppChipStyles.subCategoryChipText(selected: selected)
+            : AppChipStyles.categoryChipText(selected: selected);
 
     final horizontalPadding =
         isSubCategory ? AppSpacing.large : AppSpacing.xLarge;

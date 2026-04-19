@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../../core/utils/error_handler.dart';
+import '../../../core/utils/load_profile_image_bytes.dart';
 import '../../../core/utils/session_helper.dart';
 import '../../auth/data/models/notification_dto.dart';
 import '../../auth/data/repositories/interaction_repository.dart';
@@ -29,11 +30,14 @@ class ActivityController extends ChangeNotifier {
   final Set<String> _followingUserIds = {};
   int _page = 0;
   int _totalPages = 1;
+  int _totalElements = 0;
   bool _loadingFirst = true;
   bool _loadingMore = false;
   String? _errorMessage;
 
   List<ActivityItem> get items => List.unmodifiable(_items);
+  /// Sunucudaki toplam bildirim sayısı (sayfalama üst bilgisi).
+  int get totalNotificationCount => _totalElements;
   bool get loadingFirst => _loadingFirst;
   bool get loadingMore => _loadingMore;
   String? get errorMessage => _errorMessage;
@@ -41,6 +45,15 @@ class ActivityController extends ChangeNotifier {
 
   bool isFollowingUser(String userId) =>
       userId.isNotEmpty && _followingUserIds.contains(userId);
+
+  void _prefetchAvatarsForItems(Iterable<ActivityItem> items) {
+    for (final e in items) {
+      final u = e.user.avatarUrl;
+      if (u != null && u.trim().isNotEmpty) {
+        unawaited(loadProfileImageBytesFromRaw(u));
+      }
+    }
+  }
 
   Future<void> loadFirstPage() async {
     _loadingFirst = true;
@@ -53,6 +66,8 @@ class ActivityController extends ChangeNotifier {
           page.content.map(activityItemFromNotification).toList();
       _page = page.number;
       _totalPages = page.totalPages;
+      _totalElements = page.totalElements;
+      _prefetchAvatarsForItems(_items);
       await _syncFollowStatesForCurrentItems();
     } catch (e) {
       _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
@@ -69,12 +84,12 @@ class ActivityController extends ChangeNotifier {
     try {
       final next =
           await _notifications.getNotifications(page: _page + 1, size: 20);
-      _items = [
-        ..._items,
-        ...next.content.map(activityItemFromNotification),
-      ];
+      final appended =
+          next.content.map(activityItemFromNotification).toList();
+      _items = [..._items, ...appended];
       _page = next.number;
       _totalPages = next.totalPages;
+      _prefetchAvatarsForItems(appended);
       await _syncFollowStatesForCurrentItems();
     } catch (_) {
       // Ignore; user can pull to refresh or scroll again
@@ -123,6 +138,15 @@ class ActivityController extends ChangeNotifier {
     }
   }
 
+  /// Activity ekranı görüntülendiğinde: sunucuda tümünü okundu işaretle + yerel satırlar.
+  Future<void> markEntireFeedViewed() async {
+    try {
+      await _notifications.markAllRead();
+      _items = _items.map((e) => e.copyWith(isRead: true)).toList();
+      notifyListeners();
+    } catch (_) {}
+  }
+
   Future<void> markRead(String id) async {
     final i = _items.indexWhere((e) => e.id == id);
     if (i < 0 || _items[i].isRead) return;
@@ -143,6 +167,8 @@ class ActivityController extends ChangeNotifier {
     final mapped = activityItemFromNotification(n);
     if (_items.any((e) => e.id == mapped.id)) return;
     _items = [mapped, ..._items];
+    if (_totalElements > 0) _totalElements += 1;
+    _prefetchAvatarsForItems([mapped]);
     notifyListeners();
     unawaited(_syncFollowStatesForCurrentItems());
   }

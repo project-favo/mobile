@@ -454,5 +454,111 @@ class InteractionRepository {
       throw Exception('Network error: ${e.message}');
     }
   }
+
+  // ─── Product report (REPORT interaction) ─────────────────────────────────
+
+  /// Ürünü raporla — POST `/api/interactions/product/{productId}/report` (auth).
+  /// 200: `{ "reported": true|false }`
+  Future<bool> reportProduct(String firebaseIdToken, String productId) async {
+    try {
+      _apiClient.setAuthToken(firebaseIdToken);
+      final encoded = Uri.encodeComponent(productId);
+      final response = await _apiClient.dio.post(
+        '/api/interactions/product/$encoded/report',
+      );
+      if (response.data is Map) {
+        return response.data['reported'] as bool? ?? false;
+      }
+      return false;
+    } on DioException catch (e) {
+      if (e.response != null) {
+        final errorData = e.response?.data;
+        final errorMessage = errorData is Map
+            ? (errorData['message'] ?? errorData['error'] ?? 'Failed to report product')
+            : errorData?.toString() ?? 'Failed to report product';
+        throw Exception(errorMessage);
+      }
+      throw Exception('Network error: ${e.message}');
+    }
+  }
+
+  /// Toplam rapor sayısı — GET `.../report-count` (public).
+  Future<int> getProductReportCount(String productId) async {
+    try {
+      final encoded = Uri.encodeComponent(productId);
+      final response = await _publicDioInstance.get(
+        '/api/interactions/product/$encoded/report-count',
+      );
+      if (response.data is Map) {
+        return (response.data['count'] as num?)?.toInt() ?? 0;
+      }
+      return 0;
+    } on DioException catch (e) {
+      if (e.response != null) {
+        final errorData = e.response?.data;
+        final errorMessage = errorData is Map
+            ? (errorData['message'] ?? errorData['error'] ?? 'Failed to get report count')
+            : errorData?.toString() ?? 'Failed to get report count';
+        throw Exception(errorMessage);
+      }
+      throw Exception('Network error: ${e.message}');
+    }
+  }
+
+  /// Giriş yapan kullanıcı bu ürünü raporlamış mı — GET `.../is-reported` (auth isteğe bağlı).
+  Future<bool> isProductReported(String? firebaseIdToken, String productId) async {
+    bool parse(Response response) {
+      if (response.data is Map) {
+        return response.data['isReported'] as bool? ?? false;
+      }
+      return false;
+    }
+
+    final encoded = Uri.encodeComponent(productId);
+    final path = '/api/interactions/product/$encoded/is-reported';
+
+    if (firebaseIdToken != null && firebaseIdToken.isNotEmpty) {
+      try {
+        _apiClient.setAuthToken(firebaseIdToken);
+        final response = await _apiClient.dio.get(path);
+        return parse(response);
+      } on DioException catch (e) {
+        if (e.response?.statusCode != 401) {
+          return false;
+        }
+      }
+    }
+
+    try {
+      final response = await _publicDioInstance.get(path);
+      return parse(response);
+    } on DioException {
+      return false;
+    }
+  }
+
+  /// Etkileşim sayısı (REPORT) — GET `.../count?type=REPORT` (public).
+  Future<int> getProductReportInteractionCount(String productId) async {
+    try {
+      final encoded = Uri.encodeComponent(productId);
+      final response = await _publicDioInstance.get(
+        '/api/interactions/product/$encoded/count',
+        queryParameters: const {'type': 'REPORT'},
+      );
+      if (response.data is Map) {
+        return (response.data['count'] as num?)?.toInt() ?? 0;
+      }
+      return 0;
+    } on DioException catch (e) {
+      if (e.response != null) {
+        final errorData = e.response?.data;
+        final errorMessage = errorData is Map
+            ? (errorData['message'] ?? errorData['error'] ?? 'Failed to get report count')
+            : errorData?.toString() ?? 'Failed to get report count';
+        throw Exception(errorMessage);
+      }
+      throw Exception('Network error: ${e.message}');
+    }
+  }
 }
 

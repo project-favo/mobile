@@ -119,6 +119,7 @@ class _ProductCardState extends State<ProductCard> {
                   child: Image.network(
                     widget.imageUrl,
                     fit: BoxFit.contain,
+                    alignment: Alignment.center,
                     cacheWidth: imageCacheW,
                     cacheHeight: imageCacheH,
                     filterQuality: FilterQuality.medium,

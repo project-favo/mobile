@@ -74,6 +74,7 @@ class _TopProductListState extends State<TopProductList> {
                     child: Image.network(
                       widget.product.imageURL,
                       fit: BoxFit.contain,
+                      alignment: Alignment.center,
                       cacheWidth: topImgW,
                       cacheHeight: topImgH,
                       filterQuality: FilterQuality.medium,

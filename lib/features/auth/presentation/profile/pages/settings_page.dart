@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../../../../core/theme/app_colors.dart';
@@ -12,8 +14,7 @@ import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/utils/resolve_media_url.dart';
 import 'edit_profile_page.dart';
 import 'change_password_page.dart';
-import 'notifications_page.dart';
-import '../../../../../core/notifications/notification_realtime_service.dart';
+import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../backend_email_verification_page.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -43,9 +44,10 @@ class _SettingsPageState extends State<SettingsPage> {
     });
 
     try {
-      try {
-        await FirebaseAuth.instance.currentUser?.reload();
-      } catch (_) {}
+      final u = FirebaseAuth.instance.currentUser;
+      if (u != null) {
+        unawaited(u.reload().catchError((_) {}));
+      }
       final user = await _authService.getMe();
       setState(() {
         _user = user;
@@ -79,10 +81,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           content: const Text(
             "Are you sure you want to log out? You'll need to login again to use the app.",
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.black54,
-            ),
+            style: TextStyle(fontSize: 14, color: Colors.black54),
           ),
           actions: [
             TextButton(
@@ -90,7 +89,10 @@ class _SettingsPageState extends State<SettingsPage> {
                 Navigator.of(context).pop();
               },
               style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                   side: const BorderSide(color: AppColors.primary, width: 1),
@@ -113,7 +115,10 @@ class _SettingsPageState extends State<SettingsPage> {
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -137,10 +142,9 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       await _authService.signOut();
       if (context.mounted) {
-        Navigator.of(context).pushNamedAndRemoveUntil(
-          AppRoutes.login,
-          (route) => false,
-        );
+        Navigator.of(
+          context,
+        ).pushNamedAndRemoveUntil(AppRoutes.login, (route) => false);
       }
     } catch (e) {
       if (context.mounted) {
@@ -175,10 +179,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           content: const Text(
             'This action is permanent and cannot be undone. Are you sure you want to delete your account?',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.black54,
-            ),
+            style: TextStyle(fontSize: 14, color: Colors.black54),
           ),
           actions: [
             TextButton(
@@ -186,7 +187,10 @@ class _SettingsPageState extends State<SettingsPage> {
                 Navigator.of(context).pop();
               },
               style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                   side: const BorderSide(color: AppColors.primary, width: 1),
@@ -209,7 +213,10 @@ class _SettingsPageState extends State<SettingsPage> {
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.error,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -236,9 +243,7 @@ class _SettingsPageState extends State<SettingsPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'A new verification email was sent.',
-          ),
+          content: Text('A new verification email was sent.'),
           backgroundColor: AppColors.success,
         ),
       );
@@ -262,12 +267,13 @@ class _SettingsPageState extends State<SettingsPage> {
     final ok = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => BackendEmailVerificationPage(
-          email: email,
-          popWithSuccessResult: true,
-          navigateHomeOnSuccess: false,
-          refreshProfileOnlyOnContinue: onlyVerifyNoBackendLogin,
-        ),
+        builder:
+            (_) => BackendEmailVerificationPage(
+              email: email,
+              popWithSuccessResult: true,
+              navigateHomeOnSuccess: false,
+              refreshProfileOnlyOnContinue: onlyVerifyNoBackendLogin,
+            ),
       ),
     );
     if (ok == true && mounted) await _loadUserData();
@@ -283,7 +289,11 @@ class _SettingsPageState extends State<SettingsPage> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.check_circle_outline, color: AppColors.success, size: 22),
+            Icon(
+              Icons.check_circle_outline,
+              color: AppColors.success,
+              size: 22,
+            ),
             const SizedBox(width: AppSpacing.small),
             Text(
               'Email verified',
@@ -316,9 +326,10 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(height: AppSpacing.medium),
               TextButton(
-                onPressed: _emailVerifyBusy
-                    ? null
-                    : () => _openEmailVerification(
+                onPressed:
+                    _emailVerifyBusy
+                        ? null
+                        : () => _openEmailVerification(
                           email: email,
                           onlyVerifyNoBackendLogin: true,
                         ),
@@ -342,8 +353,11 @@ class _SettingsPageState extends State<SettingsPage> {
             children: [
               Row(
                 children: [
-                  Icon(Icons.mark_email_unread_outlined,
-                      color: AppColors.primary, size: 24),
+                  Icon(
+                    Icons.mark_email_unread_outlined,
+                    color: AppColors.primary,
+                    size: 24,
+                  ),
                   const SizedBox(width: AppSpacing.small),
                   Expanded(
                     child: Text(
@@ -367,15 +381,17 @@ class _SettingsPageState extends State<SettingsPage> {
                 runSpacing: 8,
                 children: [
                   TextButton(
-                    onPressed: _emailVerifyBusy
-                        ? null
-                        : _resendBackendVerificationCode,
+                    onPressed:
+                        _emailVerifyBusy
+                            ? null
+                            : _resendBackendVerificationCode,
                     child: const Text('Resend code'),
                   ),
                   TextButton(
-                    onPressed: _emailVerifyBusy
-                        ? null
-                        : () => _openEmailVerification(
+                    onPressed:
+                        _emailVerifyBusy
+                            ? null
+                            : () => _openEmailVerification(
                               email: email,
                               onlyVerifyNoBackendLogin: false,
                             ),
@@ -394,10 +410,9 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       await _authService.deleteAccount();
       if (context.mounted) {
-        Navigator.of(context).pushNamedAndRemoveUntil(
-          AppRoutes.login,
-          (route) => false,
-        );
+        Navigator.of(
+          context,
+        ).pushNamedAndRemoveUntil(AppRoutes.login, (route) => false);
       }
     } catch (e) {
       if (context.mounted) {
@@ -420,18 +435,14 @@ class _SettingsPageState extends State<SettingsPage> {
         appBar: AppBar(
           backgroundColor: AppColors.background,
           toolbarHeight: AppSpacing.toolbarHeight,
-          title: const Text('Settings', style: AppTextStyles.HomeHeader,),
+          title: const Text('Settings', style: AppTextStyles.HomeHeader),
           centerTitle: true,
           leading: Padding(
             padding: const EdgeInsets.symmetric(vertical: AppSpacing.small),
-            child: const BackButton(
-              color: AppColors.primary,
-            ),
+            child: const BackButton(color: AppColors.primary),
           ),
         ),
-        body: const Center(
-          child: CircularProgressIndicator(),
-        ),
+        body: const SettingsPageSkeleton(),
       );
     }
 
@@ -441,13 +452,11 @@ class _SettingsPageState extends State<SettingsPage> {
         appBar: AppBar(
           backgroundColor: AppColors.background,
           toolbarHeight: AppSpacing.toolbarHeight,
-          title: const Text('Settings', style: AppTextStyles.HomeHeader,),
+          title: const Text('Settings', style: AppTextStyles.HomeHeader),
           centerTitle: true,
           leading: Padding(
             padding: const EdgeInsets.symmetric(vertical: AppSpacing.small),
-            child: const BackButton(
-              color: AppColors.primary,
-            ),
+            child: const BackButton(color: AppColors.primary),
           ),
         ),
         body: Center(
@@ -456,11 +465,7 @@ class _SettingsPageState extends State<SettingsPage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(
-                  Icons.error_outline,
-                  size: 64,
-                  color: AppColors.error,
-                ),
+                Icon(Icons.error_outline, size: 64, color: AppColors.error),
                 const SizedBox(height: AppSpacing.large),
                 Text(
                   _errorMessage ?? 'Failed to load user data',
@@ -488,13 +493,11 @@ class _SettingsPageState extends State<SettingsPage> {
       appBar: AppBar(
         backgroundColor: AppColors.background,
         toolbarHeight: AppSpacing.toolbarHeight,
-        title: const Text('Settings', style: AppTextStyles.HomeHeader,),
+        title: const Text('Settings', style: AppTextStyles.HomeHeader),
         centerTitle: true,
         leading: Padding(
           padding: const EdgeInsets.symmetric(vertical: AppSpacing.small),
-          child: const BackButton(
-            color: AppColors.primary,
-          ),
+          child: const BackButton(color: AppColors.primary),
         ),
         actions: [
           Padding(
@@ -525,113 +528,89 @@ class _SettingsPageState extends State<SettingsPage> {
       body: SingleChildScrollView(
         child: Column(
           children: [
-          const SizedBox(height: AppSpacing.xxLarge),
+            const SizedBox(height: AppSpacing.xxLarge),
 
-          // Avatar - Profil fotoğrafı varsa göster
-          ProfileAvatar(
-            radius: 45,
-            imageUrl: _user!.profileImageUrl,
-            memoryBytes: decodeProfilePhotoBytes(_user!.profilePhotoData),
-            fallbackInitial: _user!.userName,
-          ),
-
-          const SizedBox(height: AppSpacing.large),
-
-          // User Name - Backend'den gelen userName
-          Text(
-            _user!.userName,
-            style: AppTextStyles.titleMedium,
-          ),
-
-          const SizedBox(height: AppSpacing.small),
-
-          // Email - Backend'den gelen email
-          Text(
-            _user!.email,
-            style: AppTextStyles.bodySmall.copyWith(
-              color: AppColors.textSecondary,
+            // Avatar - Profil fotoğrafı varsa göster
+            ProfileAvatar(
+              radius: 45,
+              imageUrl: _user!.profileImageUrl,
+              memoryBytes: decodeProfilePhotoBytes(_user!.profilePhotoData),
+              fallbackInitial: _user!.userName,
             ),
-          ),
 
-          const SizedBox(height: AppSpacing.large),
-          _emailVerificationSettingsCard(),
-          const SizedBox(height: AppSpacing.settingPages),
+            const SizedBox(height: AppSpacing.large),
 
-          Divider(
-            thickness: 2,
-            color: AppColors.textSecondary.withOpacity(0.2),
-          ),
-          // Menu Items
-          ProfileMenuItem(
-            title: 'Edit Profile',
-            onTap: () async {
-              final result = await Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => EditProfilePage(user: _user!),
-                ),
-              );
-              // Eğer profil güncellendiyse, kullanıcı bilgilerini yeniden yükle
-              if (result == true) {
-                await _loadUserData();
-                // Profile sayfasını da güncellemek için true döndür (Settings'ten geri dönüldüğünde)
-                if (mounted) {
-                  // Settings sayfasından geri dönüldüğünde Profile sayfasına bilgi ver
-                  Navigator.pop(context, true);
+            // User Name - Backend'den gelen userName
+            Text(_user!.userName, style: AppTextStyles.titleMedium),
+
+            const SizedBox(height: AppSpacing.small),
+
+            // Email - Backend'den gelen email
+            Text(
+              _user!.email,
+              style: AppTextStyles.bodySmall.copyWith(
+                color: AppColors.textSecondary,
+              ),
+            ),
+
+            const SizedBox(height: AppSpacing.large),
+            _emailVerificationSettingsCard(),
+            const SizedBox(height: AppSpacing.settingPages),
+
+            Divider(
+              thickness: 2,
+              color: AppColors.textSecondary.withOpacity(0.2),
+            ),
+            // Menu Items
+            ProfileMenuItem(
+              title: 'Edit Profile',
+              onTap: () async {
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => EditProfilePage(user: _user!),
+                  ),
+                );
+                // Eğer profil güncellendiyse, kullanıcı bilgilerini yeniden yükle
+                if (result == true) {
+                  await _loadUserData();
+                  // Profile sayfasını da güncellemek için true döndür (Settings'ten geri dönüldüğünde)
+                  if (mounted) {
+                    // Settings sayfasından geri dönüldüğünde Profile sayfasına bilgi ver
+                    Navigator.pop(context, true);
+                  }
                 }
-              }
-            },
-          ),
-          Divider(
-            thickness: 2,
-            color: AppColors.textSecondary.withOpacity(0.2),
-          ),
-          ProfileMenuItem(
-            title: 'Notifications',
-            onTap: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const NotificationsPage(),
-                ),
-              );
-              if (mounted) {
-                await NotificationRealtimeService.instance.refreshUnread();
-              }
-            },
-          ),
-          Divider(
-            thickness: 2,
-            color: AppColors.textSecondary.withOpacity(0.2),
-          ),
-          ProfileMenuItem(
-            title: 'Change Password',
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const ChangePasswordPage(),
-                ),
-              );
-            },
-          ),
-          Divider(
-            thickness: 2,
-            color: AppColors.textSecondary.withOpacity(0.2),
-          ),
-          ProfileMenuItem(
-            title: 'Delete Account',
-            isDestructive: true,
-            onTap: _showDeleteAccountDialog,
-          ),
-          Divider(
-            thickness: 2,
-            color: AppColors.textSecondary.withOpacity(0.2),
-          ),
-        ],
+              },
+            ),
+            Divider(
+              thickness: 2,
+              color: AppColors.textSecondary.withOpacity(0.2),
+            ),
+            ProfileMenuItem(
+              title: 'Change Password',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ChangePasswordPage()),
+                );
+              },
+            ),
+            Divider(
+              thickness: 2,
+              color: AppColors.textSecondary.withOpacity(0.2),
+            ),
+            ProfileMenuItem(
+              title: 'Delete Account',
+              isDestructive: true,
+              onTap: _showDeleteAccountDialog,
+            ),
+            Divider(
+              thickness: 2,
+              color: AppColors.textSecondary.withOpacity(0.2),
+            ),
+          ],
         ),
       ),
     );
   }
 }
-

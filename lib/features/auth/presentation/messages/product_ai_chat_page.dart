@@ -34,7 +34,7 @@ class ProductAiChatPage extends StatefulWidget {
 }
 
 class _ProductAiChatPageState extends State<ProductAiChatPage>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final SessionHelper _sessionHelper = SessionHelper();
   final AuthService _authService = AuthService();
   final TextEditingController _controller = TextEditingController();
@@ -50,20 +50,24 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
   late final List<_ProductAiMessage> _messages;
 
   String get _displayName =>
-      widget.productName.trim().isNotEmpty ? widget.productName.trim() : 'Ürün';
+      widget.productName.trim().isNotEmpty ? widget.productName.trim() : 'Product';
 
   @override
   void initState() {
     super.initState();
-    _messages = [
-      _ProductAiMessage(
-        role: 'assistant',
-        text:
-            'Merhaba, $_displayName için FAVO ürün asistanıyım. Yanıtlarım bu ürünün bilgileri ve '
-            'topluluk yorumlarına dayanır; uygulamada fiyat veya satın alma yok, fiyat uydurmam. '
-            'Sorunu buraya yazabilirsin.',
-      ),
-    ];
+    WidgetsBinding.instance.addObserver(this);
+    final cached = _ProductAiTranscriptCache.load(widget.productId);
+    _messages =
+        cached ??
+        [
+          _ProductAiMessage(
+            role: 'assistant',
+            text:
+                "Hi — I'm your product assistant for $_displayName. I use this item's details and "
+                'community reviews; the app has no checkout, so I will not invent prices. '
+                'Ask your question below.',
+          ),
+        ];
     _logoController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1400),
@@ -96,11 +100,19 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _ProductAiTranscriptCache.save(widget.productId, _messages);
     _logoController.dispose();
     _controller.dispose();
     _scrollController.dispose();
     _inputFocusNode.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    _scrollToBottom();
   }
 
   String get _encodedProductId => Uri.encodeComponent(widget.productId);
@@ -126,7 +138,7 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
     try {
       final token = await _sessionHelper.ensureSession();
       if (token == null) {
-        throw Exception('Asistanı kullanmak için giriş yapmalısın.');
+        throw Exception('Please sign in to use the assistant.');
       }
 
       Response<dynamic> response;
@@ -140,7 +152,7 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                'Ürün bulunamadı veya artık kullanılamıyor.',
+                'Product not found or no longer available.',
               ),
               backgroundColor: AppColors.error,
             ),
@@ -162,7 +174,7 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
       final data = response.data;
       final replyText = (data is Map && data['reply'] is String)
           ? data['reply'] as String
-          : 'Yanıt alınamadı, lütfen tekrar dener misin?';
+          : 'No reply received. Please try again.';
 
       final products = _parseProducts(data);
 
@@ -220,10 +232,15 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
   }
 
   void _scrollToBottom() {
-    if (!_scrollController.hasClients) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
-      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+      final max = _scrollController.position.maxScrollExtent;
+      if (max.isFinite) _scrollController.jumpTo(max);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      final max = _scrollController.position.maxScrollExtent;
+      if (max.isFinite) _scrollController.jumpTo(max);
     });
   }
 
@@ -288,6 +305,7 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
 
   @override
   Widget build(BuildContext context) {
+    final screenW = MediaQuery.sizeOf(context).width;
     return Scaffold(
       resizeToAvoidBottomInset: true,
       backgroundColor: AppColors.background,
@@ -297,28 +315,34 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
         automaticallyImplyLeading: true,
         iconTheme: const IconThemeData(color: AppColors.primary),
         centerTitle: true,
-        title: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Ürün asistanı',
-              style: AppTextStyles.bodySmall.copyWith(
-                color: AppColors.textSecondary,
-                fontWeight: FontWeight.w600,
+        title: SizedBox(
+          width: screenW * 0.62,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Product assistant',
+                textAlign: TextAlign.center,
+                style: AppTextStyles.bodySmall.copyWith(
+                  color: AppColors.textSecondary,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-            Text(
-              _displayName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppTextStyles.heading3.copyWith(
-                color: AppColors.textPrimary,
-                fontWeight: FontWeight.w700,
-                fontSize: 17,
+              Text(
+                _displayName,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.heading3.copyWith(
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 17,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
+        actions: const [SizedBox(width: kToolbarHeight)],
       ),
       body: Stack(
         children: [
@@ -333,7 +357,14 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
                 Expanded(
                   child: ListView.builder(
                     controller: _scrollController,
-                    padding: const EdgeInsets.all(AppSpacing.large),
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.large,
+                      AppSpacing.large,
+                      AppSpacing.large,
+                      84,
+                    ),
                     itemCount: _messages.length,
                     itemBuilder: (context, index) {
                       final m = _messages[index];
@@ -408,44 +439,46 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
                 ),
                 SafeArea(
                   top: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      AppSpacing.large,
-                      AppSpacing.medium,
-                      AppSpacing.large,
-                      AppSpacing.large,
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _controller,
-                            focusNode: _inputFocusNode,
-                            minLines: 1,
-                            maxLines: 3,
-                            decoration: const InputDecoration(
-                              hintText: 'Mesajını yaz...',
-                              border: OutlineInputBorder(),
-                            ),
+                  child: AnimatedPadding(
+                  duration: const Duration(milliseconds: 120),
+                  curve: Curves.easeOut,
+                  padding: EdgeInsets.fromLTRB(
+                    AppSpacing.large,
+                    AppSpacing.medium,
+                    AppSpacing.large,
+                    AppSpacing.large,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _controller,
+                          focusNode: _inputFocusNode,
+                          minLines: 1,
+                          maxLines: 3,
+                          decoration: const InputDecoration(
+                            hintText: 'Type your message...',
+                            border: OutlineInputBorder(),
                           ),
                         ),
-                        const SizedBox(width: AppSpacing.small),
-                        IconButton(
-                          icon: _isSending
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: AppColors.primary,
-                                  ),
-                                )
-                              : const Icon(Icons.send, color: AppColors.primary),
-                          onPressed: _isSending ? null : _sendMessage,
-                        ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(width: AppSpacing.small),
+                      IconButton(
+                        icon: _isSending
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.primary,
+                                ),
+                              )
+                            : const Icon(Icons.send, color: AppColors.primary),
+                        onPressed: _isSending ? null : _sendMessage,
+                      ),
+                    ],
                   ),
+                ),
                 ),
               ],
             ),
@@ -525,6 +558,7 @@ class _ProductAiChip extends StatelessWidget {
                         height: 80,
                         width: 110,
                         fit: BoxFit.contain,
+                        alignment: Alignment.center,
                         errorBuilder: (_, __, ___) => _placeholder(),
                       )
                     : _placeholder(),
@@ -579,5 +613,42 @@ class _ProductAiChip extends StatelessWidget {
       child: const Icon(Icons.image_not_supported_outlined,
           color: AppColors.textSecondary),
     );
+  }
+}
+
+class _ProductAiTranscriptCache {
+  static final Map<String, List<_ProductAiMessage>> _byId = {};
+  static final Map<String, DateTime> _at = {};
+  static const Duration _ttl = Duration(minutes: 40);
+
+  static List<_ProductAiMessage>? load(String productId) {
+    final list = _byId[productId];
+    final t = _at[productId];
+    if (list == null || t == null) return null;
+    if (DateTime.now().difference(t) > _ttl) {
+      _byId.remove(productId);
+      _at.remove(productId);
+      return null;
+    }
+    return [
+      for (final m in list)
+        _ProductAiMessage(
+          role: m.role,
+          text: m.text,
+          products: List<_ProductAiProduct>.from(m.products),
+        ),
+    ];
+  }
+
+  static void save(String productId, List<_ProductAiMessage> src) {
+    _byId[productId] = [
+      for (final m in src)
+        _ProductAiMessage(
+          role: m.role,
+          text: m.text,
+          products: List<_ProductAiProduct>.from(m.products),
+        ),
+    ];
+    _at[productId] = DateTime.now();
   }
 }

@@ -10,6 +10,9 @@ import '../../../../../core/config/api_config.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/network/api_client.dart';
+import '../../../../../core/widgets/profile_avatar.dart';
+import '../../../../../core/routes/custom_page_transitions.dart';
+import 'review_page.dart';
 import '../../../data/models/review_dto.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/repositories/interaction_repository.dart';
@@ -266,16 +269,6 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
     }
   }
 
-  /// Username'den avatar initials oluşturur
-  String _getInitials(String username) {
-    if (username.isEmpty) return 'U';
-    final parts = username.replaceAll('@', '').split(' ');
-    if (parts.length >= 2) {
-      return '${parts[0][0].toUpperCase()}${parts[1][0].toUpperCase()}';
-    }
-    return username[0].toUpperCase();
-  }
-
   Future<void> _toggleLike() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
@@ -424,23 +417,22 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
           Expanded(
             child: SingleChildScrollView(
               child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.xLarge),
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.xLarge,
+                  AppSpacing.xLarge,
+                  AppSpacing.xLarge,
+                  120,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
               /// REVIEWER INFO
               Row(
                 children: [
-                  // Avatar
-                  CircleAvatar(
-                    radius: 24,
-                    backgroundColor: AppColors.primary,
-                    child: Text(
-                      _getInitials(_currentReview.ownerUserName),
-                      style: AppTextStyles.bodyBold.copyWith(
-                        color: Colors.white,
-                      ),
-                    ),
+                  ProfileAvatarImage(
+                    size: 48,
+                    imageUrl: _currentReview.ownerProfilePhotoUrl,
+                    fallbackInitial: _currentReview.ownerUserName,
                   ),
                   const SizedBox(width: AppSpacing.medium),
                   Expanded(
@@ -504,63 +496,96 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
               ),
               const SizedBox(height: AppSpacing.xLarge),
 
-              /// PRODUCT INFO
-              Container(
-                padding: const EdgeInsets.all(AppSpacing.large),
-                decoration: BoxDecoration(
-                  color: AppColors.textSecondary.withOpacity(0.1),
+              /// PRODUCT INFO (tam karta basınca ürün sayfası)
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
                   borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Product Image
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        widget.product.imageURL,
-                        width: 100,
-                        height: 100,
-                        fit: BoxFit.contain,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
+                  onTap: () {
+                    final pid =
+                        widget.product.id.trim().isNotEmpty
+                            ? widget.product.id
+                            : _currentReview.productId.trim();
+                    if (pid.isEmpty) return;
+                    final name =
+                        widget.product.name.trim().isNotEmpty
+                            ? widget.product.name
+                            : _currentReview.productName;
+                    Navigator.push(
+                      context,
+                      SlideRightRoute(
+                        page: ReviewPage(
+                          product:
+                              widget.product.id.trim().isNotEmpty
+                                  ? widget.product
+                                  : null,
+                          productId: pid,
+                          productName: name,
+                        ),
+                      ),
+                    );
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(AppSpacing.large),
+                    decoration: BoxDecoration(
+                      color: AppColors.textSecondary.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            widget.product.imageURL,
                             width: 100,
                             height: 100,
-                            color: AppColors.textSecondary.withOpacity(0.1),
-                            child: const Icon(
-                              Icons.image_not_supported,
-                              color: AppColors.textSecondary,
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.medium),
-                    // Product Info
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            widget.product.name,
-                            style: AppTextStyles.bodyBold,
+                            fit: BoxFit.contain,
+                            alignment: Alignment.center,
+                            errorBuilder: (context, error, stackTrace) {
+                              return Container(
+                                width: 100,
+                                height: 100,
+                                color: AppColors.textSecondary.withOpacity(0.1),
+                                child: const Icon(
+                                  Icons.image_not_supported,
+                                  color: AppColors.textSecondary,
+                                ),
+                              );
+                            },
                           ),
-                          if (widget.product.description != null &&
-                              widget.product.description!.isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              widget.product.description!,
-                              style: AppTextStyles.bodySmall.copyWith(
-                                color: AppColors.textSecondary,
+                        ),
+                        const SizedBox(width: AppSpacing.medium),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                widget.product.name,
+                                style: AppTextStyles.bodyBold,
                               ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ],
-                      ),
+                              if (widget.product.description != null &&
+                                  widget.product.description!.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  widget.product.description!,
+                                  style: AppTextStyles.bodySmall.copyWith(
+                                    color: AppColors.textSecondary,
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          color: AppColors.textSecondary.withOpacity(0.6),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
               const SizedBox(height: AppSpacing.xLarge),
@@ -729,10 +754,14 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                 const SizedBox(height: AppSpacing.xLarge),
               ],
 
-              /// REVIEW TEXT (fotoğrafların altında, büyük)
+              /// REVIEW TEXT (fotoğrafların altında; kaydırılabilir gövde)
               Text(
                 _currentReview.description ?? _currentReview.title,
-                style: AppTextStyles.heading3,
+                style: AppTextStyles.body.copyWith(
+                  fontSize: 16,
+                  height: 1.45,
+                  color: AppColors.textPrimary,
+                ),
               ),
                   ],
                 ),
@@ -786,28 +815,10 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                         _currentReview.ownerId.trim())
                   TextButton.icon(
                     onPressed: () async {
-                      final user = FirebaseAuth.instance.currentUser;
-                      if (user == null) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content:
-                                Text('Please sign in to report a review'),
-                            backgroundColor: AppColors.error,
-                          ),
-                        );
-                        return;
-                      }
-                      final ok = await showReportReviewSheet(
+                      await openReviewReportFlow(
                         context,
                         reviewId: _currentReview.id,
                       );
-                      if (mounted && ok) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Thanks — your report was sent'),
-                          ),
-                        );
-                      }
                     },
                     icon: const Icon(
                       Icons.flag_outlined,

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:firebase_auth/firebase_auth.dart';
@@ -9,18 +10,22 @@ import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/utils/exceptions.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
+import '../../../../../core/cache/product_memory_cache.dart';
 import '../../../../../core/utils/resolve_media_url.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
 import '../../../../../routes/app_routes.dart';
+import '../../../data/models/product_dto.dart';
 import '../../../data/models/review_dto.dart';
+import '../../../data/models/tag_dto.dart';
 import '../../../data/models/conversation_dto.dart';
 import '../../../data/repositories/interaction_repository.dart';
+import '../../../data/repositories/product_repository.dart';
 import '../../../data/repositories/review_repository.dart';
 import '../../../data/services/auth_service.dart';
 import '../../messages/chat_detail_page.dart';
-import '../../review/pages/review_page.dart';
-import '../../review/widgets/review_card.dart';
+import '../../review/pages/review_detail_page.dart';
 import 'follow_list_page.dart';
+import '../widgets/profile_review_row_card.dart';
 
 class UserProfilePage extends StatefulWidget {
   final String userId;
@@ -42,8 +47,12 @@ class _UserProfilePageState extends State<UserProfilePage>
     with SingleTickerProviderStateMixin {
   final InteractionRepository _interactionRepo = InteractionRepository();
   final ReviewRepository _reviewRepo = ReviewRepository();
+  final ProductRepository _productRepository = ProductRepository();
   final SessionHelper _sessionHelper = SessionHelper();
   final AuthService _authService = AuthService();
+
+  /// Reviews listesinde ürün görseli için prefetch.
+  final Map<String, ProductDto> _reviewProductHints = {};
 
   late TabController _tabController;
   String _selectedDateSort = 'Newest';
@@ -167,10 +176,12 @@ class _UserProfilePageState extends State<UserProfilePage>
       }
       setState(() {
         _reviews = reviews;
+        _reviewProductHints.clear();
         _avatarImageUrl = avatar;
         _isLoadingReviews = false;
       });
       _sortReviews();
+      unawaited(_prefetchProductsForReviews(reviews));
     } catch (_) {
       if (!mounted) return;
       setState(() => _isLoadingReviews = false);
@@ -191,10 +202,48 @@ class _UserProfilePageState extends State<UserProfilePage>
     setState(() => _reviews = sorted);
   }
 
-  double? get _averageRating {
-    if (_reviews.isEmpty) return null;
+  Future<void> _prefetchProductsForReviews(List<ReviewDto> reviews) async {
+    final ids =
+        reviews.map((r) => r.productId).where((s) => s.isNotEmpty).toSet();
+    if (ids.isEmpty) return;
+    final token = await _sessionHelper.getTokenAndSetHeader();
+    final list = ids.toList();
+    const batch = 5;
+    for (var i = 0; i < list.length; i += batch) {
+      if (!mounted) return;
+      final end = (i + batch > list.length) ? list.length : i + batch;
+      final slice = list.sublist(i, end);
+      await Future.wait(
+        slice.map((id) async {
+          try {
+            final p = await _productRepository.getProductById(
+              id,
+              firebaseIdToken: token,
+            );
+            if (mounted) {
+              setState(() => _reviewProductHints[id] = p);
+            }
+          } catch (_) {}
+        }),
+      );
+    }
+  }
+
+  String _reviewsAverageLabel() {
+    if (_reviews.isEmpty) return '—';
     final sum = _reviews.fold<double>(0, (a, r) => a + r.rating);
-    return sum / _reviews.length;
+    return (sum / _reviews.length).toStringAsFixed(1);
+  }
+
+  ProductDto _productForReviewDetail(ReviewDto review, ProductDto? hint) {
+    if (hint != null) return hint;
+    return ProductDto(
+      id: review.productId,
+      name: review.productName,
+      imageURL: '',
+      description: null,
+      tag: TagDto(id: '', name: ''),
+    );
   }
 
   Future<void> _toggleFollow() async {
@@ -336,31 +385,70 @@ class _UserProfilePageState extends State<UserProfilePage>
               ),
               const SizedBox(height: AppSpacing.xxLarge),
               _isLoadingCounts
-                  ? const SizedBox(height: 48)
-                  : Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        GestureDetector(
-                          onTap: _openFollowerList,
-                          child: _StatItem(
-                            count: _followerCount,
-                            label: 'Followers',
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.medium,
+                      ),
+                      child: Row(
+                        children: [
+                          for (var i = 0; i < 4; i++)
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: AppSpacing.small,
+                                ),
+                                child: SkeletonLoader(
+                                  width: double.infinity,
+                                  height: 44,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    )
+                  : Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.medium,
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: _openFollowerList,
+                              child: _StatItem(
+                                count: _followerCount,
+                                label: 'Followers',
+                              ),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: AppSpacing.xxLarge),
-                        GestureDetector(
-                          onTap: _openFollowingList,
-                          child: _StatItem(
-                            count: _followingCount,
-                            label: 'Following',
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: _openFollowingList,
+                              child: _StatItem(
+                                count: _followingCount,
+                                label: 'Following',
+                              ),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: AppSpacing.xxLarge),
-                        _StatItem(
-                          count: _isLoadingReviews ? 0 : _reviews.length,
-                          label: 'Reviews',
-                        ),
-                      ],
+                          Expanded(
+                            child: _StatItem(
+                              count: _isLoadingReviews ? 0 : _reviews.length,
+                              label: 'Reviews',
+                            ),
+                          ),
+                          Expanded(
+                            child: Tooltip(
+                              message:
+                                  'Bu kullanıcının yorumlarındaki yıldız ortalaması (5 üzerinden)',
+                              child: _StatTextItem(
+                                value: _reviewsAverageLabel(),
+                                label: 'Review avg',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
               const SizedBox(height: AppSpacing.large),
               SizedBox(
@@ -403,52 +491,46 @@ class _UserProfilePageState extends State<UserProfilePage>
                 ),
               ),
               const SizedBox(height: AppSpacing.xxLarge),
-              Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: _SummaryCard(
-                        title: 'AVERAGE RATING',
-                        content: _averageRating != null
-                            ? '${_averageRating!.toStringAsFixed(1)} /5.0'
-                            : '— /5.0',
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.xLarge),
-                    const Expanded(
-                      child: _SummaryCard(
-                        title: 'TOP CATEGORY',
-                        content: '—',
-                      ),
-                    ),
+              Material(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(14),
+                clipBehavior: Clip.antiAlias,
+                child: TabBar(
+                  controller: _tabController,
+                  labelColor: AppColors.primary,
+                  unselectedLabelColor: AppColors.textSecondary,
+                  indicatorColor: AppColors.primary,
+                  indicatorWeight: 2.5,
+                  dividerColor: Colors.transparent,
+                  labelStyle: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                  unselectedLabelStyle: const TextStyle(
+                    fontWeight: FontWeight.w500,
+                    fontSize: 14,
+                  ),
+                  tabs: const [
+                    Tab(text: 'Reviews'),
                   ],
                 ),
               ),
-              const SizedBox(height: AppSpacing.xxLarge),
-              TabBar(
-                controller: _tabController,
-                labelColor: AppColors.primary,
-                unselectedLabelColor: AppColors.textSecondary,
-                indicatorColor: AppColors.primary,
-                indicatorWeight: 2,
-                tabs: const [
-                  Tab(text: 'Reviews'),
-                ],
-              ),
               const SizedBox(height: AppSpacing.large),
               Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.xLarge,
+                ),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      'SORT BY DATE',
-                      style: AppTextStyles.bodyMedium
-                          .copyWith(color: AppColors.textSecondary),
+                      'Sort by date',
+                      style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.textSecondary,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.2,
+                      ),
                     ),
+                    const Spacer(),
                     _SortDropdown(
                       items: const ['Newest', 'Oldest'],
                       value: _selectedDateSort,
@@ -461,7 +543,7 @@ class _UserProfilePageState extends State<UserProfilePage>
                   ],
                 ),
               ),
-              const SizedBox(height: AppSpacing.xxLarge),
+              const SizedBox(height: AppSpacing.medium),
               if (_isLoadingReviews)
                 Padding(
                   padding: const EdgeInsets.symmetric(
@@ -471,7 +553,7 @@ class _UserProfilePageState extends State<UserProfilePage>
                     children: [
                       for (var i = 0; i < 3; i++)
                         const Padding(
-                          padding: EdgeInsets.only(bottom: AppSpacing.large),
+                          padding: EdgeInsets.only(bottom: AppSpacing.medium),
                           child: ReviewCardSkeleton(),
                         ),
                     ],
@@ -480,9 +562,11 @@ class _UserProfilePageState extends State<UserProfilePage>
               else if (_reviews.isEmpty)
                 Padding(
                   padding: const EdgeInsets.all(AppSpacing.xLarge),
-                  child: Text(
-                    'No reviews yet.',
-                    style: AppTextStyles.bodySecondary,
+                  child: Center(
+                    child: Text(
+                      'No reviews yet.',
+                      style: AppTextStyles.bodySecondary,
+                    ),
                   ),
                 )
               else
@@ -491,29 +575,34 @@ class _UserProfilePageState extends State<UserProfilePage>
                     horizontal: AppSpacing.xLarge,
                   ),
                   child: Column(
-                    children: _reviews
-                        .map(
-                          (r) => Padding(
-                            padding: const EdgeInsets.only(
-                              bottom: AppSpacing.large,
-                            ),
-                            child: ReviewCard(
-                              username: '@${r.ownerUserName}',
-                              content: r.description ?? r.title,
-                              rating: r.rating,
-                              isSponsored: r.isCollaborative,
-                              likeCount: r.likeCount,
-                              isLiked: r.isLikedByCurrentUser,
-                              onTap: () => Navigator.push(
-                                context,
-                                SlideRightRoute(
-                                  page: ReviewPage(productId: r.productId),
+                    children: [
+                      for (var i = 0; i < _reviews.length; i++) ...[
+                        if (i > 0)
+                          const SizedBox(height: AppSpacing.medium),
+                        ProfileReviewRowCard(
+                          review: _reviews[i],
+                          productImageUrl:
+                              _reviewProductHints[_reviews[i].productId]
+                                  ?.imageURL,
+                          onTap: () {
+                            final r = _reviews[i];
+                            final cached =
+                                ProductMemoryCache.instance.peek(r.productId) ??
+                                _reviewProductHints[r.productId];
+                            final product = _productForReviewDetail(r, cached);
+                            Navigator.push(
+                              context,
+                              SlideRightRoute(
+                                page: ReviewDetailPage(
+                                  review: r,
+                                  product: product,
                                 ),
                               ),
-                            ),
-                          ),
-                        )
-                        .toList(),
+                            );
+                          },
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               const SizedBox(height: AppSpacing.xxLarge),
@@ -535,48 +624,45 @@ class _StatItem extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Text(count.toString(), style: AppTextStyles.heading3),
+        Text(
+          count.toString(),
+          style: AppTextStyles.heading3,
+          textAlign: TextAlign.center,
+        ),
         const SizedBox(height: AppSpacing.small),
-        Text(label, style: AppTextStyles.bodySecondary),
+        Text(
+          label,
+          style: AppTextStyles.bodySecondary,
+          textAlign: TextAlign.center,
+          maxLines: 2,
+        ),
       ],
     );
   }
 }
 
-class _SummaryCard extends StatelessWidget {
-  final String title;
-  final String content;
+class _StatTextItem extends StatelessWidget {
+  final String value;
+  final String label;
 
-  const _SummaryCard({
-    required this.title,
-    required this.content,
-  });
+  const _StatTextItem({required this.value, required this.label});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.xLarge),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: AppTextStyles.bodySecondary.copyWith(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.medium),
-          Text(
-            content,
-            style: AppTextStyles.heading3,
-          ),
-        ],
-      ),
+    return Column(
+      children: [
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(value, style: AppTextStyles.heading3, maxLines: 1),
+        ),
+        const SizedBox(height: AppSpacing.small),
+        Text(
+          label,
+          style: AppTextStyles.bodySecondary,
+          textAlign: TextAlign.center,
+          maxLines: 2,
+        ),
+      ],
     );
   }
 }
@@ -596,8 +682,14 @@ class _SortDropdown extends StatelessWidget {
   Widget build(BuildContext context) {
     return DropdownButton<String>(
       value: value,
-      underline: Container(),
-      style: AppTextStyles.bodyMedium,
+      isDense: true,
+      underline: const SizedBox.shrink(),
+      borderRadius: BorderRadius.circular(10),
+      iconSize: 20,
+      style: AppTextStyles.bodySmall.copyWith(
+        color: AppColors.textPrimary,
+        fontWeight: FontWeight.w600,
+      ),
       items: items.map((String item) {
         return DropdownMenuItem<String>(
           value: item,
@@ -605,7 +697,11 @@ class _SortDropdown extends StatelessWidget {
         );
       }).toList(),
       onChanged: onChanged,
-      icon: const Icon(Icons.arrow_drop_down, color: AppColors.textSecondary),
+      icon: const Icon(
+        Icons.expand_more_rounded,
+        size: 20,
+        color: AppColors.textSecondary,
+      ),
     );
   }
 }

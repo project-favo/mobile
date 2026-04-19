@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'notification_profile_nav_icon.dart';
+import 'activity_bottom_nav_icon.dart';
 
 /// Main tabs: Search, Add (+), Home (center), Activity (bolt), Profile.
 class MainBottomNavItems {
@@ -23,11 +23,11 @@ class MainBottomNavItems {
           label: 'Home',
         ),
         const BottomNavigationBarItem(
-          icon: Icon(Icons.bolt_rounded),
+          icon: ActivityBottomNavIcon(),
           label: 'Activity',
         ),
-        BottomNavigationBarItem(
-          icon: const NotificationProfileNavIcon(),
+        const BottomNavigationBarItem(
+          icon: Icon(Icons.person_outline),
           label: 'Profile',
         ),
       ];

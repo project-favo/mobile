@@ -39,8 +39,11 @@ class _ChatDetailPageState extends State<ChatDetailPage>
   final FocusNode _inputFocusNode = FocusNode();
 
   late int _conversationId;
-  bool _isLoading = true;
-  bool _isSending = false;
+  /// İlk token / kullanıcı bilgisi gelene kadar tam ekran iskelet.
+  bool _bootstrapping = true;
+  /// Mesaj listesi henüz çekilirken (UI görünür, liste boş olabilir).
+  bool _messagesLoading = false;
+  bool _sendInFlight = false;
   String? _errorMessage;
   List<MessageDto> _messages = [];
   int? _currentUserId;
@@ -76,7 +79,10 @@ class _ChatDetailPageState extends State<ChatDetailPage>
     super.didChangeMetrics();
     // Klavye açılıp kapanınca viewport yeniden boyanıyor; birkaç kare boyunca
     // maxScrollExtent güncellenir, tek seferde jumpTo yetmiyor.
-    if (!_isLoading && _errorMessage == null && _messages.isNotEmpty) {
+    if (!_bootstrapping &&
+        !_messagesLoading &&
+        _errorMessage == null &&
+        _messages.isNotEmpty) {
       _scrollToBottom();
     }
   }
@@ -99,21 +105,28 @@ class _ChatDetailPageState extends State<ChatDetailPage>
         _myAvatarBytes = decodeProfilePhotoBytes(me.profilePhotoData);
         _myInitial = me.userName.isNotEmpty ? me.userName[0].toUpperCase() : '?';
       } catch (_) {}
+      unawaited(_enrichOtherParticipant());
       await _bootstrapExistingConversationIfNeeded();
-      await _enrichOtherParticipant();
       if (_conversationId > 0) {
         _connectStomp(token);
+        if (mounted) {
+          setState(() {
+            _bootstrapping = false;
+            _messagesLoading = true;
+          });
+        }
         await _loadMessages();
         _startPolling();
       } else {
         // Yeni konuşma (henüz backend’de yok) — ilk mesajı bekler
-        if (mounted) setState(() => _isLoading = false);
+        if (mounted) setState(() => _bootstrapping = false);
       }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
-        _isLoading = false;
+        _bootstrapping = false;
+        _messagesLoading = false;
       });
     }
   }
@@ -187,9 +200,10 @@ class _ChatDetailPageState extends State<ChatDetailPage>
       _resolvedOtherBytes ?? _inlineOtherBytes;
 
   Future<void> _loadMessages() async {
+    if (!mounted) return;
     setState(() {
-      _isLoading = true;
       _errorMessage = null;
+      _messagesLoading = true;
     });
     try {
       final page = await _messageRepository.getConversationMessages(
@@ -201,22 +215,48 @@ class _ChatDetailPageState extends State<ChatDetailPage>
       setState(() {
         // Backend'den gelen sırayı koru: eski mesajlar üstte, yeniler altta
         _messages = page.content;
-        _isLoading = false;
+        _messagesLoading = false;
       });
       _scrollToBottom();
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
-        _isLoading = false;
+        _messagesLoading = false;
       });
     }
   }
 
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
-    if (text.isEmpty || _isSending) return;
-    setState(() => _isSending = true);
+    if (text.isEmpty || _sendInFlight) return;
+    final uid = _currentUserId;
+    if (uid == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please wait, loading your profile…'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+
+    final tempId = -DateTime.now().millisecondsSinceEpoch;
+    final optimistic = MessageDto(
+      id: tempId,
+      conversationId: _conversationId,
+      senderId: uid,
+      senderUsername: '',
+      content: text,
+      createdAt: DateTime.now().toUtc().toIso8601String(),
+      isRead: true,
+    );
+
+    _controller.clear();
+    setState(() => _messages = [..._messages, optimistic]);
+    _scrollToBottom();
+
+    _sendInFlight = true;
     try {
       final token = await _sessionHelper.ensureSession();
       if (token == null) {
@@ -230,25 +270,27 @@ class _ChatDetailPageState extends State<ChatDetailPage>
       // First message in a new conversation — bootstrap real-time
       if (_conversationId == 0 && msg.conversationId > 0) {
         _conversationId = msg.conversationId;
-        final token = await _sessionHelper.ensureSession();
-        if (token != null) {
-          _connectStomp(token);
+        final t2 = await _sessionHelper.ensureSession();
+        if (t2 != null) {
+          _connectStomp(t2);
           _startPolling();
         }
       }
       if (!mounted) return;
-      _controller.clear();
       setState(() {
-        if (!_messages.any((m) => m.id == msg.id)) {
-          _messages = [..._messages, msg];
+        final withoutTemp = _messages.where((m) => m.id != tempId).toList();
+        if (!withoutTemp.any((m) => m.id == msg.id)) {
+          _messages = [...withoutTemp, msg];
+        } else {
+          _messages = withoutTemp;
         }
-        _isSending = false;
       });
-      // Backend sırasını ve olası ekstra alanları eşitlemek için sessizce güncelle
-      _refreshMessagesSilently();
       _scrollToBottom();
     } catch (e) {
       if (!mounted) return;
+      setState(() {
+        _messages = _messages.where((m) => m.id != tempId).toList();
+      });
       final msg = ErrorHandler.getUserFriendlyMessage(e);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -256,7 +298,8 @@ class _ChatDetailPageState extends State<ChatDetailPage>
           backgroundColor: AppColors.error,
         ),
       );
-      setState(() => _isSending = false);
+    } finally {
+      _sendInFlight = false;
     }
   }
 
@@ -418,7 +461,7 @@ class _ChatDetailPageState extends State<ChatDetailPage>
         child: Column(
           children: [
             Expanded(
-              child: _isLoading
+              child: _bootstrapping
                 ? ListView.builder(
                     padding: const EdgeInsets.all(AppSpacing.large),
                     itemCount: 8,
@@ -483,7 +526,9 @@ class _ChatDetailPageState extends State<ChatDetailPage>
                           ),
                         ),
                       )
-                    : ListView.builder(
+                    : Stack(
+                        children: [
+                          ListView.builder(
                         controller: _scrollController,
                         padding: const EdgeInsets.all(AppSpacing.large),
                         itemCount: _messages.length,
@@ -532,6 +577,14 @@ class _ChatDetailPageState extends State<ChatDetailPage>
                           );
                         },
                       ),
+                          if (_messagesLoading && _messages.isEmpty)
+                            const Center(
+                              child: CircularProgressIndicator(
+                                color: AppColors.primary,
+                              ),
+                            ),
+                        ],
+                      ),
             ),
             SafeArea(
               top: false,
@@ -558,17 +611,8 @@ class _ChatDetailPageState extends State<ChatDetailPage>
                     ),
                     const SizedBox(width: AppSpacing.small),
                     IconButton(
-                      icon: _isSending
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: AppColors.primary,
-                              ),
-                            )
-                          : const Icon(Icons.send, color: AppColors.primary),
-                      onPressed: _isSending ? null : _sendMessage,
+                      icon: const Icon(Icons.send, color: AppColors.primary),
+                      onPressed: _sendMessage,
                     ),
                   ],
                 ),

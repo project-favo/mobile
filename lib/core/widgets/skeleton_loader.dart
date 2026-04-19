@@ -423,3 +423,71 @@ class ReviewCardSkeleton extends StatelessWidget {
   }
 }
 
+/// Settings ilk yüklemesi — avatar + menü satırları.
+class SettingsPageSkeleton extends StatelessWidget {
+  const SettingsPageSkeleton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.xLarge,
+          AppSpacing.xxLarge,
+          AppSpacing.xLarge,
+          AppSpacing.xxLarge,
+        ),
+        child: Column(
+          children: [
+            SkeletonLoader(
+              width: 90,
+              height: 90,
+              borderRadius: BorderRadius.circular(45),
+            ),
+            const SizedBox(height: AppSpacing.large),
+            SkeletonLoader(
+              width: 160,
+              height: 18,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            const SizedBox(height: AppSpacing.small),
+            SkeletonLoader(
+              width: 220,
+              height: 14,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            const SizedBox(height: AppSpacing.xxLarge),
+            ...List.generate(
+              5,
+              (_) => Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.large),
+                child: Row(
+                  children: [
+                    SkeletonLoader(
+                      width: 22,
+                      height: 22,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    const SizedBox(width: AppSpacing.medium),
+                    Expanded(
+                      child: SkeletonLoader(
+                        width: double.infinity,
+                        height: 16,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                    SkeletonLoader(
+                      width: 18,
+                      height: 18,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

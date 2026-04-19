@@ -5,6 +5,34 @@ import 'package:dio/dio.dart';
 import '../network/api_client.dart';
 import 'resolve_media_url.dart';
 
+/// Bellek içi avatar önbelleği (aynı URL tekrar açılınca anında boyanır).
+final Map<String, Uint8List> _profileImageByteCache = <String, Uint8List>{};
+const int _profileImageByteCacheMax = 96;
+
+String? _profileImageCacheKey(String? raw) {
+  final resolved = resolveMediaUrl(raw);
+  if (resolved == null || resolved.isEmpty) return null;
+  if (resolved.startsWith('data:')) return null;
+  return resolved;
+}
+
+/// Senkron: ağ isteği öncesi [ProfileAvatar] / [ProfileAvatarImage] ilk karede kullanır.
+Uint8List? peekProfileImageBytes(String? raw) {
+  final k = _profileImageCacheKey(raw);
+  if (k == null) return null;
+  return _profileImageByteCache[k];
+}
+
+void _rememberProfileImageBytes(String? raw, Uint8List bytes) {
+  final k = _profileImageCacheKey(raw);
+  if (k == null || bytes.isEmpty) return;
+  if (_profileImageByteCache.length >= _profileImageByteCacheMax &&
+      !_profileImageByteCache.containsKey(k)) {
+    _profileImageByteCache.remove(_profileImageByteCache.keys.first);
+  }
+  _profileImageByteCache[k] = bytes;
+}
+
 /// Profil / avatar görselleri için ham byte yükler.
 /// Önce [ApiClient] (Authorization Bearer) ile dener; korumalı dosya uçları için gerekli.
 /// Gerekirse yetkisiz [Dio] ile tekrar dener (herkese açık CDN vb.).
@@ -13,6 +41,12 @@ Future<Uint8List?> loadProfileImageBytesFromRaw(String? raw) async {
   if (resolved == null || resolved.isEmpty) return null;
   if (resolved.startsWith('data:')) {
     return decodeProfilePhotoBytes(resolved);
+  }
+
+  final k = _profileImageCacheKey(raw);
+  if (k != null) {
+    final hit = _profileImageByteCache[k];
+    if (hit != null && hit.isNotEmpty) return hit;
   }
 
   Future<Uint8List?> fetchWith(Dio dio) async {
@@ -38,7 +72,10 @@ Future<Uint8List?> loadProfileImageBytesFromRaw(String? raw) async {
 
   try {
     final withAuth = await fetchWith(ApiClient().dio);
-    if (withAuth != null && withAuth.isNotEmpty) return withAuth;
+    if (withAuth != null && withAuth.isNotEmpty) {
+      _rememberProfileImageBytes(raw, withAuth);
+      return withAuth;
+    }
   } catch (_) {
     // ApiClient henüz initialize değilse vb.
   }
@@ -50,5 +87,9 @@ Future<Uint8List?> loadProfileImageBytesFromRaw(String? raw) async {
       validateStatus: (c) => c != null && c > 0 && c < 600,
     ),
   );
-  return fetchWith(plain);
+  final out = await fetchWith(plain);
+  if (out != null && out.isNotEmpty) {
+    _rememberProfileImageBytes(raw, out);
+  }
+  return out;
 }

@@ -7,6 +7,7 @@ import '../../routes/app_routes.dart';
 import '../network/api_client.dart';
 import '../config/api_config.dart';
 import 'exceptions.dart';
+import 'review_report_storage.dart';
 
 /// Session management helper
 /// Handles backend session establishment and token management
@@ -121,6 +122,7 @@ class SessionHelper {
     _lastLoginTime = null;
     _accountStatusTimer?.cancel();
     _accountStatusTimer = null;
+    ReviewReportStorage.clearMemory();
     ApiClient().clearAuthToken();
   }
 

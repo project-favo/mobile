@@ -26,7 +26,7 @@ class AiChatPage extends StatefulWidget {
 }
 
 class _AiChatPageState extends State<AiChatPage>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final SessionHelper _sessionHelper = SessionHelper();
   final AuthService _authService = AuthService();
   final TextEditingController _controller = TextEditingController();
@@ -39,17 +39,22 @@ class _AiChatPageState extends State<AiChatPage>
   Uint8List? _userAvatarBytes;
   String? _userInitial;
 
-  final List<_AiMessage> _messages = [
-    const _AiMessage(
-      role: 'assistant',
-      text:
-          'Merhaba, ben FAVO asistanıyım. Ürünler, yorumlar veya uygulama ile ilgili sorularını buradan yazabilirsin.',
-    ),
-  ];
+  late final List<_AiMessage> _messages;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    final restored = _AiChatTranscriptCache.loadIfFresh();
+    _messages =
+        restored ??
+        [
+          _AiMessage(
+            role: 'assistant',
+            text:
+                'Merhaba, ben FAVO asistanıyım. Ürünler, yorumlar veya uygulama ile ilgili sorularını buradan yazabilirsin.',
+          ),
+        ];
     _logoController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1400),
@@ -82,11 +87,19 @@ class _AiChatPageState extends State<AiChatPage>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _AiChatTranscriptCache.save(_messages);
     _logoController.dispose();
     _controller.dispose();
     _scrollController.dispose();
     _inputFocusNode.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    _scrollToBottom();
   }
 
   Future<Response<dynamic>> _callChatApi(String text) {
@@ -184,10 +197,19 @@ class _AiChatPageState extends State<AiChatPage>
   }
 
   void _scrollToBottom() {
-    if (!_scrollController.hasClients) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
-      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+      final max = _scrollController.position.maxScrollExtent;
+      if (max.isFinite) {
+        _scrollController.jumpTo(max);
+      }
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      final max = _scrollController.position.maxScrollExtent;
+      if (max.isFinite) {
+        _scrollController.jumpTo(max);
+      }
     });
   }
 
@@ -359,44 +381,46 @@ class _AiChatPageState extends State<AiChatPage>
             ),
             SafeArea(
               top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.large,
-                  AppSpacing.medium,
-                  AppSpacing.large,
-                  AppSpacing.large,
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _controller,
-                        focusNode: _inputFocusNode,
-                        minLines: 1,
-                        maxLines: 3,
-                        decoration: const InputDecoration(
-                          hintText: 'Mesajını yaz...',
-                          border: OutlineInputBorder(),
-                        ),
+              child: AnimatedPadding(
+              duration: const Duration(milliseconds: 120),
+              curve: Curves.easeOut,
+              padding: EdgeInsets.fromLTRB(
+                AppSpacing.large,
+                AppSpacing.medium,
+                AppSpacing.large,
+                AppSpacing.large,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _controller,
+                      focusNode: _inputFocusNode,
+                      minLines: 1,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        hintText: 'Mesajını yaz...',
+                        border: OutlineInputBorder(),
                       ),
                     ),
-                    const SizedBox(width: AppSpacing.small),
-                    IconButton(
-                      icon: _isSending
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: AppColors.primary,
-                              ),
-                            )
-                          : const Icon(Icons.send, color: AppColors.primary),
-                      onPressed: _isSending ? null : _sendMessage,
-                    ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: AppSpacing.small),
+                  IconButton(
+                    icon: _isSending
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppColors.primary,
+                            ),
+                          )
+                        : const Icon(Icons.send, color: AppColors.primary),
+                    onPressed: _isSending ? null : _sendMessage,
+                  ),
+                ],
               ),
+            ),
             ),
           ],
         ),
@@ -414,7 +438,7 @@ class _AiMessage {
   final String text;
   final List<_AiProduct> products;
 
-  const _AiMessage({
+  _AiMessage({
     required this.role,
     required this.text,
     this.products = const [],
@@ -548,5 +572,41 @@ class _ProductChip extends StatelessWidget {
       child: const Icon(Icons.image_not_supported_outlined,
           color: AppColors.textSecondary),
     );
+  }
+}
+
+/// Son oturum sohbeti (sayfadan çıkıp tekrar girince ~40 dk’ya kadar).
+class _AiChatTranscriptCache {
+  static List<_AiMessage>? _lines;
+  static DateTime? _savedAt;
+  static const Duration _ttl = Duration(minutes: 40);
+
+  static void save(List<_AiMessage> src) {
+    _lines = [
+      for (final m in src)
+        _AiMessage(
+          role: m.role,
+          text: m.text,
+          products: List<_AiProduct>.from(m.products),
+        ),
+    ];
+    _savedAt = DateTime.now();
+  }
+
+  static List<_AiMessage>? loadIfFresh() {
+    if (_lines == null || _savedAt == null) return null;
+    if (DateTime.now().difference(_savedAt!) > _ttl) {
+      _lines = null;
+      _savedAt = null;
+      return null;
+    }
+    return [
+      for (final m in _lines!)
+        _AiMessage(
+          role: m.role,
+          text: m.text,
+          products: List<_AiProduct>.from(m.products),
+        ),
+    ];
   }
 }

@@ -201,7 +201,8 @@ class _ContentThumb extends StatelessWidget {
         child: url != null && url!.isNotEmpty
             ? Image.network(
                 url!,
-                fit: BoxFit.cover,
+                fit: BoxFit.contain,
+                alignment: Alignment.center,
                 errorBuilder: (_, __, ___) => _placeholder(context),
               )
             : _placeholder(context),

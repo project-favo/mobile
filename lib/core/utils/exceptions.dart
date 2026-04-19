@@ -55,6 +55,14 @@ class IncompleteBackendRegistrationException implements Exception {
   String toString() => 'IncompleteBackendRegistrationException';
 }
 
+/// Aynı review için şikayet zaten gönderilmiş.
+class ReviewAlreadyReportedException implements Exception {
+  const ReviewAlreadyReportedException();
+
+  @override
+  String toString() => 'ReviewAlreadyReportedException';
+}
+
 class DeactivatedAccountException implements Exception {
   const DeactivatedAccountException();
 
