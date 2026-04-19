@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../widgets/review_card.dart';
+import '../widgets/report_review_sheet.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
@@ -700,6 +701,39 @@ class _ReviewPageState extends State<ReviewPage> {
                         showChatIcon: _currentUsername != null &&
                             review.ownerUserName.toLowerCase() !=
                                 _currentUsername!.toLowerCase(),
+                        onReportTap: _currentUserId != null &&
+                                review.ownerId.trim() ==
+                                    _currentUserId!.trim()
+                            ? null
+                            : () async {
+                                final user =
+                                    FirebaseAuth.instance.currentUser;
+                                if (user == null) {
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context)
+                                        .showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                            'Please sign in to report a review'),
+                                        backgroundColor: AppColors.error,
+                                      ),
+                                    );
+                                  }
+                                  return;
+                                }
+                                final ok = await showReportReviewSheet(
+                                  context,
+                                  reviewId: review.id,
+                                );
+                                if (mounted && ok) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                          'Thanks — your report was sent'),
+                                    ),
+                                  );
+                                }
+                              },
                         onChatTap: () => _onChatIconTap(review),
                         onUsernameTap: () {
                           if (_currentUserId != null &&

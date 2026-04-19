@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/widgets/profile_avatar.dart';
 import '../../domain/activity_models.dart';
 import '../../domain/activity_type.dart';
 import '../../utils/relative_time.dart';
@@ -48,7 +49,13 @@ class ActivityFeedRow extends StatelessWidget {
                 )
               else
                 const SizedBox(width: 14),
-              _Avatar(user: item.user),
+              ProfileAvatar(
+                radius: 20,
+                imageUrl: item.user.avatarUrl,
+                fallbackInitial: item.user.username.isNotEmpty
+                    ? item.user.username
+                    : '?',
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -129,35 +136,6 @@ class ActivityFeedRow extends StatelessWidget {
     }
 
     return Text(line, style: baseStyle);
-  }
-}
-
-class _Avatar extends StatelessWidget {
-  const _Avatar({required this.user});
-
-  final ActivityUser user;
-
-  @override
-  Widget build(BuildContext context) {
-    final url = user.avatarUrl;
-    return CircleAvatar(
-      radius: 20,
-      backgroundColor: AppColors.border.withValues(alpha: 0.35),
-      backgroundImage:
-          url != null && url.isNotEmpty ? NetworkImage(url) : null,
-      child: url == null || url.isEmpty
-          ? Text(
-              user.username.isNotEmpty
-                  ? user.username[0].toUpperCase()
-                  : '?',
-              style: const TextStyle(
-                color: AppColors.textSecondary,
-                fontWeight: FontWeight.w600,
-                fontSize: 16,
-              ),
-            )
-          : null,
-    );
   }
 }
 

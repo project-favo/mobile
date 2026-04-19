@@ -33,9 +33,35 @@ String notificationIdToString(dynamic raw) {
   return raw.toString();
 }
 
+/// Bildirimi tetikleyen kullanıcı özeti (`GET /api/notifications`, WebSocket).
+class NotificationActorDto {
+  final int id;
+  final String? userName;
+  final String profileImageUrl;
+
+  const NotificationActorDto({
+    required this.id,
+    this.userName,
+    required this.profileImageUrl,
+  });
+
+  factory NotificationActorDto.fromJson(Map<String, dynamic> json) {
+    final rawId = json['id'];
+    final id = rawId is num
+        ? rawId.toInt()
+        : int.tryParse(rawId?.toString() ?? '') ?? 0;
+    return NotificationActorDto(
+      id: id,
+      userName: json['userName']?.toString(),
+      profileImageUrl: json['profileImageUrl']?.toString() ?? '',
+    );
+  }
+}
+
 class NotificationDto {
   final String id;
   final String type;
+  final NotificationActorDto? actor;
   final String? actorDisplayName;
   final String title;
   final String? body;
@@ -46,6 +72,7 @@ class NotificationDto {
   NotificationDto({
     required this.id,
     required this.type,
+    this.actor,
     this.actorDisplayName,
     required this.title,
     this.body,
@@ -59,6 +86,7 @@ class NotificationDto {
   NotificationDto copyWith({
     String? id,
     String? type,
+    NotificationActorDto? actor,
     String? actorDisplayName,
     String? title,
     String? body,
@@ -69,6 +97,7 @@ class NotificationDto {
     return NotificationDto(
       id: id ?? this.id,
       type: type ?? this.type,
+      actor: actor ?? this.actor,
       actorDisplayName: actorDisplayName ?? this.actorDisplayName,
       title: title ?? this.title,
       body: body ?? this.body,
@@ -79,9 +108,16 @@ class NotificationDto {
   }
 
   factory NotificationDto.fromJson(Map<String, dynamic> json) {
+    NotificationActorDto? actor;
+    final rawActor = json['actor'];
+    if (rawActor is Map<String, dynamic>) {
+      actor = NotificationActorDto.fromJson(rawActor);
+    }
+
     return NotificationDto(
       id: notificationIdToString(json['id']),
       type: json['type']?.toString() ?? '',
+      actor: actor,
       actorDisplayName: json['actorDisplayName']?.toString(),
       title: json['title']?.toString() ?? '',
       body: json['body']?.toString(),

@@ -30,22 +30,41 @@ ActivityItem activityItemFromNotification(NotificationDto n) {
   final p = _parsePayload(n.payloadJson);
   final type = activityTypeFromNotification(n.type);
 
-  final actorName = (n.actorDisplayName != null &&
+  final displayNameFromApi = (n.actorDisplayName != null &&
           n.actorDisplayName!.trim().isNotEmpty)
       ? n.actorDisplayName!.trim()
       : 'User';
 
+  final actor = n.actor;
+  final actorUserName = actor?.userName?.trim();
+  final actorName = (actorUserName != null && actorUserName.isNotEmpty)
+      ? actorUserName
+      : displayNameFromApi;
+
   final followerId = p?['followerUserId']?.toString() ?? '';
   final actorUserId = p?['actorUserId']?.toString() ?? '';
 
+  final actorIdStr =
+      actor != null && actor.id > 0 ? actor.id.toString() : '';
+
   final userIdForFollow = type == ActivityType.follow
-      ? followerId
-      : (actorUserId.isNotEmpty ? actorUserId : followerId);
+      ? (actorIdStr.isNotEmpty ? actorIdStr : followerId)
+      : (actorIdStr.isNotEmpty
+          ? actorIdStr
+          : (actorUserId.isNotEmpty ? actorUserId : followerId));
+
+  final avatarFromActor = actor?.profileImageUrl.trim();
+  final avatarFallback = p?['actorAvatarUrl']?.toString().trim();
+  final rawAvatar = (avatarFromActor != null && avatarFromActor.isNotEmpty)
+      ? avatarFromActor
+      : avatarFallback;
+  final resolvedAvatar =
+      rawAvatar != null && rawAvatar.isNotEmpty ? rawAvatar : null;
 
   final user = ActivityUser(
     id: userIdForFollow,
     username: actorName,
-    avatarUrl: p?['actorAvatarUrl']?.toString(),
+    avatarUrl: resolvedAvatar,
   );
 
   final productId = p?['productId']?.toString();

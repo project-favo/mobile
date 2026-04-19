@@ -188,5 +188,32 @@ class ReviewRepository {
       throw Exception('Network error: ${e.message}');
     }
   }
+
+  /// Review şikayeti — POST `/api/reviews/{reviewId}/report`
+  Future<void> reportReview(
+    String firebaseIdToken,
+    String reviewId,
+    ReportReviewRequestDto request,
+  ) async {
+    try {
+      _apiClient.setAuthToken(firebaseIdToken);
+      final encoded = Uri.encodeComponent(reviewId);
+      await _apiClient.dio.post(
+        '/api/reviews/$encoded/report',
+        data: request.toJson(),
+      );
+    } on DioException catch (e) {
+      if (e.response != null) {
+        final errorData = e.response?.data;
+        final errorMessage = errorData is Map
+            ? (errorData['message'] ??
+                errorData['error'] ??
+                'Failed to submit report')
+            : errorData?.toString() ?? 'Failed to submit report';
+        throw Exception(errorMessage);
+      }
+      throw Exception('Network error: ${e.message}');
+    }
+  }
 }
 

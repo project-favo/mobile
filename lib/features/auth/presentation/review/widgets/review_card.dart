@@ -15,6 +15,7 @@ class ReviewCard extends StatelessWidget {
   final VoidCallback? onUsernameTap;
   final bool showChatIcon;
   final VoidCallback? onChatTap;
+  final VoidCallback? onReportTap;
 
   const ReviewCard({
     super.key,
@@ -29,6 +30,7 @@ class ReviewCard extends StatelessWidget {
     this.onUsernameTap,
     this.showChatIcon = false,
     this.onChatTap,
+    this.onReportTap,
   });
 
   @override
@@ -134,13 +136,17 @@ class ReviewCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 16),
-                // Report
-                Icon(
-                  Icons.flag_outlined,
-                  size: 22,
-                  color: AppColors.primary,
-                ),
-                const SizedBox(width: 16),
+                if (onReportTap != null)
+                  GestureDetector(
+                    onTap: onReportTap,
+                    behavior: HitTestBehavior.opaque,
+                    child: const Icon(
+                      Icons.flag_outlined,
+                      size: 22,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                if (onReportTap != null) const SizedBox(width: 16),
                 // Chat
                 if (showChatIcon)
                   InkWell(

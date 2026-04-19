@@ -15,6 +15,8 @@ import '../../../data/models/product_dto.dart';
 import '../../../data/repositories/interaction_repository.dart';
 import '../../../data/repositories/review_repository.dart';
 import '../../../data/repositories/message_repository.dart';
+import '../../../data/services/auth_service.dart';
+import '../widgets/report_review_sheet.dart';
 
 class ReviewDetailPage extends StatefulWidget {
   final ReviewDto review;
@@ -37,6 +39,9 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
   final ApiClient _apiClient = ApiClient();
   late ReviewDto _currentReview;
   final MessageRepository _messageRepository = MessageRepository();
+
+  /// Şikayet butonunu gizlemek için (kendi yorumu).
+  String? _viewerUserId;
 
   @override
   void initState() {
@@ -69,8 +74,14 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
         firebaseIdToken: firebaseIdToken,
       );
 
+      String? viewerId;
+      try {
+        viewerId = (await AuthService().getMe()).id;
+      } catch (_) {}
+
       setState(() {
         _currentReview = updatedReview;
+        _viewerUserId = viewerId;
       });
     } catch (_) {}
   }
@@ -770,24 +781,44 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                     ],
                   ),
                 ),
-                TextButton.icon(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Report functionality coming soon'),
-                      ),
-                    );
-                  },
-                  icon: const Icon(
-                    Icons.flag_outlined,
-                    size: 20,
-                    color: AppColors.primary,
+                if (_viewerUserId == null ||
+                    _viewerUserId!.trim() !=
+                        _currentReview.ownerId.trim())
+                  TextButton.icon(
+                    onPressed: () async {
+                      final user = FirebaseAuth.instance.currentUser;
+                      if (user == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content:
+                                Text('Please sign in to report a review'),
+                            backgroundColor: AppColors.error,
+                          ),
+                        );
+                        return;
+                      }
+                      final ok = await showReportReviewSheet(
+                        context,
+                        reviewId: _currentReview.id,
+                      );
+                      if (mounted && ok) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Thanks — your report was sent'),
+                          ),
+                        );
+                      }
+                    },
+                    icon: const Icon(
+                      Icons.flag_outlined,
+                      size: 20,
+                      color: AppColors.primary,
+                    ),
+                    label: const Text(
+                      'Report',
+                      style: AppTextStyles.body,
+                    ),
                   ),
-                  label: const Text(
-                    'Report',
-                    style: AppTextStyles.body,
-                  ),
-                ),
               ],
             ),
           ),

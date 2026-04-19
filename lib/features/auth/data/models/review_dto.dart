@@ -210,3 +210,22 @@ class UpdateReviewRequestDto {
   }
 }
 
+/// POST `/api/reviews/{id}/report` gövdesi (backend alan adlarıyla uyumlu).
+class ReportReviewRequestDto {
+  final String reason;
+  final String? description;
+
+  ReportReviewRequestDto({
+    required this.reason,
+    this.description,
+  });
+
+  Map<String, dynamic> toJson() {
+    final d = description?.trim();
+    return {
+      'reason': reason,
+      if (d != null && d.isNotEmpty) 'description': d,
+    };
+  }
+}
+

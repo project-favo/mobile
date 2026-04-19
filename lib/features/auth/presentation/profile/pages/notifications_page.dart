@@ -9,6 +9,7 @@ import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/utils/error_handler.dart';
+import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../../data/models/notification_dto.dart';
 import '../../../data/models/notification_section.dart';
@@ -17,6 +18,14 @@ import '../../review/pages/review_page.dart';
 
 /// Tarihler ve metinler İngilizce (ekran dili ne olursa olsun).
 const String _kDateLocale = 'en_US';
+
+String _notificationActorInitial(NotificationDto n) {
+  final u = n.actor?.userName?.trim();
+  if (u != null && u.isNotEmpty) return u;
+  final d = n.actorDisplayName?.trim();
+  if (d != null && d.isNotEmpty) return d;
+  return '?';
+}
 
 class NotificationsPage extends StatefulWidget {
   const NotificationsPage({super.key});
@@ -547,6 +556,16 @@ class _NotificationTile extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (n.actor != null) ...[
+                ProfileAvatar(
+                  radius: 22,
+                  imageUrl: n.actor!.profileImageUrl.trim().isEmpty
+                      ? null
+                      : n.actor!.profileImageUrl,
+                  fallbackInitial: _notificationActorInitial(n),
+                ),
+                const SizedBox(width: AppSpacing.medium),
+              ],
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
