@@ -52,7 +52,7 @@ class _AiChatPageState extends State<AiChatPage>
           _AiMessage(
             role: 'assistant',
             text:
-                'Merhaba, ben FAVO asistanıyım. Ürünler, yorumlar veya uygulama ile ilgili sorularını buradan yazabilirsin.',
+                "Hi, I'm the FAVO assistant. You can ask anything here about products, reviews, or the app.",
           ),
         ];
     _logoController = AnimationController(
@@ -143,7 +143,7 @@ class _AiChatPageState extends State<AiChatPage>
       final data = response.data;
       final replyText = (data is Map && data['reply'] is String)
           ? data['reply'] as String
-          : 'Yanıt alınamadı, lütfen tekrar dener misin?';
+          : 'No reply received. Please try again.';
 
       final products = _parseProducts(data);
 
@@ -399,7 +399,7 @@ class _AiChatPageState extends State<AiChatPage>
                       minLines: 1,
                       maxLines: 3,
                       decoration: const InputDecoration(
-                        hintText: 'Mesajını yaz...',
+                        hintText: 'Type your message...',
                         border: OutlineInputBorder(),
                       ),
                     ),

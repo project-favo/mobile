@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'activity_bottom_nav_icon.dart';
 
-/// Main tabs: Search, Add (+), Home (center), Activity (bolt), Profile.
+/// Main tabs: Search, Following feed, Home, Activity, Profile.
 class MainBottomNavItems {
   MainBottomNavItems._();
 
@@ -12,8 +12,8 @@ class MainBottomNavItems {
           label: 'Search',
         ),
         const BottomNavigationBarItem(
-          icon: Icon(Icons.add),
-          label: 'Add',
+          icon: Icon(Icons.people_alt_outlined),
+          label: 'Following',
         ),
         const BottomNavigationBarItem(
           icon: Icon(

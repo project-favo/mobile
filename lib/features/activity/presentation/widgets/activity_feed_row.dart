@@ -102,8 +102,9 @@ class ActivityFeedRow extends StatelessWidget {
   }
 
   bool get _showThumbnail {
-    final pid = item.targetContent?.productId;
-    if (pid == null || pid.isEmpty) return false;
+    final hasImage = (item.targetContent?.thumbnailUrl ?? '').trim().isNotEmpty;
+    final pid = (item.targetContent?.productId ?? '').trim().isNotEmpty;
+    if (!hasImage && !pid) return false;
     return item.type == ActivityType.like ||
         item.type == ActivityType.comment ||
         item.type == ActivityType.review;
@@ -135,7 +136,12 @@ class ActivityFeedRow extends StatelessWidget {
       );
     }
 
-    return Text(line, style: baseStyle);
+    return Text(
+      line,
+      style: baseStyle,
+      maxLines: 3,
+      overflow: TextOverflow.ellipsis,
+    );
   }
 }
 
@@ -193,17 +199,25 @@ class _ContentThumb extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(4),
-      child: SizedBox(
-        width: 44,
-        height: 56,
+    return Container(
+      width: 52,
+      height: 52,
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.border.withValues(alpha: 0.7)),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
         child: url != null && url!.isNotEmpty
-            ? Image.network(
-                url!,
-                fit: BoxFit.contain,
-                alignment: Alignment.center,
-                errorBuilder: (_, __, ___) => _placeholder(context),
+            ? Padding(
+                padding: const EdgeInsets.all(3),
+                child: Image.network(
+                  url!,
+                  fit: BoxFit.contain,
+                  alignment: Alignment.center,
+                  errorBuilder: (_, __, ___) => _placeholder(context),
+                ),
               )
             : _placeholder(context),
       ),

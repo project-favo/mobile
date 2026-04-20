@@ -1,6 +1,10 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../../../core/cache/search_warm_cache.dart';
+import '../../../core/utils/session_helper.dart';
 import '../../../core/theme/app_colors.dart';
+import '../data/repositories/product_repository.dart';
+import '../data/repositories/tag_repository.dart';
 import 'home_page.dart';
 import 'login_page.dart';
 import 'onboarding_page.dart';
@@ -18,6 +22,27 @@ class AuthSplashGate extends StatefulWidget {
 
 class _AuthSplashGateState extends State<AuthSplashGate> {
   Widget? _screen;
+  final TagRepository _tagRepository = TagRepository();
+  final ProductRepository _productRepository = ProductRepository();
+  final SessionHelper _sessionHelper = SessionHelper();
+
+  Future<void> _warmHomeCache() async {
+    try {
+      final token = await _sessionHelper.ensureSession();
+      try {
+        final tags = await _tagRepository.getRootTags(token);
+        SearchWarmCache.instance.rememberRootTags(tags);
+      } catch (_) {}
+      try {
+        final feed = await _productRepository.getHomeFeed(
+          page: 0,
+          size: 10,
+          firebaseIdToken: token,
+        );
+        SearchWarmCache.instance.rememberSeedProducts(feed.content);
+      } catch (_) {}
+    } catch (_) {}
+  }
 
   @override
   void initState() {
@@ -26,7 +51,10 @@ class _AuthSplashGateState extends State<AuthSplashGate> {
   }
 
   Future<void> _bootstrap() async {
+    final minSplashFuture = Future.delayed(const Duration(seconds: 2));
+
     if (!widget.onboardingCompleted) {
+      await minSplashFuture;
       if (!mounted) return;
       setState(() => _screen = const OnboardingPage());
       return;
@@ -34,6 +62,7 @@ class _AuthSplashGateState extends State<AuthSplashGate> {
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
+      await minSplashFuture;
       if (!mounted) return;
       setState(() => _screen = const LoginPage());
       return;
@@ -45,10 +74,16 @@ class _AuthSplashGateState extends State<AuthSplashGate> {
 
     if (!mounted) return;
     if (FirebaseAuth.instance.currentUser == null) {
+      await minSplashFuture;
       setState(() => _screen = const LoginPage());
       return;
     }
 
+    await Future.wait([
+      minSplashFuture,
+      _warmHomeCache().timeout(const Duration(seconds: 3), onTimeout: () {}),
+    ]);
+    if (!mounted) return;
     setState(() => _screen = const HomePage());
   }
 
@@ -57,11 +92,56 @@ class _AuthSplashGateState extends State<AuthSplashGate> {
     if (_screen == null) {
       return const Scaffold(
         backgroundColor: AppColors.background,
-        body: Center(
-          child: CircularProgressIndicator(color: AppColors.primary),
-        ),
+        body: _FavoLaunchSplash(),
       );
     }
     return _screen!;
+  }
+}
+
+class _FavoLaunchSplash extends StatelessWidget {
+  const _FavoLaunchSplash();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TweenAnimationBuilder<double>(
+            tween: Tween<double>(begin: 0.94, end: 1.04),
+            duration: const Duration(milliseconds: 950),
+            curve: Curves.easeInOut,
+            builder: (context, value, child) =>
+                Transform.scale(scale: value, child: child),
+            child: SizedBox(
+              width: 160,
+              child: Image.asset(
+                'assets/images/homepage_logo2.png',
+                fit: BoxFit.contain,
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          const SizedBox(
+            width: 26,
+            height: 26,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.6,
+              color: AppColors.primary,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Loading FAVO...',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

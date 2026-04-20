@@ -58,6 +58,25 @@ class _RegisterPageState extends State<RegisterPage> {
   XFile? _selectedProfilePhoto;
 
   @override
+  void initState() {
+    super.initState();
+    final map = <FocusNode, GlobalKey>{
+      _userNameFocus: _userNameFieldKey,
+      _nameFocus: _nameFieldKey,
+      _surnameFocus: _surnameFieldKey,
+      _birthdateFocus: _birthdateFieldKey,
+      _emailFocus: _emailFieldKey,
+      _passwordFocus: _passwordFieldKey,
+      _confirmPasswordFocus: _confirmPasswordFieldKey,
+    };
+    map.forEach((focus, key) {
+      focus.addListener(() {
+        if (focus.hasFocus) _scrollFieldIntoView(key);
+      });
+    });
+  }
+
+  @override
   void dispose() {
     _email.dispose();
     _password.dispose();
@@ -363,6 +382,7 @@ class _RegisterPageState extends State<RegisterPage> {
         onTap: () => FocusScope.of(context).unfocus(),
         child: SafeArea(
           child: SingleChildScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
             padding: EdgeInsets.only(
               left: 24,
               right: 24,

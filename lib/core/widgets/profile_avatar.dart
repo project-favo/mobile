@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../utils/load_profile_image_bytes.dart';
-import 'skeleton_loader.dart';
 
 /// Ağ veya data URI profil görseli: önce [memoryBytes], sonra kimlik doğrulamalı indirme.
 class ProfileAvatar extends StatefulWidget {
@@ -85,16 +84,8 @@ class _ProfileAvatarState extends State<ProfileAvatar> {
       );
     }
 
-    if (_loading) {
-      return ClipOval(
-        child: SkeletonLoader(
-          width: widget.radius * 2,
-          height: widget.radius * 2,
-          borderRadius: BorderRadius.circular(widget.radius),
-        ),
-      );
-    }
-
+    // Show placeholder immediately while network bytes load,
+    // instead of shimmer delay that feels like UI lag.
     return _placeholderCircle(widget.radius, widget.fallbackInitial);
   }
 
@@ -213,16 +204,6 @@ class _ProfileAvatarImageState extends State<ProfileAvatarImage> {
           width: widget.size,
           height: widget.size,
           fit: BoxFit.cover,
-        ),
-      );
-    }
-
-    if (_loading) {
-      return ClipOval(
-        child: SkeletonLoader(
-          width: widget.size,
-          height: widget.size,
-          borderRadius: BorderRadius.circular(radius),
         ),
       );
     }

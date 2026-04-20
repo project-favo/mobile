@@ -58,10 +58,37 @@ class NotificationActorDto {
   }
 }
 
+/// Product summary attached by activity notification endpoint.
+class NotificationProductDto {
+  final int id;
+  final String name;
+  final String? imageURL;
+
+  const NotificationProductDto({
+    required this.id,
+    required this.name,
+    this.imageURL,
+  });
+
+  factory NotificationProductDto.fromJson(Map<String, dynamic> json) {
+    final rawId = json['id'];
+    final id = rawId is num
+        ? rawId.toInt()
+        : int.tryParse(rawId?.toString() ?? '') ?? 0;
+    final rawImage = json['imageURL']?.toString().trim();
+    return NotificationProductDto(
+      id: id,
+      name: json['name']?.toString() ?? '',
+      imageURL: (rawImage == null || rawImage.isEmpty) ? null : rawImage,
+    );
+  }
+}
+
 class NotificationDto {
   final String id;
   final String type;
   final NotificationActorDto? actor;
+  final NotificationProductDto? product;
   final String? actorDisplayName;
   final String title;
   final String? body;
@@ -73,6 +100,7 @@ class NotificationDto {
     required this.id,
     required this.type,
     this.actor,
+    this.product,
     this.actorDisplayName,
     required this.title,
     this.body,
@@ -87,6 +115,7 @@ class NotificationDto {
     String? id,
     String? type,
     NotificationActorDto? actor,
+    NotificationProductDto? product,
     String? actorDisplayName,
     String? title,
     String? body,
@@ -98,6 +127,7 @@ class NotificationDto {
       id: id ?? this.id,
       type: type ?? this.type,
       actor: actor ?? this.actor,
+      product: product ?? this.product,
       actorDisplayName: actorDisplayName ?? this.actorDisplayName,
       title: title ?? this.title,
       body: body ?? this.body,
@@ -113,11 +143,17 @@ class NotificationDto {
     if (rawActor is Map<String, dynamic>) {
       actor = NotificationActorDto.fromJson(rawActor);
     }
+    NotificationProductDto? product;
+    final rawProduct = json['product'];
+    if (rawProduct is Map<String, dynamic>) {
+      product = NotificationProductDto.fromJson(rawProduct);
+    }
 
     return NotificationDto(
       id: notificationIdToString(json['id']),
       type: json['type']?.toString() ?? '',
       actor: actor,
+      product: product,
       actorDisplayName: json['actorDisplayName']?.toString(),
       title: json['title']?.toString() ?? '',
       body: json['body']?.toString(),

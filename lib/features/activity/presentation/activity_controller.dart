@@ -1,7 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
+import '../../../core/cache/activity_memory_cache.dart';
 import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/load_profile_image_bytes.dart';
 import '../../../core/utils/session_helper.dart';
@@ -42,9 +44,21 @@ class ActivityController extends ChangeNotifier {
   bool get loadingMore => _loadingMore;
   String? get errorMessage => _errorMessage;
   bool get hasMore => _page + 1 < _totalPages;
-
   bool isFollowingUser(String userId) =>
       userId.isNotEmpty && _followingUserIds.contains(userId);
+
+  bool hydrateFromCache() {
+    final warm = ActivityMemoryCache.instance.peek();
+    if (warm == null || warm.items.isEmpty) return false;
+    _items = List<ActivityItem>.from(warm.items);
+    _page = warm.page;
+    _totalPages = warm.totalPages;
+    _totalElements = warm.totalElements;
+    _loadingFirst = false;
+    _errorMessage = null;
+    notifyListeners();
+    return true;
+  }
 
   void _prefetchAvatarsForItems(Iterable<ActivityItem> items) {
     for (final e in items) {
@@ -52,7 +66,22 @@ class ActivityController extends ChangeNotifier {
       if (u != null && u.trim().isNotEmpty) {
         unawaited(loadProfileImageBytesFromRaw(u));
       }
+      final thumb = e.targetContent?.thumbnailUrl;
+      if (thumb != null && thumb.trim().isNotEmpty) {
+        _warmImageCache(thumb);
+      }
     }
+  }
+
+  void _warmImageCache(String url) {
+    final provider = NetworkImage(url);
+    final stream = provider.resolve(const ImageConfiguration());
+    late final ImageStreamListener listener;
+    listener = ImageStreamListener(
+      (_, __) => stream.removeListener(listener),
+      onError: (_, __) => stream.removeListener(listener),
+    );
+    stream.addListener(listener);
   }
 
   Future<void> loadFirstPage() async {
@@ -62,11 +91,16 @@ class ActivityController extends ChangeNotifier {
     notifyListeners();
     try {
       final page = await _notifications.getNotifications(page: 0, size: 20);
-      _items =
-          page.content.map(activityItemFromNotification).toList();
+      _items = page.content.map(activityItemFromNotification).toList();
       _page = page.number;
       _totalPages = page.totalPages;
       _totalElements = page.totalElements;
+      ActivityMemoryCache.instance.remember(
+        items: _items,
+        page: _page,
+        totalPages: _totalPages,
+        totalElements: _totalElements,
+      );
       _prefetchAvatarsForItems(_items);
       await _syncFollowStatesForCurrentItems();
     } catch (e) {
@@ -84,11 +118,16 @@ class ActivityController extends ChangeNotifier {
     try {
       final next =
           await _notifications.getNotifications(page: _page + 1, size: 20);
-      final appended =
-          next.content.map(activityItemFromNotification).toList();
+      final appended = next.content.map(activityItemFromNotification).toList();
       _items = [..._items, ...appended];
       _page = next.number;
       _totalPages = next.totalPages;
+      ActivityMemoryCache.instance.remember(
+        items: _items,
+        page: _page,
+        totalPages: _totalPages,
+        totalElements: _totalElements,
+      );
       _prefetchAvatarsForItems(appended);
       await _syncFollowStatesForCurrentItems();
     } catch (_) {

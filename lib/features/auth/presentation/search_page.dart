@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
+import '../../../core/cache/search_warm_cache.dart';
 import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/session_helper.dart';
 import '../../../core/notifications/notification_realtime_service.dart';
@@ -13,9 +14,11 @@ import '../data/models/product_dto.dart';
 import '../data/models/tag_dto.dart';
 import '../data/repositories/product_repository.dart';
 import '../data/repositories/tag_repository.dart';
+import '../data/services/review_prefetch_service.dart';
 import '../widgets/product_card.dart';
 import '../../../core/widgets/skeleton_loader.dart';
 import 'home_page.dart';
+import 'friend_feed_page.dart';
 import 'profile/pages/profile_page.dart';
 import 'review/pages/review_page.dart';
 
@@ -88,6 +91,20 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Future<void> _loadInitialData() async {
+    final warmTags = SearchWarmCache.instance.peekRootTags();
+    final warmProducts = SearchWarmCache.instance.peekSeedProducts();
+    if (warmTags.isNotEmpty || warmProducts.isNotEmpty) {
+      setState(() {
+        _rootCategories = warmTags;
+        _currentCategories = warmTags;
+        _allProducts = warmProducts;
+        _isLoading = false;
+        _errorMessage = null;
+      });
+      unawaited(_refreshInitialDataInBackground());
+      return;
+    }
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -110,6 +127,7 @@ class _SearchPageState extends State<SearchPage> {
         _currentCategories = rootTags;
         _isLoading = false;
       });
+      SearchWarmCache.instance.rememberRootTags(rootTags);
 
       // Ürünleri arka planda yükle (tümünü değil, ilk sayfa – hız için)
       try {
@@ -122,6 +140,7 @@ class _SearchPageState extends State<SearchPage> {
         setState(() {
           _allProducts = result.content;
         });
+        SearchWarmCache.instance.rememberSeedProducts(result.content);
       } catch (_) {
         // Ürünler yüklenemezse arama boş kalır, kategoriler çalışır
       }
@@ -133,6 +152,41 @@ class _SearchPageState extends State<SearchPage> {
         });
       }
     }
+  }
+
+  Future<void> _refreshInitialDataInBackground() async {
+    try {
+      final token = await _sessionHelper.ensureSession();
+      _firebaseIdToken = token;
+
+      List<TagDto> rootTags = [];
+      try {
+        rootTags = await _tagRepository.getRootTags(token);
+      } catch (_) {}
+      if (rootTags.isNotEmpty) {
+        SearchWarmCache.instance.rememberRootTags(rootTags);
+        if (mounted) {
+          setState(() {
+            _rootCategories = rootTags;
+            _currentCategories = rootTags;
+          });
+        }
+      }
+
+      try {
+        final result = await _productRepository.getHomeFeed(
+          page: 0,
+          size: 30,
+          firebaseIdToken: token,
+        );
+        SearchWarmCache.instance.rememberSeedProducts(result.content);
+        if (mounted) {
+          setState(() {
+            _allProducts = result.content;
+          });
+        }
+      } catch (_) {}
+    } catch (_) {}
   }
 
   Future<void> _openCategory(TagDto category) async {
@@ -166,6 +220,10 @@ class _SearchPageState extends State<SearchPage> {
         _searchResults = products;
         _isLoadingCategories = false;
       });
+      ReviewPrefetchService.instance.prefetchForProducts(
+        products,
+        maxCount: 6,
+      );
     } catch (e) {
       setState(() {
         _isLoadingCategories = false;
@@ -245,6 +303,10 @@ class _SearchPageState extends State<SearchPage> {
         _searchResults = results;
         _isSearching = false;
       });
+      ReviewPrefetchService.instance.prefetchForProducts(
+        results,
+        maxCount: 6,
+      );
     } catch (e) {
       if (!mounted || _activeQuery != normalizedQuery) return;
       setState(() {
@@ -315,7 +377,7 @@ class _SearchPageState extends State<SearchPage> {
                                           crossAxisCount: 2,
                                           crossAxisSpacing: AppSpacing.xLarge,
                                           mainAxisSpacing: AppSpacing.xLarge,
-                                          childAspectRatio: 0.6,
+                                          childAspectRatio: 0.60,
                                         ),
                                         itemCount: _searchResults.length,
                                         itemBuilder: (context, index) {
@@ -325,6 +387,7 @@ class _SearchPageState extends State<SearchPage> {
                                             imageUrl: product.imageURL,
                                             title: product.name,
                                             category: product.tag.name,
+                                            categoryPath: product.tag.categoryPath,
                                             rating: product.averageRating ?? 0.0,
                                             desc: product.description ?? '',
                                             isFavorite: product.isLiked ?? false,
@@ -382,7 +445,7 @@ class _SearchPageState extends State<SearchPage> {
                                                       crossAxisCount: 2,
                                                       crossAxisSpacing: AppSpacing.xLarge,
                                                       mainAxisSpacing: AppSpacing.xLarge,
-                                                      childAspectRatio: 0.6,
+                                                      childAspectRatio: 0.60,
                                                     ),
                                                     itemCount: _searchResults.length,
                                                     itemBuilder: (context, index) {
@@ -392,6 +455,7 @@ class _SearchPageState extends State<SearchPage> {
                                                         imageUrl: product.imageURL,
                                                         title: product.name,
                                                         category: product.tag.name,
+                                                        categoryPath: product.tag.categoryPath,
                                                         rating: product.averageRating ?? 0.0,
                                                         desc: product.description ?? '',
                                                         isFavorite: product.isLiked ?? false,
@@ -476,7 +540,13 @@ class _SearchPageState extends State<SearchPage> {
         showUnselectedLabels: false,
         onTap: (index) {
           if (index == 0) return;
-          if (index == 1) return;
+          if (index == 1) {
+            Navigator.pushReplacement(
+              context,
+              _noAnimationRoute(const FriendFeedPage()),
+            );
+            return;
+          }
           if (index == 2) {
             Navigator.pushReplacement(
               context,

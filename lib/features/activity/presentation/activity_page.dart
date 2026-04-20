@@ -12,6 +12,7 @@ import '../../../core/widgets/skeleton_loader.dart';
 import '../domain/activity_models.dart';
 import '../domain/activity_type.dart';
 import '../../auth/presentation/home_page.dart';
+import '../../auth/presentation/friend_feed_page.dart';
 import '../../auth/presentation/profile/pages/profile_page.dart';
 import '../../auth/presentation/profile/pages/user_profile_page.dart';
 import '../../auth/presentation/review/pages/review_page.dart';
@@ -53,7 +54,13 @@ class _ActivityPageState extends State<ActivityPage>
       showUnselectedLabels: false,
       onTap: (index) {
         if (index == 3) return;
-        if (index == 1) return;
+        if (index == 1) {
+          Navigator.pushReplacement(
+            context,
+            _instantRoute(const FriendFeedPage()),
+          );
+          return;
+        }
         if (index == 0) {
           Navigator.pushReplacement(context, _instantRoute(const SearchPage()));
           return;
@@ -84,6 +91,7 @@ class _ActivityPageState extends State<ActivityPage>
       _onRealtimePush,
     );
     _scrollController.addListener(_onScroll);
+    _controller.hydrateFromCache();
     unawaited(_bootstrapActivity());
   }
 
@@ -122,9 +130,18 @@ class _ActivityPageState extends State<ActivityPage>
     final all = _controller.items;
     switch (_tabController.index) {
       case 1:
-        return all.where((e) => e.type == ActivityType.follow).toList();
+        return all.where((e) {
+          final t = e.lineText.toLowerCase();
+          return e.type == ActivityType.follow ||
+              t.contains('followed you') ||
+              t.contains('started following you');
+        }).toList();
       case 2:
-        return all.where((e) => e.type == ActivityType.like).toList();
+        return all.where((e) {
+          final t = e.lineText.toLowerCase();
+          return e.type == ActivityType.like &&
+              (t.contains('your review') || t.contains('liked your review'));
+        }).toList();
       case 3:
         return all.where((e) => e.type == ActivityType.review).toList();
       default:
@@ -241,38 +258,47 @@ class _ActivityPageState extends State<ActivityPage>
         shadowColor: Colors.transparent,
         toolbarHeight: AppSpacing.toolbarHeight,
         centerTitle: true,
-        title: const Text('Activity', style: AppTextStyles.HomeHeader),
+        title: Text(
+          'Activity',
+          style: AppTextStyles.heading2.copyWith(
+            color: AppColors.primary,
+            fontWeight: FontWeight.w700,
+            fontSize: 20,
+          ),
+        ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(50),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TabBar(
-                controller: _tabController,
-                isScrollable: true,
-                tabAlignment: TabAlignment.start,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                labelColor: AppColors.primary,
-                unselectedLabelColor: AppColors.textSecondary,
-                indicatorColor: AppColors.primary,
-                indicatorWeight: 2.5,
-                indicatorSize: TabBarIndicatorSize.label,
-                dividerColor: Colors.transparent,
-                labelStyle: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                  letterSpacing: 0.2,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                child: TabBar(
+                  controller: _tabController,
+                  isScrollable: false,
+                  indicator: BoxDecoration(
+                    color: AppColors.primary,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  indicatorSize: TabBarIndicatorSize.tab,
+                  labelColor: Colors.white,
+                  unselectedLabelColor: AppColors.textSecondary,
+                  dividerColor: Colors.transparent,
+                  labelStyle: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                  unselectedLabelStyle: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                  tabs: const [
+                    Tab(text: 'All'),
+                    Tab(text: 'Follow'),
+                    Tab(text: 'Likes'),
+                    Tab(text: 'Reviews'),
+                  ],
                 ),
-                unselectedLabelStyle: const TextStyle(
-                  fontWeight: FontWeight.w500,
-                  fontSize: 13,
-                ),
-                tabs: const [
-                  Tab(text: 'All'),
-                  Tab(text: 'Follow'),
-                  Tab(text: 'Likes'),
-                  Tab(text: 'Reviews'),
-                ],
               ),
               Divider(
                 height: 1,
@@ -386,12 +412,21 @@ class _ActivityPageState extends State<ActivityPage>
                   return const _ActivityLoadMoreSkeleton();
                 }
                 final item = visible[index];
-                return Material(
-                  color: AppColors.surface,
-                  elevation: 0,
-                  shadowColor: Colors.black26,
-                  borderRadius: BorderRadius.circular(14),
-                  clipBehavior: Clip.antiAlias,
+                return Container(
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: AppColors.border.withValues(alpha: 0.7),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.03),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
                   child: ActivityFeedRow(
                     item: item,
                     following: _controller.isFollowingUser(item.user.id),

@@ -1,9 +1,6 @@
 import 'dart:async';
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/theme/app_chip_styles.dart';
@@ -15,22 +12,23 @@ import '../../../core/widgets/main_bottom_nav_items.dart';
 import '../../../features/activity/presentation/activity_page.dart';
 import '../../../core/widgets/custom_refresh_indicator.dart';
 import '../../../core/widgets/skeleton_loader.dart';
-import '../../../core/widgets/home_hero_carousel.dart';
 import '../../../core/routes/custom_page_transitions.dart';
+import '../../../core/cache/search_warm_cache.dart';
 import '../widgets/product_card.dart';
 import '../widgets/top_product_card.dart';
 import 'messages/conversation_list_page.dart';
 import 'messages/ai_chat_page.dart';
 import '../data/repositories/message_repository.dart';
 import 'search_page.dart';
+import 'friend_feed_page.dart';
 import 'profile/pages/profile_page.dart';
 import 'review/pages/review_page.dart';
 import '../data/repositories/tag_repository.dart';
 import '../data/repositories/product_repository.dart';
 import '../data/repositories/interaction_repository.dart';
+import '../data/services/review_prefetch_service.dart';
 import '../data/models/tag_dto.dart';
 import '../data/models/product_dto.dart';
-import '../data/models/home_feed_mode.dart';
 import '../data/models/product_search_result_dto.dart';
 
 class HomePage extends StatefulWidget {
@@ -40,7 +38,9 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+enum _TopPicksTab { trendingReviews, weeklyLikes, forYou }
+
+class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
   // BottomNavigationBar index mapping:
   // 0: search, 1: add (placeholder), 2: home, 3: activity, 4: profile
   int _selectedCategoryIndex = -1; // -1 means "All", 0+ means selected category
@@ -53,6 +53,23 @@ class _HomePageState extends State<HomePage> {
 
   List<TagDto> _tags = [];
   List<TagDto> _subTags = [];
+  final Map<_TopPicksTab, List<ProductDto>> _topPicksByTab = {
+    _TopPicksTab.trendingReviews: [],
+    _TopPicksTab.weeklyLikes: [],
+    _TopPicksTab.forYou: [],
+  };
+  final Map<_TopPicksTab, String?> _topPicksErrorByTab = {
+    _TopPicksTab.trendingReviews: null,
+    _TopPicksTab.weeklyLikes: null,
+    _TopPicksTab.forYou: null,
+  };
+  final Set<_TopPicksTab> _topPicksLoadingTabs = <_TopPicksTab>{};
+  final Map<_TopPicksTab, int> _topPicksLatestRequestByTab = {};
+  int _topPicksRequestSeq = 0;
+  late final TabController _topPicksTabController;
+  final ScrollController _topPicksScrollController = ScrollController();
+  _TopPicksTab _selectedTopPicksTab = _TopPicksTab.trendingReviews;
+  bool _isTopPicksLoading = false;
   List<ProductDto> _filteredProducts = []; // Current page products
   int _currentPage = 0;
   int _totalPages = 0;
@@ -66,7 +83,6 @@ class _HomePageState extends State<HomePage> {
   final ScrollController _scrollController = ScrollController();
   int _unreadMessageCount = 0;
   bool _notificationSvcAttached = false;
-  HomeFeedMode _feedMode = HomeFeedMode.discover;
 
   Route _noAnimationRoute(Widget page) {
     return PageRouteBuilder(
@@ -94,6 +110,10 @@ class _HomePageState extends State<HomePage> {
           return;
         }
         if (index == 1) {
+          Navigator.pushReplacement(
+            context,
+            _noAnimationRoute(const FriendFeedPage()),
+          );
           return;
         }
         if (index == 2) {
@@ -121,10 +141,32 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _topPicksTabController = TabController(
+      length: _TopPicksTab.values.length,
+      vsync: this,
+      initialIndex: 0,
+    )..addListener(_onTopPicksTabControllerChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_hookNotificationsIfSignedIn());
     });
-    _loadData();
+    final warmTags = SearchWarmCache.instance.peekRootTags();
+    final warmProducts = SearchWarmCache.instance.peekSeedProducts();
+    if (warmTags.isNotEmpty || warmProducts.isNotEmpty) {
+      _tags = warmTags;
+      _topPicksByTab[_TopPicksTab.trendingReviews] = warmProducts;
+      _filteredProducts = warmProducts;
+      _isLoading = false;
+      _isFiltering = false;
+      _errorMessage = null;
+      if (_filteredProducts.isNotEmpty) {
+        _currentPage = 0;
+        _totalPages = 1;
+        _totalElements = _filteredProducts.length;
+      }
+      unawaited(_loadData(background: true));
+    } else {
+      _loadData();
+    }
     _loadUnreadCount();
     _scrollController.addListener(_onScroll);
   }
@@ -139,11 +181,15 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _topPicksTabController
+      ..removeListener(_onTopPicksTabControllerChanged)
+      ..dispose();
     if (_notificationSvcAttached) {
       NotificationRealtimeService.instance.detach();
     }
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    _topPicksScrollController.dispose();
     super.dispose();
   }
 
@@ -165,6 +211,207 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         _unreadMessageCount = 0;
       });
+    }
+  }
+
+  String _topPicksTabLabel(_TopPicksTab tab) => switch (tab) {
+    _TopPicksTab.trendingReviews => 'Trending Reviews',
+    _TopPicksTab.weeklyLikes => 'Most Liked',
+    _TopPicksTab.forYou => 'For You',
+  };
+
+  void _selectTopPicksTab(
+    _TopPicksTab tab, {
+    bool syncController = true,
+    bool forceRefresh = false,
+  }) {
+    if (!mounted) return;
+    final shouldUpdate = tab != _selectedTopPicksTab;
+    if (!shouldUpdate && !forceRefresh) return;
+    if (shouldUpdate) {
+      setState(() {
+        _selectedTopPicksTab = tab;
+      });
+      if (_topPicksScrollController.hasClients) {
+        _topPicksScrollController.jumpTo(0);
+      }
+    }
+    final cached = _topPicksByTab[tab] ?? const <ProductDto>[];
+    unawaited(_loadTopPicksForTab(tab, showLoadingState: cached.isEmpty));
+    if (syncController) {
+      final targetIndex = _TopPicksTab.values.indexOf(tab);
+      if (_topPicksTabController.index != targetIndex) {
+        _topPicksTabController.animateTo(targetIndex);
+      }
+    }
+  }
+
+  void _changeTopPicksTabByDelta(int delta) {
+    final currentIndex = _TopPicksTab.values.indexOf(_selectedTopPicksTab);
+    final nextIndex = (currentIndex + delta).clamp(
+      0,
+      _TopPicksTab.values.length - 1,
+    );
+    if (nextIndex == currentIndex) return;
+    _selectTopPicksTab(_TopPicksTab.values[nextIndex]);
+  }
+
+  Widget _buildTopPicksHeader() {
+    final currentIndex = _TopPicksTab.values.indexOf(_selectedTopPicksTab);
+    return Column(
+      children: [
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragEnd: (details) {
+            final velocity = details.primaryVelocity ?? 0;
+            if (velocity < -120) {
+              _changeTopPicksTabByDelta(1);
+            } else if (velocity > 120) {
+              _changeTopPicksTabByDelta(-1);
+            }
+          },
+          child: Row(
+            children: [
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                onPressed:
+                    currentIndex == 0 ? null : () => _changeTopPicksTabByDelta(-1),
+                icon: const Icon(Icons.chevron_left_rounded),
+                color: AppColors.textSecondary,
+              ),
+              Expanded(
+                child: Text(
+                  _topPicksTabLabel(_selectedTopPicksTab),
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.heading3.copyWith(
+                    color: AppColors.primary,
+                  ),
+                ),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                onPressed:
+                    currentIndex == _TopPicksTab.values.length - 1
+                        ? null
+                        : () => _changeTopPicksTabByDelta(1),
+                icon: const Icon(Icons.chevron_right_rounded),
+                color: AppColors.textSecondary,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(_TopPicksTab.values.length, (index) {
+            final selected = index == currentIndex;
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              width: selected ? 16 : 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color:
+                    selected
+                        ? AppColors.primary
+                        : AppColors.textSecondary.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(99),
+              ),
+            );
+          }),
+        ),
+      ],
+    );
+  }
+
+  void _onTopPicksTabControllerChanged() {
+    if (_topPicksTabController.indexIsChanging) return;
+    final nextTab = _TopPicksTab.values[_topPicksTabController.index];
+    _selectTopPicksTab(nextTab, syncController: false);
+  }
+
+  Future<void> _loadTopPicksForTab(
+    _TopPicksTab tab, {
+    bool showLoadingState = false,
+  }) async {
+    if (_topPicksLoadingTabs.contains(tab)) return;
+    final requestId = ++_topPicksRequestSeq;
+    _topPicksLatestRequestByTab[tab] = requestId;
+    _topPicksLoadingTabs.add(tab);
+    if (showLoadingState && mounted) {
+      setState(() {
+        _isTopPicksLoading = true;
+      });
+    }
+    try {
+      final firebaseIdToken = await _sessionHelper.ensureSession();
+      late ProductSearchResultDto result;
+      switch (tab) {
+        case _TopPicksTab.trendingReviews:
+          result = await _productRepository.getTrendingReviewsFeed(
+            page: 0,
+            size: 10,
+            firebaseIdToken: firebaseIdToken,
+          ).timeout(const Duration(seconds: 8));
+          break;
+        case _TopPicksTab.weeklyLikes:
+          result = await _productRepository.getTrendingLikesWeekFeed(
+            page: 0,
+            size: 10,
+            firebaseIdToken: firebaseIdToken,
+          ).timeout(const Duration(seconds: 8));
+          break;
+        case _TopPicksTab.forYou:
+          if (firebaseIdToken == null) {
+            result = await _productRepository.getTrendingReviewsFeed(
+              page: 0,
+              size: 10,
+              firebaseIdToken: null,
+            ).timeout(const Duration(seconds: 8));
+          } else {
+            try {
+              result = await _productRepository.getPersonalizedFeed(
+                page: 0,
+                size: 10,
+                firebaseIdToken: firebaseIdToken,
+              ).timeout(const Duration(seconds: 8));
+            } catch (_) {
+              // personalized erişilemezse global trende düş.
+              result = await _productRepository.getTrendingReviewsFeed(
+                page: 0,
+                size: 10,
+                firebaseIdToken: firebaseIdToken,
+              ).timeout(const Duration(seconds: 8));
+            }
+          }
+          break;
+      }
+      if (!mounted) return;
+      if (_topPicksLatestRequestByTab[tab] != requestId) return;
+      setState(() {
+        _topPicksByTab[tab] = result.content.take(10).toList();
+        _topPicksErrorByTab[tab] = null;
+        if (tab == _selectedTopPicksTab) {
+          _isTopPicksLoading = false;
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      if (_topPicksLatestRequestByTab[tab] != requestId) return;
+      setState(() {
+        _topPicksErrorByTab[tab] = ErrorHandler.getUserFriendlyMessage(e);
+      });
+    } finally {
+      _topPicksLoadingTabs.remove(tab);
+      if (mounted) {
+        setState(() {
+          if (
+              tab == _selectedTopPicksTab &&
+              _topPicksLatestRequestByTab[tab] == requestId) {
+            _isTopPicksLoading = false;
+          }
+        });
+      }
     }
   }
 
@@ -208,62 +455,11 @@ class _HomePageState extends State<HomePage> {
           firebaseIdToken: firebaseIdToken,
         );
       } else {
-        switch (_feedMode) {
-          case HomeFeedMode.discover:
-            result = await _productRepository.getHomeFeed(
-              page: page,
-              size: 10,
-              firebaseIdToken: firebaseIdToken,
-            );
-            break;
-          case HomeFeedMode.trendingReviews:
-            result = await _productRepository.getTrendingReviewsFeed(
-              page: page,
-              size: 10,
-              firebaseIdToken: firebaseIdToken,
-            );
-            break;
-          case HomeFeedMode.weeklyLikes:
-            result = await _productRepository.getTrendingLikesWeekFeed(
-              page: page,
-              size: 10,
-              firebaseIdToken: firebaseIdToken,
-            );
-            break;
-          case HomeFeedMode.personalized:
-            final t = firebaseIdToken;
-            if (t == null) {
-              result = await _productRepository.getTrendingReviewsFeed(
-                page: page,
-                size: 10,
-                firebaseIdToken: null,
-              );
-            } else {
-              try {
-                result = await _productRepository.getPersonalizedFeed(
-                  page: page,
-                  size: 10,
-                  firebaseIdToken: t,
-                );
-              } on DioException catch (e) {
-                if (e.response?.statusCode == 401) {
-                  final user = FirebaseAuth.instance.currentUser;
-                  if (user == null) rethrow;
-                  final newToken = await user.getIdToken(true);
-                  if (newToken == null) rethrow;
-                  ApiClient().setAuthToken(newToken);
-                  result = await _productRepository.getPersonalizedFeed(
-                    page: page,
-                    size: 10,
-                    firebaseIdToken: newToken,
-                  );
-                } else {
-                  rethrow;
-                }
-              }
-            }
-            break;
-        }
+        result = await _productRepository.getHomeFeed(
+          page: page,
+          size: 10,
+          firebaseIdToken: firebaseIdToken,
+        );
       }
 
       if (!mounted) return;
@@ -279,6 +475,16 @@ class _HomePageState extends State<HomePage> {
         _totalElements = result.totalElements;
         _isFiltering = false;
       });
+
+      if (!append || page == 0) {
+        SearchWarmCache.instance.rememberSeedProducts(_filteredProducts);
+      }
+
+      // Trendyol-style warmup: prefetch reviews for likely-to-open products.
+      ReviewPrefetchService.instance.prefetchForProducts(
+        append && page > 0 ? result.content : _filteredProducts,
+        maxCount: append ? 5 : 8,
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -358,11 +564,15 @@ class _HomePageState extends State<HomePage> {
     } catch (_) {}
   }
 
-  Future<void> _loadData() async {
-    setState(() {
-      _isLoading = true;
+  Future<void> _loadData({bool background = false}) async {
+    if (!background) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    } else {
       _errorMessage = null;
-    });
+    }
 
     try {
       // Token opsiyonel: ürün listesi ve kategori artık token olmadan da 200 döner
@@ -381,8 +591,11 @@ class _HomePageState extends State<HomePage> {
         _activeCategoryPathPrefix = null;
         _selectedCategoryIndex = -1;
       });
-
-      await _loadProductsPage(0);
+      SearchWarmCache.instance.rememberRootTags(tags);
+      await Future.wait([
+        _loadProductsPage(0),
+        _loadTopPicksForTab(_selectedTopPicksTab, showLoadingState: !background),
+      ]);
 
       if (mounted) {
         setState(() {
@@ -391,6 +604,10 @@ class _HomePageState extends State<HomePage> {
       }
     } catch (e) {
       if (mounted) {
+        if (background && _filteredProducts.isNotEmpty) {
+          _isLoading = false;
+          return;
+        }
         setState(() {
           _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
           _isLoading = false;
@@ -401,6 +618,10 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final currentTopPicks =
+        _topPicksByTab[_selectedTopPicksTab] ?? const <ProductDto>[];
+    final topPicksError = _topPicksErrorByTab[_selectedTopPicksTab];
+
     if (_isLoading && _filteredProducts.isEmpty) {
       return Scaffold(
         backgroundColor: AppColors.background,
@@ -440,41 +661,11 @@ class _HomePageState extends State<HomePage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                /// Feed mode chips skeleton (Discover / Trending / …)
-                SizedBox(
-                  height: AppSpacing.categoryChipHeight,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: 4,
-                    separatorBuilder:
-                        (_, __) => const SizedBox(width: AppSpacing.large),
-                    itemBuilder:
-                        (context, index) => const SkeletonLoader(
-                          width: 88,
-                          height: AppSpacing.categoryChipHeight - 8,
-                          borderRadius: BorderRadius.all(Radius.circular(20)),
-                        ),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.large),
-                SkeletonLoader(
-                  width: double.infinity,
-                  height: 148,
-                  borderRadius: BorderRadius.circular(16),
-                ),
+                /// TOP PICKS SKELETON
+                _buildTopPicksHeader(),
                 const SizedBox(height: AppSpacing.medium),
-                SkeletonLoader(
-                  width: 80,
-                  height: 8,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                const SizedBox(height: AppSpacing.large),
-
-                /// TOP 10 SKELETON
-                Text(_feedMode.topStripTitle, style: AppTextStyles.heading2),
-                const SizedBox(height: AppSpacing.large),
                 SizedBox(
-                  height: 190,
+                  height: 170,
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     itemCount: 10,
@@ -484,7 +675,7 @@ class _HomePageState extends State<HomePage> {
                         (context, index) => const TopProductCardSkeleton(),
                   ),
                 ),
-                const SizedBox(height: AppSpacing.xxLarge),
+                const SizedBox(height: AppSpacing.medium),
 
                 /// PRODUCTS SKELETON
                 ...List.generate(
@@ -562,9 +753,6 @@ class _HomePageState extends State<HomePage> {
         bottomNavigationBar: _buildBottomNavigationBar(),
       );
     }
-
-    /// TOP 10 PRODUCTS - Use first 10 products from filtered products
-    final top10Products = _filteredProducts.take(10).toList();
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -664,100 +852,132 @@ class _HomePageState extends State<HomePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (_selectedCategoryIndex == -1) ...[
-                SizedBox(
-                  height: AppSpacing.categoryChipHeight,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
+              _buildTopPicksHeader(),
+              const SizedBox(height: AppSpacing.medium),
+              if (topPicksError != null && currentTopPicks.isEmpty) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.large,
+                    vertical: AppSpacing.medium,
+                  ),
+                  margin: const EdgeInsets.only(bottom: AppSpacing.small),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.9),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppColors.border.withValues(alpha: 0.75),
+                    ),
+                  ),
+                  child: Row(
                     children: [
-                      for (final mode in HomeFeedMode.values)
-                        Padding(
-                          padding: const EdgeInsets.only(
-                            right: AppSpacing.large,
-                          ),
-                          child: _FeedModeChip(
-                            title: mode.chipLabel,
-                            selected: _feedMode == mode,
-                            onTap: () async {
-                              if (mode == HomeFeedMode.personalized) {
-                                final t = await _sessionHelper.ensureSession();
-                                if (!mounted) return;
-                                if (t == null) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Sign in for personalized recommendations.',
-                                      ),
-                                      backgroundColor: AppColors.error,
-                                    ),
-                                  );
-                                  return;
-                                }
-                              }
-                              if (_feedMode == mode) return;
-                              setState(() {
-                                _feedMode = mode;
-                                _isFiltering = true;
-                              });
-                              await _loadProductsPage(0);
-                            },
-                          ),
+                      Expanded(
+                        child: Text(
+                          topPicksError,
+                          style: AppTextStyles.bodySecondary,
                         ),
+                      ),
+                      TextButton(
+                        onPressed:
+                            () => _selectTopPicksTab(
+                              _selectedTopPicksTab,
+                              forceRefresh: true,
+                            ),
+                        child: const Text('Retry'),
+                      ),
                     ],
                   ),
                 ),
-                const SizedBox(height: AppSpacing.large),
-                const SizedBox(
-                  width: double.infinity,
-                  child: HomeHeroCarousel(),
-                ),
-                const SizedBox(height: AppSpacing.large),
               ],
-              Text(_feedMode.topStripTitle, style: AppTextStyles.heading2),
-              const SizedBox(height: AppSpacing.large),
               SizedBox(
-                height: 240,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: top10Products.length,
-                  separatorBuilder:
-                      (_, __) => const SizedBox(width: AppSpacing.xLarge),
-                  itemBuilder: (context, index) {
-                    final product = top10Products[index];
-                    return TopProductList(product: product, rank: index + 1);
-                  },
-                ),
+                height: 170,
+                child:
+                    _isTopPicksLoading && currentTopPicks.isEmpty
+                        ? ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: 10,
+                          separatorBuilder:
+                              (_, __) => const SizedBox(width: AppSpacing.xLarge),
+                          itemBuilder:
+                              (context, index) => const TopProductCardSkeleton(),
+                        )
+                        : ListView.separated(
+                          controller: _topPicksScrollController,
+                          scrollDirection: Axis.horizontal,
+                          itemCount: currentTopPicks.length,
+                          separatorBuilder:
+                              (_, __) => const SizedBox(width: AppSpacing.xLarge),
+                          itemBuilder: (context, index) {
+                            final product = currentTopPicks[index];
+                            return TopProductList(
+                              product: product,
+                              rank: index + 1,
+                            );
+                          },
+                        ),
               ),
-              const SizedBox(height: AppSpacing.xxLarge),
-              SizedBox(
-                height: AppSpacing.categoryChipHeight,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: [
-                    _CategoryChip(
-                      title: 'All',
-                      selected: _selectedCategoryIndex == -1,
-                      onTap: () async {
-                        setState(() {
-                          _selectedCategoryIndex = -1;
-                          _selectedSubCategoryIndex = -1;
-                          _subTags = [];
-                          _activeCategoryPathPrefix = null;
-                          _isFiltering = true;
-                        });
-                        await _loadProductsPage(0);
-                      },
+              if (!_isTopPicksLoading && currentTopPicks.isEmpty) ...[
+                const SizedBox(height: AppSpacing.small),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.large,
+                    vertical: AppSpacing.medium,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.82),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppColors.border.withValues(alpha: 0.75),
                     ),
-                    ..._tags.asMap().entries.map<Widget>((entry) {
-                      final index = entry.key;
-                      final tag = entry.value;
+                  ),
+                  child: Text(
+                    'No products in this feed right now.',
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.bodySecondary,
+                  ),
+                ),
+              ],
+              const SizedBox(height: AppSpacing.medium),
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                decoration: BoxDecoration(
+                  color: AppColors.surface.withValues(alpha: 0.9),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.border.withValues(alpha: 0.7)),
+                ),
+                child: SizedBox(
+                  height: AppSpacing.categoryChipHeight,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _tags.length + 1,
+                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    itemBuilder: (context, i) {
+                      if (i == 0) {
+                        return _CategoryChip(
+                          title: 'All',
+                          selected: _selectedCategoryIndex == -1,
+                          onTap: () async {
+                            setState(() {
+                              _selectedCategoryIndex = -1;
+                              _selectedSubCategoryIndex = -1;
+                              _subTags = [];
+                              _activeCategoryPathPrefix = null;
+                              _isFiltering = true;
+                            });
+                            await _loadProductsPage(0);
+                          },
+                        );
+                      }
+                      final index = i - 1;
+                      final tag = _tags[index];
                       return _CategoryChip(
                         title: tag.name,
                         selected: index == _selectedCategoryIndex,
                         onTap: () => _onRootCategoryTap(tag, index),
                       );
-                    }),
-                  ],
+                    },
+                  ),
                 ),
               ),
               if (_selectedCategoryIndex != -1) ...[
@@ -780,28 +1000,40 @@ class _HomePageState extends State<HomePage> {
                     ),
                   )
                 else if (_subTags.isNotEmpty)
-                  SizedBox(
-                    height: AppSpacing.categoryChipHeight,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      children: [
-                        _CategoryChip(
-                          title: 'All',
-                          selected: _selectedSubCategoryIndex == -1,
-                          isSubCategory: true,
-                          onTap: () async {
-                            final rootTag = _tags[_selectedCategoryIndex];
-                            setState(() {
-                              _selectedSubCategoryIndex = -1;
-                              _activeCategoryPathPrefix = rootTag.categoryPath;
-                              _isFiltering = true;
-                            });
-                            await _loadProductsPage(0);
-                          },
-                        ),
-                        ..._subTags.asMap().entries.map<Widget>((entry) {
-                          final subIndex = entry.key;
-                          final subTag = entry.value;
+                  Container(
+                    padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface.withValues(alpha: 0.88),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: AppColors.border.withValues(alpha: 0.75),
+                      ),
+                    ),
+                    child: SizedBox(
+                      height: AppSpacing.categoryChipHeight,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _subTags.length + 1,
+                        separatorBuilder: (_, __) => const SizedBox(width: 8),
+                        itemBuilder: (context, i) {
+                          if (i == 0) {
+                            return _CategoryChip(
+                              title: 'All',
+                              selected: _selectedSubCategoryIndex == -1,
+                              isSubCategory: true,
+                              onTap: () async {
+                                final rootTag = _tags[_selectedCategoryIndex];
+                                setState(() {
+                                  _selectedSubCategoryIndex = -1;
+                                  _activeCategoryPathPrefix = rootTag.categoryPath;
+                                  _isFiltering = true;
+                                });
+                                await _loadProductsPage(0);
+                              },
+                            );
+                          }
+                          final subIndex = i - 1;
+                          final subTag = _subTags[subIndex];
                           return _CategoryChip(
                             title: subTag.name,
                             selected: subIndex == _selectedSubCategoryIndex,
@@ -815,8 +1047,8 @@ class _HomePageState extends State<HomePage> {
                               await _loadProductsPage(0);
                             },
                           );
-                        }),
-                      ],
+                        },
+                      ),
                     ),
                   ),
               ],
@@ -831,7 +1063,7 @@ class _HomePageState extends State<HomePage> {
                           crossAxisCount: 2,
                           crossAxisSpacing: AppSpacing.xLarge,
                           mainAxisSpacing: AppSpacing.xLarge,
-                          childAspectRatio: 0.6,
+                          childAspectRatio: 0.60,
                         ),
                     itemCount: 4,
                     itemBuilder:
@@ -858,7 +1090,7 @@ class _HomePageState extends State<HomePage> {
                               crossAxisCount: 2,
                               crossAxisSpacing: AppSpacing.xLarge,
                               mainAxisSpacing: AppSpacing.xLarge,
-                              childAspectRatio: 0.6,
+                              childAspectRatio: 0.60,
                             ),
                         itemCount: _filteredProducts.length,
                         itemBuilder: (context, index) {
@@ -871,9 +1103,11 @@ class _HomePageState extends State<HomePage> {
                             imageUrl: product.imageURL,
                             title: product.name,
                             category: product.tag.name,
+                            categoryPath: product.tag.categoryPath,
                             rating: product.averageRating ?? 0.0,
                             desc: product.description ?? '',
                             isFavorite: product.isLiked ?? false,
+                            loadReviewCount: true,
                             onTap: () async {
                               final updatedProduct =
                                   await Navigator.push<ProductDto>(
@@ -898,9 +1132,10 @@ class _HomePageState extends State<HomePage> {
                               }
                             },
                             onFavoriteTap: () async {
+                              final messenger = ScaffoldMessenger.of(context);
                               final user = FirebaseAuth.instance.currentUser;
                               if (user == null) {
-                                ScaffoldMessenger.of(context).showSnackBar(
+                                messenger.showSnackBar(
                                   const SnackBar(
                                     content: Text(
                                       'Please login to like products',
@@ -952,7 +1187,7 @@ class _HomePageState extends State<HomePage> {
                                 if (mounted) {
                                   final errorMessage =
                                       ErrorHandler.getUserFriendlyMessage(e);
-                                  ScaffoldMessenger.of(context).showSnackBar(
+                                  messenger.showSnackBar(
                                     SnackBar(
                                       content: Text(errorMessage),
                                       backgroundColor: AppColors.error,
@@ -990,36 +1225,6 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-/// Feed kaynağı (Discover / Trending / …) — sadece "All" kategorideyken.
-class _FeedModeChip extends StatelessWidget {
-  final String title;
-  final bool selected;
-  final VoidCallback? onTap;
-
-  const _FeedModeChip({required this.title, this.selected = false, this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final decoration = AppChipStyles.categoryChipDecoration(selected: selected);
-    final textStyle = AppChipStyles.categoryChipText(selected: selected);
-
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.large),
-        alignment: Alignment.center,
-        decoration: decoration,
-        child: Text(
-          title,
-          style: textStyle,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ),
-    );
-  }
-}
-
 /// CATEGORY CHIP
 class _CategoryChip extends StatelessWidget {
   final String title;
@@ -1049,20 +1254,19 @@ class _CategoryChip extends StatelessWidget {
     final horizontalPadding =
         isSubCategory ? AppSpacing.large : AppSpacing.xLarge;
 
-    return Padding(
-      padding: const EdgeInsets.only(right: AppSpacing.large),
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-          alignment: Alignment.center,
-          decoration: decoration,
-          child: Text(
-            title,
-            style: textStyle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+        alignment: Alignment.center,
+        decoration: decoration,
+        child: Text(
+          title,
+          style: textStyle,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
       ),
     );

@@ -20,14 +20,14 @@ class SkeletonLoader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Shimmer.fromColors(
-      baseColor: AppColors.textSecondary.withOpacity(0.1),
-      highlightColor: AppColors.textSecondary.withOpacity(0.3),
+      baseColor: AppColors.textSecondary.withValues(alpha: 0.1),
+      highlightColor: AppColors.textSecondary.withValues(alpha: 0.3),
       period: const Duration(milliseconds: 1500),
       child: Container(
         width: width,
         height: height,
         decoration: BoxDecoration(
-          color: AppColors.textSecondary.withOpacity(0.2),
+          color: AppColors.textSecondary.withValues(alpha: 0.2),
           borderRadius: borderRadius ?? BorderRadius.circular(8),
         ),
       ),
@@ -138,39 +138,32 @@ class TopProductCardSkeleton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: 180,
-      height: 240,
+      height: double.infinity,
       decoration: BoxDecoration(
         color: AppColors.primary.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Stack(
+        fit: StackFit.expand,
         children: [
-          // Image skeleton
-          Padding(
-            padding: const EdgeInsets.all(AppSpacing.medium),
-            child: SkeletonLoader(
-              width: double.infinity,
-              height: 120,
-              borderRadius: AppDecorations.cardRadius,
+          Align(
+            alignment: Alignment.center,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: SkeletonLoader(
+                width: double.infinity,
+                height: 154,
+                borderRadius: AppDecorations.cardRadius,
+              ),
             ),
           ),
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SkeletonLoader(
-                  width: 100,
-                  height: 16,
-                ),
-                const SizedBox(height: 4),
-                SkeletonLoader(
-                  width: 60,
-                  height: 12,
-                ),
-              ],
+          const Positioned(
+            top: 8,
+            left: 8,
+            child: SkeletonLoader(
+              width: 32,
+              height: 32,
+              borderRadius: BorderRadius.all(Radius.circular(16)),
             ),
           ),
         ],

@@ -16,6 +16,8 @@ class ReviewCard extends StatelessWidget {
   final bool showChatIcon;
   final VoidCallback? onChatTap;
   final VoidCallback? onReportTap;
+  final bool isCurrentUser;
+  final String? reviewDateLabel;
 
   const ReviewCard({
     super.key,
@@ -31,6 +33,8 @@ class ReviewCard extends StatelessWidget {
     this.showChatIcon = false,
     this.onChatTap,
     this.onReportTap,
+    this.isCurrentUser = false,
+    this.reviewDateLabel,
   });
 
   @override
@@ -50,25 +54,46 @@ class ReviewCard extends StatelessWidget {
           children: [
             /// USER + TAG
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                GestureDetector(
-                  onTap: onUsernameTap,
-                  child: Text(
-                    username,
-                    style: AppTextStyles.bodyBold.copyWith(
-                      decoration: onUsernameTap != null
-                          ? TextDecoration.underline
-                          : TextDecoration.none,
-                      decorationColor: AppColors.textPrimary,
-                    ),
+                Expanded(
+                  child: Row(
+                    children: [
+                      GestureDetector(
+                        onTap: onUsernameTap,
+                        child: Text(
+                          username,
+                          style: AppTextStyles.body.copyWith(
+                            color:
+                                isCurrentUser
+                                    ? AppColors.error
+                                    : AppColors.textPrimary,
+                            fontWeight: FontWeight.w600,
+                            decoration: TextDecoration.none,
+                          ),
+                        ),
+                      ),
+                      if (isSponsored)
+                        Text(
+                          "  Sponsored",
+                          style: AppTextStyles.chip.copyWith(
+                            color: AppColors.primary,
+                            decoration: TextDecoration.none,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
-                if (isSponsored)
-                  Text(
-                    "  Sponsored",
-                    style: AppTextStyles.chip.copyWith(
-                      color: AppColors.primary,
-                      decoration: TextDecoration.none,
+                if (reviewDateLabel != null && reviewDateLabel!.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(left: AppSpacing.small),
+                    child: Text(
+                      reviewDateLabel!,
+                      style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.textSecondary,
+                        fontWeight: FontWeight.w500,
+                        decoration: TextDecoration.none,
+                      ),
                     ),
                   ),
               ],
@@ -101,7 +126,10 @@ class ReviewCard extends StatelessWidget {
             /// TEXT - Max 3 lines with ellipsis
             Text(
               content,
-              style: AppTextStyles.heading3.copyWith(
+              style: AppTextStyles.body.copyWith(
+                color: AppColors.textSecondary,
+                fontSize: 15,
+                height: 1.35,
                 decoration: TextDecoration.none,
               ),
               maxLines: 3,
@@ -109,70 +137,100 @@ class ReviewCard extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.medium),
 
-            /// ACTION ROW: like, report, chat + detail arrow
+            /// ACTION ROW: grouped actions + detail arrow
             Row(
               children: [
-                // Like
-                GestureDetector(
-                  onTap: onLikeTap,
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.small,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.background,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppColors.border.withValues(alpha: 0.8),
+                    ),
+                  ),
                   child: Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
-                        isLiked ? Icons.thumb_up : Icons.thumb_up_alt_outlined,
-                        size: 22,
-                        color: isLiked ? AppColors.primary : AppColors.textPrimary,
+                      GestureDetector(
+                        onTap: onLikeTap,
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.thumb_up_alt_outlined,
+                              size: 18,
+                              color:
+                                  isLiked
+                                      ? AppColors.primary
+                                      : AppColors.textSecondary,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              likeCount.toString(),
+                              style: AppTextStyles.bodySmall.copyWith(
+                                color:
+                                    isLiked
+                                        ? AppColors.primary
+                                        : AppColors.textSecondary,
+                                fontWeight: FontWeight.w600,
+                                decoration: TextDecoration.none,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      if (likeCount > 0) ...[
-                        const SizedBox(width: 4),
-                        Text(
-                          likeCount.toString(),
-                          style: AppTextStyles.bodySmall.copyWith(
-                            decoration: TextDecoration.none,
-                            color: AppColors.textPrimary,
+                      if (onReportTap != null) ...[
+                        const SizedBox(width: 10),
+                        Container(
+                          width: 1,
+                          height: 14,
+                          color: AppColors.border,
+                        ),
+                        const SizedBox(width: 10),
+                        GestureDetector(
+                          onTap: onReportTap,
+                          behavior: HitTestBehavior.opaque,
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.outlined_flag,
+                                size: 18,
+                                color: AppColors.textSecondary,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      if (showChatIcon) ...[
+                        const SizedBox(width: 10),
+                        Container(
+                          width: 1,
+                          height: 14,
+                          color: AppColors.border,
+                        ),
+                        const SizedBox(width: 10),
+                        GestureDetector(
+                          onTap: onChatTap,
+                          behavior: HitTestBehavior.opaque,
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.chat_bubble_outline,
+                                size: 18,
+                                color: AppColors.textSecondary,
+                              ),
+                            ],
                           ),
                         ),
                       ],
                     ],
                   ),
                 ),
-                const SizedBox(width: 16),
-                if (onReportTap != null)
-                  GestureDetector(
-                    onTap: onReportTap,
-                    behavior: HitTestBehavior.opaque,
-                    child: const Icon(
-                      Icons.flag_outlined,
-                      size: 22,
-                      color: AppColors.primary,
-                    ),
-                  ),
-                if (onReportTap != null) const SizedBox(width: 16),
-                // Chat
-                if (showChatIcon)
-                  InkWell(
-                    onTap: onChatTap,
-                    borderRadius: BorderRadius.circular(16),
-                    child: Container(
-                      padding: const EdgeInsets.all(2),
-                      decoration: BoxDecoration(
-                        color: AppColors.background,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.06),
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: const Icon(
-                        Icons.chat_bubble_outline,
-                        size: 22,
-                        color: AppColors.primary,
-                      ),
-                    ),
-                  ),
-                const Spacer(),
+                const SizedBox(width: AppSpacing.small),
                 // Detail arrow (bottom-right)
                 const Icon(
                   Icons.arrow_forward_ios,

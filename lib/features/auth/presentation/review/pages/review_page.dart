@@ -15,6 +15,7 @@ import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/utils/product_rating_display.dart';
 import '../../../../../core/widgets/new_product_badge.dart';
 import '../../../../../core/cache/product_memory_cache.dart';
+import '../../../../../core/cache/review_memory_cache.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/models/review_dto.dart';
@@ -59,8 +60,144 @@ class _ReviewPageState extends State<ReviewPage> {
   String? _errorMessage;
   int _likeCount = 0;
   bool _hasLoadedLikeCount = false;
+  bool _isRatingExpanded = false;
+  bool _isDescriptionExpanded = false;
+  static const EdgeInsets _contentHorizontalPadding = EdgeInsets.symmetric(
+    horizontal: AppSpacing.xxLarge,
+  );
 
   bool get _hasLoadedReviewSummary => !_isLoadingReviews && _hasLoadedLikeCount;
+
+  String _formatReviewRelativeDate(String raw) {
+    final parsed = DateTime.tryParse(raw);
+    if (parsed == null) return '';
+    final now = DateTime.now();
+    var diff = now.difference(parsed.toLocal());
+    if (diff.isNegative) diff = Duration.zero;
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inHours < 1) {
+      final m = diff.inMinutes;
+      return '$m minute${m == 1 ? '' : 's'} ago';
+    }
+    if (diff.inDays < 1) {
+      final h = diff.inHours;
+      return '$h hour${h == 1 ? '' : 's'} ago';
+    }
+    if (diff.inDays < 30) {
+      final d = diff.inDays;
+      return '$d day${d == 1 ? '' : 's'} ago';
+    }
+    final month = (diff.inDays / 30).floor();
+    if (month < 12) return '$month month${month == 1 ? '' : 's'} ago';
+    final year = (diff.inDays / 365).floor();
+    return '$year year${year == 1 ? '' : 's'} ago';
+  }
+
+  Map<int, int> _ratingCounts() {
+    final counts = <int, int>{5: 0, 4: 0, 3: 0, 2: 0, 1: 0};
+    for (final review in _reviews) {
+      final r = review.rating.clamp(1, 5);
+      counts[r] = (counts[r] ?? 0) + 1;
+    }
+    return counts;
+  }
+
+  List<String> _productTagHierarchy() {
+    final path = (_currentProduct.tag.categoryPath ?? '').trim();
+    final fromPath =
+        path
+            .split(RegExp(r'[>/.]'))
+            .map((s) => s.trim())
+            .where((s) => s.isNotEmpty)
+            .toList();
+
+    final fallbackTag = _currentProduct.tag.name.trim();
+    final tags = <String>[];
+    for (final t in fromPath) {
+      if (!tags.any((e) => e.toLowerCase() == t.toLowerCase())) {
+        tags.add(t);
+      }
+    }
+    if (fallbackTag.isNotEmpty &&
+        !tags.any((e) => e.toLowerCase() == fallbackTag.toLowerCase())) {
+      tags.add(fallbackTag);
+    }
+    return tags;
+  }
+
+  bool _shouldShowDescriptionToggle({
+    required String text,
+    required TextStyle style,
+    required double maxWidth,
+  }) {
+    if (text.trim().isEmpty) return false;
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      maxLines: 3,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: maxWidth);
+    return painter.didExceedMaxLines;
+  }
+
+  Widget _buildRatingDistribution() {
+    if (_reviews.isEmpty) return const SizedBox.shrink();
+    final counts = _ratingCounts();
+    final total = _reviews.length;
+    return Column(
+      children: [5, 4, 3, 2, 1].map((star) {
+        final count = counts[star] ?? 0;
+        final ratio = total == 0 ? 0.0 : count / total;
+        return Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 16,
+                child: Text(
+                  '$star',
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const Icon(
+                Icons.star_border,
+                size: 14,
+                color: AppColors.textSecondary,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(
+                    minHeight: 4,
+                    value: ratio,
+                    backgroundColor: AppColors.border.withValues(alpha: 0.45),
+                    valueColor: const AlwaysStoppedAnimation<Color>(
+                      AppColors.primary,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              SizedBox(
+                width: 14,
+                child: Text(
+                  '$count',
+                  textAlign: TextAlign.right,
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
 
   @override
   void initState() {
@@ -68,7 +205,8 @@ class _ReviewPageState extends State<ReviewPage> {
     if (widget.product != null) {
       _currentProduct = widget.product!;
       ProductMemoryCache.instance.remember(_currentProduct);
-      _loadReviews();
+      _hydrateReviewsFromCache();
+      _loadReviews(background: _reviews.isNotEmpty);
       _refreshProductData();
       return;
     }
@@ -77,15 +215,25 @@ class _ReviewPageState extends State<ReviewPage> {
     if (warm != null) {
       _currentProduct = warm;
       _isLoadingProduct = false;
-      _loadReviews();
+      _hydrateReviewsFromCache();
+      _loadReviews(background: _reviews.isNotEmpty);
       unawaited(_refreshProductData());
       return;
     }
     // productId ile açıldı: placeholder ile hemen göster, arka planda ürünü yükle
     _currentProduct = _placeholderProduct(pid, widget.productName ?? '');
     _isLoadingProduct = true;
-    _loadReviews();
+    _hydrateReviewsFromCache();
+    _loadReviews(background: _reviews.isNotEmpty);
     _loadProductById();
+  }
+
+  void _hydrateReviewsFromCache() {
+    final cached = ReviewMemoryCache.instance.peek(_currentProduct.id);
+    if (cached == null || cached.isEmpty) return;
+    _reviews = cached;
+    _isLoadingReviews = false;
+    _errorMessage = null;
   }
 
   ProductDto _placeholderProduct(String id, String name) {
@@ -272,11 +420,15 @@ class _ReviewPageState extends State<ReviewPage> {
     } catch (_) {}
   }
 
-  Future<void> _loadReviews() async {
-    setState(() {
-      _isLoadingReviews = true;
+  Future<void> _loadReviews({bool background = false}) async {
+    if (!background) {
+      setState(() {
+        _isLoadingReviews = true;
+        _errorMessage = null;
+      });
+    } else {
       _errorMessage = null;
-    });
+    }
 
     try {
       final user = FirebaseAuth.instance.currentUser;
@@ -287,6 +439,7 @@ class _ReviewPageState extends State<ReviewPage> {
             _currentProduct.id,
             firebaseIdToken: null,
           );
+          ReviewMemoryCache.instance.remember(_currentProduct.id, reviews);
           setState(() {
             _reviews = reviews;
             _isLoadingReviews = false;
@@ -320,12 +473,14 @@ class _ReviewPageState extends State<ReviewPage> {
         _currentProduct.id,
         firebaseIdToken: firebaseIdToken,
       );
+      ReviewMemoryCache.instance.remember(_currentProduct.id, reviews);
 
       setState(() {
         _reviews = reviews;
         _isLoadingReviews = false;
       });
     } catch (e) {
+      if (background && _reviews.isNotEmpty) return;
       setState(() {
         _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
         _isLoadingReviews = false;
@@ -472,6 +627,61 @@ class _ReviewPageState extends State<ReviewPage> {
     }
   }
 
+  void _openImagePreview() {
+    final imageUrl = _currentProduct.imageURL;
+    if (imageUrl.trim().isEmpty) return;
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (ctx) {
+        return Scaffold(
+          backgroundColor: Colors.transparent,
+          body: SafeArea(
+            child: Stack(
+              children: [
+                Center(
+                  child: Hero(
+                    tag:
+                        'product_image_${_currentProduct.id}_${_currentProduct.imageURL}',
+                    child: InteractiveViewer(
+                      panEnabled: true,
+                      clipBehavior: Clip.none,
+                      minScale: 1,
+                      maxScale: 5,
+                      child: Image.network(
+                        imageUrl,
+                        fit: BoxFit.contain,
+                        errorBuilder:
+                            (context, error, stackTrace) => Container(
+                              width: 240,
+                              height: 240,
+                              color: AppColors.textSecondary.withOpacity(0.1),
+                              child: const Icon(
+                                Icons.image_not_supported,
+                                size: 42,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: IconButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    icon: const Icon(Icons.close, color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -480,80 +690,19 @@ class _ReviewPageState extends State<ReviewPage> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: const IconThemeData(color: AppColors.primary),
-        actions: [
-          IconButton(
-            tooltip: 'Report product',
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            onPressed: _isLoadingProduct ? null : _onReportProductPressed,
-            icon: const Icon(Icons.flag_outlined, color: AppColors.primary),
+        centerTitle: false,
+        toolbarHeight: 62,
+        titleSpacing: 4,
+        title: Text(
+          _currentProduct.name,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: AppTextStyles.bodyBold.copyWith(
+            fontWeight: FontWeight.w700,
+            fontSize: 17,
+            height: 1.1,
           ),
-          IconButton(
-            tooltip: 'Product assistant',
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder:
-                      (_) => ProductAiChatPage(
-                        productId: _currentProduct.id,
-                        productName: _currentProduct.name,
-                      ),
-                ),
-              );
-            },
-            icon: Image.asset(
-              'assets/images/Chatbot.png',
-              width: 26,
-              height: 26,
-              fit: BoxFit.contain,
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: TextButton(
-              style: TextButton.styleFrom(
-                backgroundColor: AppColors.primary.withOpacity(0.06),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(999),
-                ),
-              ),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder:
-                        (_) =>
-                            CompareProductSelectPage(product1: _currentProduct),
-                  ),
-                );
-              },
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: const [
-                  Icon(
-                    Icons.compare_arrows_outlined,
-                    size: 18,
-                    color: AppColors.primary,
-                  ),
-                  SizedBox(width: 6),
-                  Text(
-                    'Compare',
-                    style: TextStyle(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
+        ),
       ),
       body: CustomRefreshIndicator(
         onRefresh: () async {
@@ -561,214 +710,500 @@ class _ReviewPageState extends State<ReviewPage> {
         },
         child: SingleChildScrollView(
           child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.xLarge),
+            padding: const EdgeInsets.only(
+              top: 0,
+              bottom: AppSpacing.xxLarge,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                /// PRODUCT IMAGE SECTION with Hero animation
-                Hero(
-                  tag:
-                      'product_image_${_currentProduct.id}_${_currentProduct.imageURL}',
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: Image.network(
-                      _currentProduct.imageURL,
-                      height: 230,
-                      width: double.infinity,
-                      fit: BoxFit.contain,
-                      alignment: Alignment.center,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
-                          height: 230,
-                          width: double.infinity,
-                          color: AppColors.textSecondary.withOpacity(0.1),
-                          child: const Icon(
-                            Icons.image_not_supported,
-                            color: AppColors.textSecondary,
-                            size: 48,
+                /// HERO PRODUCT CARD
+                Padding(
+                  padding: _contentHorizontalPadding,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(AppSpacing.medium),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: AppColors.border.withValues(alpha: 0.7),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.03),
+                          blurRadius: 12,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Center(
+                          child: GestureDetector(
+                            onTap: _openImagePreview,
+                            child: Hero(
+                              tag:
+                                  'product_image_${_currentProduct.id}_${_currentProduct.imageURL}',
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(14),
+                                child: Image.network(
+                                  _currentProduct.imageURL,
+                                  height: 210,
+                                  width: 210,
+                                  fit: BoxFit.contain,
+                                  alignment: Alignment.center,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return Container(
+                                      height: 210,
+                                      width: 210,
+                                      color: AppColors.textSecondary.withOpacity(
+                                        0.1,
+                                      ),
+                                      child: const Icon(
+                                        Icons.image_not_supported,
+                                        color: AppColors.textSecondary,
+                                        size: 44,
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
                           ),
-                        );
-                      },
+                        ),
+                        const SizedBox(height: AppSpacing.medium),
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children:
+                                _productTagHierarchy().map((tag) {
+                                  return Padding(
+                                    padding: const EdgeInsets.only(right: 6),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 5,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.background,
+                                        borderRadius: BorderRadius.circular(999),
+                                        border: Border.all(
+                                          color: AppColors.border.withValues(
+                                            alpha: 0.9,
+                                          ),
+                                        ),
+                                      ),
+                                      child: Text(
+                                        tag,
+                                        style: AppTextStyles.bodySmall.copyWith(
+                                          color: AppColors.textSecondary,
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 13,
+                                          letterSpacing: 0.1,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.small),
+                        if ((_currentProduct.description ?? '').trim().isEmpty)
+                          Text(
+                            'No product description yet.',
+                            style: AppTextStyles.body.copyWith(
+                              color: AppColors.textSecondary,
+                              height: 1.4,
+                              fontSize: 15,
+                            ),
+                          )
+                        else ...[
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              final descStyle = AppTextStyles.body.copyWith(
+                                color: AppColors.textSecondary,
+                                height: 1.35,
+                                fontSize: 15,
+                              );
+                              final description = _currentProduct.description!;
+                              final canExpand = _shouldShowDescriptionToggle(
+                                text: description,
+                                style: descStyle,
+                                maxWidth: constraints.maxWidth,
+                              );
+
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    description,
+                                    maxLines:
+                                        (_isDescriptionExpanded || !canExpand)
+                                            ? null
+                                            : 3,
+                                    overflow:
+                                        (_isDescriptionExpanded || !canExpand)
+                                            ? TextOverflow.visible
+                                            : TextOverflow.ellipsis,
+                                    textAlign: TextAlign.start,
+                                    style: descStyle,
+                                  ),
+                                  if (canExpand) ...[
+                                    const SizedBox(height: 2),
+                                    Align(
+                                      alignment: Alignment.centerRight,
+                                      child: TextButton(
+                                        onPressed:
+                                            () => setState(
+                                              () =>
+                                                  _isDescriptionExpanded =
+                                                      !_isDescriptionExpanded,
+                                            ),
+                                        style: TextButton.styleFrom(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 4,
+                                            vertical: 0,
+                                          ),
+                                          minimumSize: Size.zero,
+                                          tapTargetSize:
+                                              MaterialTapTargetSize.shrinkWrap,
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              _isDescriptionExpanded
+                                                  ? 'Show less'
+                                                  : 'Read more',
+                                              style: AppTextStyles.bodySmall
+                                                  .copyWith(
+                                                    color:
+                                                        AppColors.textSecondary,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                            ),
+                                            const SizedBox(width: 2),
+                                            Icon(
+                                              _isDescriptionExpanded
+                                                  ? Icons.expand_less_rounded
+                                                  : Icons.expand_more_rounded,
+                                              size: 18,
+                                              color: AppColors.textSecondary,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              );
+                            },
+                          ),
+                        ],
+                        const SizedBox(height: AppSpacing.medium),
+                        Row(
+                          children: [
+                            Expanded(
+                              flex: 4,
+                              child: SizedBox(
+                                height: 48,
+                                child: FilledButton(
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: AppColors.primary,
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                  onPressed: () async {
+                                    final result = await Navigator.push(
+                                      context,
+                                      SlideUpRoute(
+                                        page: AddReviewPage(
+                                          product: _currentProduct,
+                                        ),
+                                      ),
+                                    );
+                                    if (result == true) {
+                                      await Future.wait([
+                                        _loadReviews(),
+                                        _refreshProductData(),
+                                      ]);
+                                    }
+                                  },
+                                  child: const Text('Add a Review'),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.medium),
+                            Expanded(
+                              flex: 1,
+                              child: SizedBox(
+                                height: 48,
+                                child: Align(
+                                  alignment: Alignment.center,
+                                  child: IconButton(
+                                    onPressed: _toggleLike,
+                                    splashRadius: 20,
+                                    icon: Icon(
+                                      _currentProduct.isLiked ?? false
+                                          ? Icons.favorite
+                                          : Icons.favorite_border,
+                                      size: 22,
+                                      color:
+                                          _currentProduct.isLiked ?? false
+                                              ? AppColors.primary
+                                              : AppColors.textSecondary,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: AppSpacing.small),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.favorite,
+                                    size: 14,
+                                    color: AppColors.primary,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '$_likeCount likes',
+                                    style: AppTextStyles.bodySmall.copyWith(
+                                      color: AppColors.textSecondary,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _miniIconAction(
+                                  icon: Icons.flag_outlined,
+                                  onTap:
+                                      _isLoadingProduct
+                                          ? null
+                                          : _onReportProductPressed,
+                                ),
+                                const SizedBox(width: 8),
+                                _miniIconAction(
+                                  icon: Icons.compare_arrows_outlined,
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder:
+                                            (_) => CompareProductSelectPage(
+                                              product1: _currentProduct,
+                                            ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                                const SizedBox(width: 8),
+                                _miniIconAction(
+                                  customIcon: Image.asset(
+                                    'assets/images/Chatbot.png',
+                                    width: 24,
+                                    height: 24,
+                                    fit: BoxFit.contain,
+                                  ),
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder:
+                                            (_) => ProductAiChatPage(
+                                              productId: _currentProduct.id,
+                                              productName: _currentProduct.name,
+                                            ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: AppSpacing.small),
+                        Builder(
+                          builder: (context) {
+                            final rawRating = _currentProduct.averageRating ?? 0.0;
+                            final hasRating = productHasMeaningfulRating(rawRating);
+                            final rating =
+                                (rawRating.isNaN || rawRating.isInfinite)
+                                    ? 0.0
+                                    : rawRating.clamp(0.0, 5.0);
+
+                            if (!hasRating) return const NewProductBadge();
+
+                            return Container(
+                              padding: const EdgeInsets.all(AppSpacing.small),
+                              decoration: BoxDecoration(
+                                color: AppColors.background,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: AppColors.border.withValues(alpha: 0.75),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  InkWell(
+                                    onTap:
+                                        () => setState(
+                                          () =>
+                                              _isRatingExpanded =
+                                                  !_isRatingExpanded,
+                                        ),
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 2,
+                                        horizontal: 2,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          ...List.generate(5, (index) {
+                                            if (rating >= index + 1) {
+                                              return const Icon(
+                                                Icons.star,
+                                                size: 20,
+                                                color: AppColors.primary,
+                                              );
+                                            } else if (rating > index &&
+                                                rating < index + 1) {
+                                              return SizedBox(
+                                                width: 20,
+                                                height: 20,
+                                                child: Stack(
+                                                  children: [
+                                                    const Icon(
+                                                      Icons.star_border,
+                                                      size: 20,
+                                                      color:
+                                                          AppColors.textSecondary,
+                                                    ),
+                                                    ClipRect(
+                                                      child: Align(
+                                                        alignment:
+                                                            Alignment.centerLeft,
+                                                        widthFactor:
+                                                            rating - index,
+                                                        child: const Icon(
+                                                          Icons.star,
+                                                          size: 20,
+                                                          color:
+                                                              AppColors.primary,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              );
+                                            }
+                                            return const Icon(
+                                              Icons.star_border,
+                                              size: 20,
+                                              color: AppColors.textSecondary,
+                                            );
+                                          }),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            rating.toStringAsFixed(1),
+                                            style: AppTextStyles.bodyBold
+                                                .copyWith(
+                                                  color: AppColors.textPrimary,
+                                                  fontSize: 16,
+                                                ),
+                                          ),
+                                          const Spacer(),
+                                          Icon(
+                                            _isRatingExpanded
+                                                ? Icons.keyboard_arrow_up_rounded
+                                                : Icons
+                                                    .keyboard_arrow_down_rounded,
+                                            color: AppColors.textSecondary,
+                                            size: 22,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  AnimatedCrossFade(
+                                    duration: const Duration(milliseconds: 220),
+                                    firstChild: const SizedBox.shrink(),
+                                    secondChild: Padding(
+                                      padding: const EdgeInsets.only(top: 6),
+                                      child: _buildRatingDistribution(),
+                                    ),
+                                    crossFadeState:
+                                        _isRatingExpanded
+                                            ? CrossFadeState.showSecond
+                                            : CrossFadeState.showFirst,
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                const SizedBox(height: AppSpacing.xLarge),
-
-                /// TITLE + FAVORITE
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _currentProduct.name,
-                        style: AppTextStyles.heading1,
-                        maxLines: 2,
-                      ),
-                    ),
-                    GestureDetector(
-                      onTap: _toggleLike,
-                      child: Icon(
-                        _currentProduct.isLiked ?? false
-                            ? Icons.favorite
-                            : Icons.favorite_border,
-                        color: AppColors.primary,
-                        size: 30,
-                      ),
-                    ),
-                  ],
-                ),
-                Text(
-                  _currentProduct.tag.name.toUpperCase(),
-                  style: AppTextStyles.productCardCategory,
-                ),
-                const SizedBox(height: AppSpacing.xLarge),
-
-                /// Rating / “New” rozeti + özet satırı
-                Builder(
-                  builder: (context) {
-                    final rawRating = _currentProduct.averageRating ?? 0.0;
-                    final hasRating = productHasMeaningfulRating(rawRating);
-                    final rating =
-                        (rawRating.isNaN || rawRating.isInfinite)
-                            ? 0.0
-                            : rawRating.clamp(0.0, 5.0);
-
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (hasRating)
-                          Row(
-                            children: [
-                              ...List.generate(5, (index) {
-                                if (rating >= index + 1) {
-                                  return const Icon(
-                                    Icons.star,
-                                    size: 24,
-                                    color: AppColors.primary,
-                                  );
-                                } else if (rating > index &&
-                                    rating < index + 1) {
-                                  return SizedBox(
-                                    width: 24,
-                                    height: 24,
-                                    child: Stack(
-                                      children: [
-                                        const Icon(
-                                          Icons.star_border,
-                                          size: 24,
-                                          color: AppColors.textSecondary,
-                                        ),
-                                        ClipRect(
-                                          child: Align(
-                                            alignment: Alignment.centerLeft,
-                                            widthFactor: rating - index,
-                                            child: const Icon(
-                                              Icons.star,
-                                              size: 24,
-                                              color: AppColors.primary,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                }
-                                return const Icon(
-                                  Icons.star_border,
-                                  size: 24,
-                                  color: AppColors.textSecondary,
-                                );
-                              }),
-                              const SizedBox(width: 8),
-                              Text(
-                                rating.toStringAsFixed(1),
-                                style: AppTextStyles.bodyBold.copyWith(
-                                  color: AppColors.textPrimary,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ],
-                          )
-                        else
-                          const NewProductBadge(),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            if (!_hasLoadedReviewSummary) ...[
-                              const SkeletonLoader(width: 120, height: 12),
-                              const SizedBox(width: 16),
-                            ] else if (_reviews.isNotEmpty) ...[
-                              Icon(
-                                Icons.reviews_outlined,
-                                size: 14,
-                                color: AppColors.textSecondary,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                '${_reviews.length} review${_reviews.length != 1 ? 's' : ''}',
-                                style: AppTextStyles.bodySmall.copyWith(
-                                  color: AppColors.textSecondary,
-                                ),
-                              ),
-                              const SizedBox(width: 16),
-                            ],
-                            Icon(
-                              Icons.favorite,
-                              size: 14,
-                              color: AppColors.primary,
-                            ),
-                            const SizedBox(width: 4),
-                            if (!_hasLoadedReviewSummary) ...[
-                              const SkeletonLoader(width: 50, height: 12),
-                            ] else ...[
-                              Text(
-                                '$_likeCount likes',
-                                style: AppTextStyles.bodySmall.copyWith(
-                                  color: AppColors.textSecondary,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ],
-                    );
-                  },
-                ),
-
-                /// DESCRIPTION
-                Text(
-                  _currentProduct.description ?? "",
-                  style: AppTextStyles.bodySmall,
-                ),
-                const SizedBox(height: AppSpacing.xLarge),
+                const SizedBox(height: AppSpacing.large),
 
                 /// REVIEWS TITLE
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text("Reviews", style: AppTextStyles.heading2),
-                    if (_reviews.isNotEmpty)
-                      Text(
-                        '${_reviews.length} review${_reviews.length > 1 ? 's' : ''}',
-                        style: AppTextStyles.bodySecondary,
-                      ),
-                  ],
+                Padding(
+                  padding: _contentHorizontalPadding,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text("Reviews", style: AppTextStyles.heading2),
+                      if (_reviews.isNotEmpty)
+                        Text(
+                          '${_reviews.length} review${_reviews.length > 1 ? 's' : ''}',
+                          style: AppTextStyles.bodySecondary.copyWith(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: AppSpacing.medium),
+                const SizedBox(height: AppSpacing.xLarge),
 
                 /// REVIEWS LIST
                 if (_isLoadingReviews)
                   ...List.generate(
                     3,
                     (index) => Padding(
-                      padding: const EdgeInsets.only(bottom: AppSpacing.large),
-                      child: ReviewCardSkeleton(),
+                      padding: const EdgeInsets.only(
+                        left: AppSpacing.xxLarge,
+                        right: AppSpacing.xxLarge,
+                        bottom: AppSpacing.large,
+                      ),
+                      child: const ReviewCardSkeleton(),
                     ),
                   )
                 else if (_errorMessage != null)
                   Center(
                     child: Padding(
-                      padding: const EdgeInsets.all(AppSpacing.xxLarge),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.xxLarge,
+                        vertical: AppSpacing.xxLarge,
+                      ),
                       child: Column(
                         children: [
                           Text(
@@ -788,7 +1223,10 @@ class _ReviewPageState extends State<ReviewPage> {
                 else if (_reviews.isEmpty)
                   Center(
                     child: Padding(
-                      padding: const EdgeInsets.all(AppSpacing.xxLarge),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.xxLarge,
+                        vertical: AppSpacing.xxLarge,
+                      ),
                       child: Text(
                         'No reviews yet. Be the first to review!',
                         style: AppTextStyles.bodySecondary,
@@ -799,14 +1237,24 @@ class _ReviewPageState extends State<ReviewPage> {
                 else
                   ..._reviews.map(
                     (review) => Padding(
-                      padding: const EdgeInsets.only(bottom: AppSpacing.large),
+                      padding: const EdgeInsets.only(
+                        left: AppSpacing.xxLarge,
+                        right: AppSpacing.xxLarge,
+                        bottom: AppSpacing.large,
+                      ),
                       child: ReviewCard(
                         username: '@${review.ownerUserName}',
                         content: review.description ?? review.title,
                         rating: review.rating,
+                        reviewDateLabel: _formatReviewRelativeDate(
+                          review.createdAt,
+                        ),
                         isSponsored: review.isCollaborative,
                         likeCount: review.likeCount,
                         isLiked: review.isLikedByCurrentUser,
+                        isCurrentUser:
+                            _currentUserId != null &&
+                            review.ownerId.trim() == _currentUserId!.trim(),
                         showChatIcon:
                             _currentUsername != null &&
                             review.ownerUserName.toLowerCase() !=
@@ -992,24 +1440,24 @@ class _ReviewPageState extends State<ReviewPage> {
         ),
       ),
 
-      /// ADD REVIEW BUTTON
-      bottomNavigationBar: Padding(
-        padding: const EdgeInsets.all(AppSpacing.large),
-        child: AppButton(
-          text: "Add a Review",
-          onPressed: () async {
-            final result = await Navigator.push(
-              context,
-              SlideUpRoute(page: AddReviewPage(product: _currentProduct)),
-            );
-            // Eğer review oluşturulduysa, review listesini ve product verilerini (rating dahil) yenile
-            if (result == true) {
-              await Future.wait([_loadReviews(), _refreshProductData()]);
-            }
-          },
-          isLoading: false,
-        ),
+    );
+  }
+
+  Widget _miniIconAction({
+    IconData? icon,
+    Widget? customIcon,
+    required VoidCallback? onTap,
+  }) {
+    return OutlinedButton(
+      onPressed: onTap,
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(44, 42),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+        side: BorderSide(color: AppColors.border.withValues(alpha: 0.9)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
+      child:
+          customIcon ?? Icon(icon, size: 21, color: AppColors.textSecondary),
     );
   }
 }

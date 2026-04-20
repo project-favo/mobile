@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../../../../core/cache/product_memory_cache.dart';
+import '../../../../../core/cache/profile_warm_cache.dart';
 import '../../../../../core/widgets/main_bottom_nav_items.dart';
 import '../../../../../features/activity/presentation/activity_page.dart';
 import '../../../../../core/theme/app_colors.dart';
@@ -18,8 +19,10 @@ import '../../../data/models/tag_dto.dart';
 import '../../../data/repositories/interaction_repository.dart';
 import '../../../data/repositories/product_repository.dart';
 import '../../../data/repositories/review_repository.dart';
+import '../../../data/services/review_prefetch_service.dart';
 import '../../../widgets/product_card.dart';
 import '../../home_page.dart';
+import '../../friend_feed_page.dart';
 import '../../search_page.dart';
 import '../../review/pages/review_detail_page.dart';
 import '../../review/pages/review_page.dart';
@@ -66,6 +69,15 @@ class _ProfilePageState extends State<ProfilePage>
   int _followerCount = 0;
   int _followingCount = 0;
 
+  void _rememberWarmProfile() {
+    if (_user == null) return;
+    ProfileWarmCache.instance.remember(
+      user: _user!,
+      myReviews: _myReviews,
+      wishlist: _wishlistProducts,
+    );
+  }
+
   Route _noAnimationRoute(Widget page) {
     return PageRouteBuilder(
       pageBuilder: (_, __, ___) => page,
@@ -84,7 +96,13 @@ class _ProfilePageState extends State<ProfilePage>
       showUnselectedLabels: false,
       onTap: (index) {
         if (index == 4) return;
-        if (index == 1) return;
+        if (index == 1) {
+          Navigator.pushReplacement(
+            context,
+            _noAnimationRoute(const FriendFeedPage()),
+          );
+          return;
+        }
         if (index == 0) {
           Navigator.pushReplacement(
             context,
@@ -115,9 +133,25 @@ class _ProfilePageState extends State<ProfilePage>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _loadUserData();
-    // Profil açılır açılmaz My Reviews'ı yükle (ilk sekme)
-    _loadMyReviews();
+    final warm = ProfileWarmCache.instance.peek();
+    if (warm != null) {
+      _user = warm.user;
+      _myReviews = List<ReviewDto>.from(warm.myReviews);
+      _wishlistProducts = List<ProductDto>.from(warm.wishlist);
+      _wishlistProductsOriginalOrder = List<ProductDto>.from(warm.wishlist);
+      _isLoading = false;
+      _isLoadingMyReviews = false;
+      _isLoadingWishlist = false;
+      _sortMyReviews();
+      _sortWishlist();
+      unawaited(_loadUserData(background: true));
+      unawaited(_loadMyReviews(background: true));
+      unawaited(_loadWishlist(background: true));
+    } else {
+      _loadUserData();
+      // Profil açılır açılmaz My Reviews'ı yükle (ilk sekme)
+      _loadMyReviews();
+    }
     _tabController.addListener(() {
       if (_tabController.index == 1 &&
           _wishlistProducts.isEmpty &&
@@ -128,11 +162,15 @@ class _ProfilePageState extends State<ProfilePage>
     });
   }
 
-  Future<void> _loadMyReviews() async {
-    setState(() {
-      _isLoadingMyReviews = true;
+  Future<void> _loadMyReviews({bool background = false}) async {
+    if (!background) {
+      setState(() {
+        _isLoadingMyReviews = true;
+        _myReviewsError = null;
+      });
+    } else {
       _myReviewsError = null;
-    });
+    }
 
     try {
       final token = await _sessionHelper.ensureSession();
@@ -147,11 +185,16 @@ class _ProfilePageState extends State<ProfilePage>
           _isLoadingMyReviews = false;
           _reviewProductHints.clear();
         });
+        _rememberWarmProfile();
         _sortMyReviews();
         unawaited(_prefetchProductsForReviews(reviews));
       }
     } catch (e) {
       if (mounted) {
+        if (background && _myReviews.isNotEmpty) {
+          _isLoadingMyReviews = false;
+          return;
+        }
         setState(() {
           _myReviewsError = ErrorHandler.getUserFriendlyMessage(e);
           _isLoadingMyReviews = false;
@@ -239,7 +282,7 @@ class _ProfilePageState extends State<ProfilePage>
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(AppSpacing.xLarge),
-          child: Text('Henüz yorum yok', style: AppTextStyles.bodySecondary),
+          child: Text('No reviews yet', style: AppTextStyles.bodySecondary),
         ),
       );
     }
@@ -275,11 +318,15 @@ class _ProfilePageState extends State<ProfilePage>
     );
   }
 
-  Future<void> _loadUserData() async {
-    setState(() {
-      _isLoading = true;
+  Future<void> _loadUserData({bool background = false}) async {
+    if (!background) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    } else {
       _errorMessage = null;
-    });
+    }
 
     try {
       await _authService.syncFirebaseUserAndRefreshIdToken();
@@ -296,10 +343,15 @@ class _ProfilePageState extends State<ProfilePage>
           _followingCount = 0;
         }
       });
+      _rememberWarmProfile();
       if (user.id.isNotEmpty) {
         unawaited(_loadFollowCounts(user.id));
       }
     } catch (e) {
+      if (background && _user != null) {
+        _isLoading = false;
+        return;
+      }
       setState(() {
         _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
         _isLoading = false;
@@ -335,11 +387,15 @@ class _ProfilePageState extends State<ProfilePage>
     super.dispose();
   }
 
-  Future<void> _loadWishlist() async {
-    setState(() {
-      _isLoadingWishlist = true;
+  Future<void> _loadWishlist({bool background = false}) async {
+    if (!background) {
+      setState(() {
+        _isLoadingWishlist = true;
+        _wishlistError = null;
+      });
+    } else {
       _wishlistError = null;
-    });
+    }
 
     try {
       final token = await _sessionHelper.ensureSession();
@@ -354,12 +410,21 @@ class _ProfilePageState extends State<ProfilePage>
         _wishlistProductsOriginalOrder = List.from(products);
         _isLoadingWishlist = false;
       });
+      _rememberWarmProfile();
+      ReviewPrefetchService.instance.prefetchForProducts(
+        products,
+        maxCount: 6,
+      );
       for (final p in products) {
         ProductMemoryCache.instance.remember(p);
       }
       _sortWishlist();
     } catch (e) {
       if (!mounted) return;
+      if (background && _wishlistProducts.isNotEmpty) {
+        _isLoadingWishlist = false;
+        return;
+      }
       setState(() {
         _wishlistError = ErrorHandler.getUserFriendlyMessage(e);
         _isLoadingWishlist = false;
@@ -410,6 +475,7 @@ class _ProfilePageState extends State<ProfilePage>
           imageUrl: product.imageURL,
           title: product.name,
           category: product.tag.name,
+          categoryPath: product.tag.categoryPath,
           rating: product.averageRating ?? 0.0,
           desc: product.description ?? '',
           isFavorite: product.isLiked ?? true,
@@ -597,7 +663,7 @@ class _ProfilePageState extends State<ProfilePage>
                 ),
                 const SizedBox(height: AppSpacing.xLarge),
                 Text(
-                  'Profilinizi tamamlayın',
+                  'Complete your profile',
                   style: AppTextStyles.heading2.copyWith(
                     color: AppColors.textPrimary,
                   ),
@@ -605,9 +671,9 @@ class _ProfilePageState extends State<ProfilePage>
                 ),
                 const SizedBox(height: AppSpacing.medium),
                 Text(
-                  'Kayıt ekranında yazdığınız bilgiler kayıtlıysa “Profili tamamla” '
-                  'sayfasında otomatik dolar. Sunucu bazen kullanıcı kimliğini geç '
-                  'gösterir; yine de bu adımı bir kez tamamlamanız gerekebilir.',
+                  'If your registration info was saved, it will be prefilled on '
+                  '"Complete profile". In some cases, the server may expose your '
+                  'user id a bit later, but you might still need to complete this step once.',
                   style: AppTextStyles.bodySecondary,
                   textAlign: TextAlign.center,
                 ),
@@ -634,7 +700,7 @@ class _ProfilePageState extends State<ProfilePage>
                 ],
                 const Spacer(),
                 AppButton(
-                  text: 'Profili tamamla',
+                  text: 'Complete profile',
                   onPressed: () async {
                     final ok = await Navigator.push<bool>(
                       context,
@@ -651,7 +717,7 @@ class _ProfilePageState extends State<ProfilePage>
                 TextButton(
                   onPressed: _signOutFromIncompleteProfile,
                   child: Text(
-                    'Çıkış yap',
+                    'Sign out',
                     style: AppTextStyles.bodyMedium.copyWith(
                       color: AppColors.textSecondary,
                       fontWeight: FontWeight.w600,

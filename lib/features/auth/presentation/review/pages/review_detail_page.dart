@@ -269,6 +269,55 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
     }
   }
 
+  void _openMediaPreview(String imageUrl) {
+    if (imageUrl.trim().isEmpty) return;
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder:
+          (ctx) => Scaffold(
+            backgroundColor: Colors.transparent,
+            body: SafeArea(
+              child: Stack(
+                children: [
+                  Center(
+                    child: InteractiveViewer(
+                      panEnabled: true,
+                      clipBehavior: Clip.none,
+                      minScale: 1,
+                      maxScale: 5,
+                      child: Image.network(
+                        imageUrl,
+                        fit: BoxFit.contain,
+                        errorBuilder:
+                            (context, error, stackTrace) => Container(
+                              width: 240,
+                              height: 240,
+                              color: AppColors.textSecondary.withOpacity(0.1),
+                              child: const Icon(
+                                Icons.image_not_supported,
+                                size: 42,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: IconButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      icon: const Icon(Icons.close, color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+    );
+  }
+
   Future<void> _toggleLike() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
@@ -421,54 +470,62 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                   AppSpacing.xLarge,
                   AppSpacing.xLarge,
                   AppSpacing.xLarge,
-                  120,
+                  AppSpacing.xxLarge,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
               /// REVIEWER INFO
-              Row(
-                children: [
-                  ProfileAvatarImage(
-                    size: 48,
-                    imageUrl: _currentReview.ownerProfilePhotoUrl,
-                    fallbackInitial: _currentReview.ownerUserName,
-                  ),
-                  const SizedBox(width: AppSpacing.medium),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Text(
-                              '@${_currentReview.ownerUserName}',
-                              style: AppTextStyles.bodyBold,
-                            ),
-                            if (_currentReview.isCollaborative) ...[
-                              const SizedBox(width: AppSpacing.small),
-                              Text(
-                                'Sponsored',
-                                style: AppTextStyles.chip.copyWith(
-                                  color: AppColors.primary,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _currentReview.isCollaborative
-                              ? 'Sponsored - ${_formatDate(_currentReview.createdAt)}'
-                              : 'Not Sponsored - ${_formatDate(_currentReview.createdAt)}',
-                          style: AppTextStyles.bodySmall.copyWith(
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                      ],
+              Container(
+                padding: const EdgeInsets.all(AppSpacing.large),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.border.withValues(alpha: 0.7)),
+                ),
+                child: Row(
+                  children: [
+                    ProfileAvatarImage(
+                      size: 48,
+                      imageUrl: _currentReview.ownerProfilePhotoUrl,
+                      fallbackInitial: _currentReview.ownerUserName,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: AppSpacing.medium),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                '@${_currentReview.ownerUserName}',
+                                style: AppTextStyles.bodyBold.copyWith(fontSize: 17),
+                              ),
+                              if (_currentReview.isCollaborative) ...[
+                                const SizedBox(width: AppSpacing.small),
+                                Text(
+                                  'Sponsored',
+                                  style: AppTextStyles.chip.copyWith(
+                                    color: AppColors.primary,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _currentReview.isCollaborative
+                                ? 'Sponsored review · ${_formatDate(_currentReview.createdAt)}'
+                                : 'Verified review · ${_formatDate(_currentReview.createdAt)}',
+                            style: AppTextStyles.bodySmall.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: AppSpacing.xLarge),
 
@@ -611,53 +668,59 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
 
                       // Eğer backend'den direkt URL geliyorsa, Image.network kullan
                       if (media.url != null && media.url!.isNotEmpty) {
-                        return ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.network(
-                            media.url!,
-                            width: 120,
-                            height: 120,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) {
-                              return Container(
-                                width: 120,
-                                height: 120,
-                                decoration: BoxDecoration(
-                                  color: AppColors.textSecondary.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Icon(
-                                  Icons.image_not_supported,
-                                  color: AppColors.textSecondary,
-                                ),
-                              );
-                            },
+                        return GestureDetector(
+                          onTap: () => _openMediaPreview(media.url!),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.network(
+                              media.url!,
+                              width: 120,
+                              height: 120,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Container(
+                                  width: 120,
+                                  height: 120,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.textSecondary.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Icon(
+                                    Icons.image_not_supported,
+                                    color: AppColors.textSecondary,
+                                  ),
+                                );
+                              },
+                            ),
                           ),
                         );
                       }
                       
                       if (media.imageUrl != null && media.imageUrl!.isNotEmpty) {
-                        return ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.network(
-                            media.imageUrl!,
-                            width: 120,
-                            height: 120,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) {
-                              return Container(
-                                width: 120,
-                                height: 120,
-                                decoration: BoxDecoration(
-                                  color: AppColors.textSecondary.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Icon(
-                                  Icons.image_not_supported,
-                                  color: AppColors.textSecondary,
-                                ),
-                              );
-                            },
+                        return GestureDetector(
+                          onTap: () => _openMediaPreview(media.imageUrl!),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.network(
+                              media.imageUrl!,
+                              width: 120,
+                              height: 120,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Container(
+                                  width: 120,
+                                  height: 120,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.textSecondary.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Icon(
+                                    Icons.image_not_supported,
+                                    color: AppColors.textSecondary,
+                                  ),
+                                );
+                              },
+                            ),
                           ),
                         );
                       }
@@ -698,24 +761,63 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                             );
                           }
                           
-                          return ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.memory(
-                              snapshot.data!,
-                              width: 120,
-                              height: 120,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) {
-                                return Container(
-                                  width: 120,
-                                  height: 120,
-                                  color: AppColors.textSecondary.withOpacity(0.1),
-                                  child: const Icon(
-                                    Icons.image_not_supported,
-                                    color: AppColors.textSecondary,
-                                  ),
-                                );
-                              },
+                          return GestureDetector(
+                            onTap:
+                                () => showDialog<void>(
+                                  context: context,
+                                  barrierColor: Colors.black87,
+                                  builder:
+                                      (ctx) => Scaffold(
+                                        backgroundColor: Colors.transparent,
+                                        body: SafeArea(
+                                          child: Stack(
+                                            children: [
+                                              Center(
+                                                child: InteractiveViewer(
+                                                  minScale: 1,
+                                                  maxScale: 5,
+                                                  child: Image.memory(
+                                                    snapshot.data!,
+                                                    fit: BoxFit.contain,
+                                                  ),
+                                                ),
+                                              ),
+                                              Positioned(
+                                                top: 8,
+                                                right: 8,
+                                                child: IconButton(
+                                                  onPressed:
+                                                      () => Navigator.of(ctx).pop(),
+                                                  icon: const Icon(
+                                                    Icons.close,
+                                                    color: Colors.white,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.memory(
+                                snapshot.data!,
+                                width: 120,
+                                height: 120,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Container(
+                                    width: 120,
+                                    height: 120,
+                                    color: AppColors.textSecondary.withOpacity(0.1),
+                                    child: const Icon(
+                                      Icons.image_not_supported,
+                                      color: AppColors.textSecondary,
+                                    ),
+                                  );
+                                },
+                              ),
                             ),
                           );
                         },
@@ -754,13 +856,22 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                 const SizedBox(height: AppSpacing.xLarge),
               ],
 
-              /// REVIEW TEXT (fotoğrafların altında; kaydırılabilir gövde)
-              Text(
-                _currentReview.description ?? _currentReview.title,
-                style: AppTextStyles.body.copyWith(
-                  fontSize: 16,
-                  height: 1.45,
-                  color: AppColors.textPrimary,
+              /// REVIEW TEXT
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(AppSpacing.large),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.border.withValues(alpha: 0.7)),
+                ),
+                child: Text(
+                  _currentReview.description ?? _currentReview.title,
+                  style: AppTextStyles.body.copyWith(
+                    fontSize: 16,
+                    height: 1.45,
+                    color: AppColors.textPrimary,
+                  ),
                 ),
               ),
                   ],
@@ -768,69 +879,93 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
               ),
             ),
           ),
-          /// LIKE / REPORT (en altta sabit)
-          Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.xLarge,
-              vertical: AppSpacing.large,
+          /// BOTTOM ACTIONS
+          SafeArea(
+            minimum: const EdgeInsets.fromLTRB(
+              AppSpacing.xLarge,
+              AppSpacing.small,
+              AppSpacing.xLarge,
+              AppSpacing.medium,
             ),
-            decoration: BoxDecoration(
-              color: AppColors.background,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, -2),
-                ),
-              ],
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                GestureDetector(
-                  onTap: _toggleLike,
-                  child: Row(
-                    children: [
-                      Icon(
-                        _currentReview.isLikedByCurrentUser
-                            ? Icons.thumb_up
-                            : Icons.thumb_up_alt_outlined,
-                        size: 24,
-                        color: _currentReview.isLikedByCurrentUser
-                            ? AppColors.primary
-                            : AppColors.textPrimary,
-                      ),
-                      if (_currentReview.likeCount > 0) ...[
-                        const SizedBox(width: 8),
-                        Text(
-                          _currentReview.likeCount.toString(),
-                          style: AppTextStyles.bodyBold,
-                        ),
-                      ],
-                    ],
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.medium,
+                vertical: AppSpacing.small,
+              ),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.border.withValues(alpha: 0.8)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 10,
+                    offset: const Offset(0, -2),
                   ),
-                ),
-                if (_viewerUserId == null ||
-                    _viewerUserId!.trim() !=
-                        _currentReview.ownerId.trim())
+                ],
+              ),
+              child: Row(
+                children: [
                   TextButton.icon(
-                    onPressed: () async {
-                      await openReviewReportFlow(
-                        context,
-                        reviewId: _currentReview.id,
-                      );
-                    },
-                    icon: const Icon(
-                      Icons.flag_outlined,
+                    onPressed: _toggleLike,
+                    icon: Icon(
+                      _currentReview.isLikedByCurrentUser
+                          ? Icons.thumb_up
+                          : Icons.thumb_up_alt_outlined,
                       size: 20,
-                      color: AppColors.primary,
+                      color:
+                          _currentReview.isLikedByCurrentUser
+                              ? AppColors.primary
+                              : AppColors.textSecondary,
                     ),
-                    label: const Text(
-                      'Report',
-                      style: AppTextStyles.body,
+                    label: Text(
+                      '${_currentReview.likeCount}',
+                      style: AppTextStyles.body.copyWith(
+                        color:
+                            _currentReview.isLikedByCurrentUser
+                                ? AppColors.primary
+                                : AppColors.textSecondary,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
-              ],
+                  if (_canShowChatIcon)
+                    TextButton.icon(
+                      onPressed: _onChatIconTap,
+                      icon: const Icon(
+                        Icons.chat_bubble_outline,
+                        size: 20,
+                        color: AppColors.textSecondary,
+                      ),
+                      label: Text(
+                        'Message',
+                        style: AppTextStyles.body.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ),
+                  const Spacer(),
+                  if (_viewerUserId == null ||
+                      _viewerUserId!.trim() != _currentReview.ownerId.trim())
+                    TextButton.icon(
+                      onPressed: () async {
+                        await openReviewReportFlow(
+                          context,
+                          reviewId: _currentReview.id,
+                        );
+                      },
+                      icon: const Icon(
+                        Icons.flag_outlined,
+                        size: 20,
+                        color: AppColors.primary,
+                      ),
+                      label: const Text(
+                        'Report',
+                        style: AppTextStyles.body,
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ],

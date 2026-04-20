@@ -104,8 +104,7 @@ class _BackendEmailVerificationPageState
         Scrollable.ensureVisible(
           ctx,
           alignment: 0.35,
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOutCubic,
+          duration: Duration.zero,
         );
       }
     });
@@ -132,7 +131,6 @@ class _BackendEmailVerificationPageState
 
     if (index < 4) {
       _digitFocusNodes[index + 1].requestFocus();
-      _scrollToField(index + 1);
     }
   }
 
@@ -393,6 +391,7 @@ class _BackendEmailVerificationPageState
           builder: (context, constraints) {
             return SingleChildScrollView(
               controller: _scrollController,
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
               padding: EdgeInsets.only(
                 left: AppSpacing.xLarge,
                 right: AppSpacing.xLarge,

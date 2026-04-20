@@ -132,7 +132,7 @@ class _CompleteAppProfilePageState extends State<CompleteAppProfilePage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Oturum bulunamadı. Lütfen tekrar giriş yapın.'),
+            content: Text('Session not found. Please sign in again.'),
             backgroundColor: AppColors.error,
           ),
         );
@@ -194,7 +194,7 @@ class _CompleteAppProfilePageState extends State<CompleteAppProfilePage> {
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Text(
-          'Profili tamamla',
+          'Complete profile',
           style: AppTextStyles.heading3.copyWith(color: AppColors.textPrimary),
         ),
       ),
@@ -211,10 +211,10 @@ class _CompleteAppProfilePageState extends State<CompleteAppProfilePage> {
               children: [
                 Text(
                   AuthService.peekRegisterFormDraft != null
-                      ? 'Kayıt sırasında girdiğiniz bilgiler aşağıya getirildi; gerekirse '
-                          'düzenleyip kaydı tamamlayın.'
-                      : 'Uygulama hesabınız henüz oluşturulmadı. Firebase ile giriş yaptınız; '
-                          'aşağıdaki bilgilerle kaydınızı sunucuya tamamlayın.',
+                      ? 'The details you entered during registration were loaded below. '
+                          'Update them if needed, then complete your account.'
+                      : 'Your app account is not completed yet. You already signed in with '
+                          'Firebase; please finish registration on the server with the info below.',
                   style: AppTextStyles.bodySecondary,
                 ),
                 if (email.isNotEmpty) ...[
@@ -230,7 +230,7 @@ class _CompleteAppProfilePageState extends State<CompleteAppProfilePage> {
                 const SizedBox(height: AppSpacing.xLarge),
                 AppInput(
                   controller: _userName,
-                  hint: 'Kullanıcı adı',
+                  hint: 'Username',
                   validator: _userNameValidator,
                   onChanged: () {
                     if (_fieldError != null) setState(() => _fieldError = null);
@@ -239,13 +239,13 @@ class _CompleteAppProfilePageState extends State<CompleteAppProfilePage> {
                 const SizedBox(height: AppSpacing.medium),
                 AppInput(
                   controller: _name,
-                  hint: 'Ad',
+                  hint: 'Name',
                   validator: _nameValidator,
                 ),
                 const SizedBox(height: AppSpacing.medium),
                 AppInput(
                   controller: _surname,
-                  hint: 'Soyad',
+                  hint: 'Surname',
                   validator: _surnameValidator,
                 ),
                 const SizedBox(height: AppSpacing.medium),
@@ -254,14 +254,14 @@ class _CompleteAppProfilePageState extends State<CompleteAppProfilePage> {
                   child: AbsorbPointer(
                     child: AppInput(
                       controller: _birthdate,
-                      hint: 'Doğum tarihi (seçmek için dokunun)',
+                      hint: 'Birth date (tap to select)',
                       validator: _birthdateValidator,
                     ),
                   ),
                 ),
                 const SizedBox(height: AppSpacing.xLarge),
                 AppButton(
-                  text: 'Kaydı tamamla',
+                  text: 'Complete registration',
                   isLoading: _isLoading,
                   onPressed: _isLoading ? null : _submit,
                 ),

@@ -67,24 +67,50 @@ ActivityItem activityItemFromNotification(NotificationDto n) {
     avatarUrl: resolvedAvatar,
   );
 
-  final productId = p?['productId']?.toString();
-  final productName = p?['productName']?.toString();
+  final productId = p?['productId']?.toString() ??
+      (n.product?.id != 0 ? n.product?.id.toString() : null);
+  final productName = p?['productName']?.toString() ?? n.product?.name;
+  final payloadImage = p?['productImageUrl']?.toString();
+  final productImageUrl =
+      (payloadImage != null && payloadImage.trim().isNotEmpty)
+          ? payloadImage
+          : n.product?.imageURL;
+  final reviewId = p?['reviewId']?.toString();
 
   ActivityTargetContent? target;
-  if (productId != null && productId.isNotEmpty) {
+  if ((productId != null && productId.isNotEmpty) ||
+      (productImageUrl != null && productImageUrl.isNotEmpty)) {
     target = ActivityTargetContent(
       title: (productName != null && productName.isNotEmpty)
           ? productName
           : n.title,
-      thumbnailUrl: p?['productImageUrl']?.toString(),
-      productId: productId,
-      reviewId: p?['reviewId']?.toString(),
+      thumbnailUrl: productImageUrl,
+      productId:
+          (productId != null && productId.isNotEmpty) ? productId : null,
+      reviewId: (reviewId != null && reviewId.isNotEmpty) ? reviewId : null,
     );
   }
 
-  final lineText = (n.body != null && n.body!.trim().isNotEmpty)
-      ? n.body!.trim()
-      : n.title;
+  final title = target?.title ?? 'this product';
+  late final String lineText;
+  switch (type) {
+    case ActivityType.follow:
+      lineText = '$actorName started following you.';
+      break;
+    case ActivityType.like:
+      if (target?.reviewId != null && target!.reviewId!.isNotEmpty) {
+        lineText = '$actorName liked your review.';
+      } else {
+        lineText = '$actorName liked a product related to you: $title';
+      }
+      break;
+    case ActivityType.review:
+      lineText = '$actorName reviewed a product related to you: $title';
+      break;
+    case ActivityType.comment:
+      lineText = '$actorName commented on a product related to you: $title';
+      break;
+  }
 
   return ActivityItem(
     id: n.id,
