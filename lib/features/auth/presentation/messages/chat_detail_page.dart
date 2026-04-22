@@ -17,6 +17,7 @@ import '../../data/models/message_dto.dart';
 import '../../data/services/auth_service.dart';
 import '../../../../core/widgets/skeleton_loader.dart';
 import '../../../../core/widgets/profile_avatar.dart';
+import '../../../../core/cache/message_list_cache.dart';
 
 class ChatDetailPage extends StatefulWidget {
   final ConversationDto conversation;
@@ -37,6 +38,12 @@ class _ChatDetailPageState extends State<ChatDetailPage>
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _inputFocusNode = FocusNode();
+
+  // Oturum bilgisi statik cache — her chat açılışında getMe() çağrılmasın
+  static int? _cachedUserId;
+  static String? _cachedAvatarUrl;
+  static Uint8List? _cachedAvatarBytes;
+  static String? _cachedInitial;
 
   late int _conversationId;
   /// İlk token / kullanıcı bilgisi gelene kadar tam ekran iskelet.
@@ -93,18 +100,29 @@ class _ChatDetailPageState extends State<ChatDetailPage>
       if (token == null) {
         throw Exception('Please login to see messages.');
       }
-      // Backend current user id'yi al (senderId ile karşılaştırmak için)
-      try {
-        var me = await _authService.getMe();
-        if (!me.hasProfileAvatarVisual && me.id.isNotEmpty) {
-          final extra = await _authService.getUserById(me.id);
-          me = me.withFilledAvatarFrom(extra);
-        }
-        _currentUserId = int.tryParse(me.id);
-        _myAvatarUrl = me.profileImageUrl;
-        _myAvatarBytes = decodeProfilePhotoBytes(me.profilePhotoData);
-        _myInitial = me.userName.isNotEmpty ? me.userName[0].toUpperCase() : '?';
-      } catch (_) {}
+      // Kullanıcı bilgisi cache'de varsa hemen ata; yoksa arka planda yükle
+      if (_cachedUserId != null) {
+        _currentUserId = _cachedUserId;
+        _myAvatarUrl   = _cachedAvatarUrl;
+        _myAvatarBytes = _cachedAvatarBytes;
+        _myInitial     = _cachedInitial;
+      } else {
+        try {
+          var me = await _authService.getMe();
+          if (!me.hasProfileAvatarVisual && me.id.isNotEmpty) {
+            final extra = await _authService.getUserById(me.id);
+            me = me.withFilledAvatarFrom(extra);
+          }
+          _currentUserId  = int.tryParse(me.id);
+          _myAvatarUrl    = me.profileImageUrl;
+          _myAvatarBytes  = decodeProfilePhotoBytes(me.profilePhotoData);
+          _myInitial      = me.userName.isNotEmpty ? me.userName[0].toUpperCase() : '?';
+          _cachedUserId      = _currentUserId;
+          _cachedAvatarUrl   = _myAvatarUrl;
+          _cachedAvatarBytes = _myAvatarBytes;
+          _cachedInitial     = _myInitial;
+        } catch (_) {}
+      }
       unawaited(_enrichOtherParticipant());
       await _bootstrapExistingConversationIfNeeded();
       if (_conversationId > 0) {
@@ -201,6 +219,18 @@ class _ChatDetailPageState extends State<ChatDetailPage>
 
   Future<void> _loadMessages() async {
     if (!mounted) return;
+    // Cache'de mesaj varsa hemen göster
+    final cached = MessageListCache.instance.peek(_conversationId);
+    if (cached != null && cached.isNotEmpty) {
+      setState(() {
+        _messages = cached;
+        _messagesLoading = false;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+      unawaited(_refreshMessagesInBackground());
+      return;
+    }
+
     setState(() {
       _errorMessage = null;
       _messagesLoading = true;
@@ -212,8 +242,8 @@ class _ChatDetailPageState extends State<ChatDetailPage>
         size: 50,
       );
       if (!mounted) return;
+      MessageListCache.instance.remember(_conversationId, page.content);
       setState(() {
-        // Backend'den gelen sırayı koru: eski mesajlar üstte, yeniler altta
         _messages = page.content;
         _messagesLoading = false;
       });
@@ -225,6 +255,26 @@ class _ChatDetailPageState extends State<ChatDetailPage>
         _messagesLoading = false;
       });
     }
+  }
+
+  Future<void> _refreshMessagesInBackground() async {
+    try {
+      final page = await _messageRepository.getConversationMessages(
+        conversationId: _conversationId,
+        page: 0,
+        size: 50,
+      );
+      if (!mounted) return;
+      MessageListCache.instance.remember(_conversationId, page.content);
+      // Sadece yeni mesaj varsa güncelle
+      final fresh = page.content;
+      final hasNew = fresh.length != _messages.length ||
+          (fresh.isNotEmpty && _messages.isNotEmpty && fresh.last.id != _messages.last.id);
+      if (hasNew) {
+        setState(() => _messages = fresh);
+        _scrollToBottom();
+      }
+    } catch (_) {}
   }
 
   Future<void> _sendMessage() async {

@@ -15,6 +15,7 @@ import '../../data/repositories/message_repository.dart';
 import '../../data/models/conversation_dto.dart';
 import '../../data/services/auth_service.dart';
 import '../../../../core/notifications/message_unread_service.dart';
+import '../../../../core/cache/conversation_list_cache.dart';
 import 'chat_detail_page.dart';
 
 class ConversationListPage extends StatefulWidget {
@@ -79,11 +80,12 @@ class _ConversationListPageState extends State<ConversationListPage> {
           }
         }
       }
-      // Unread badge'ini her zaman güncelle (değişiklik olmasa da sayı senkron kalsın)
+      // Unread badge'ini her zaman güncelle
       final unread = sorted.where((c) => c.unreadCount > 0).length;
       MessageUnreadService.instance.unreadCount.value = unread;
 
       if (changed && mounted) {
+        ConversationListCache.instance.remember(sorted);
         setState(() => _conversations = sorted);
         _enrichConversationAvatars(sorted);
       }
@@ -93,6 +95,17 @@ class _ConversationListPageState extends State<ConversationListPage> {
   }
 
   Future<void> _loadConversations() async {
+    // Cache varsa anında göster
+    final warm = ConversationListCache.instance.peek();
+    if (warm != null && warm.isNotEmpty) {
+      setState(() {
+        _conversations = warm;
+        _isLoading = false;
+      });
+      unawaited(_refreshConversationsInBackground());
+      return;
+    }
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -104,12 +117,8 @@ class _ConversationListPageState extends State<ConversationListPage> {
       }
       final page = await _messageRepository.getConversations(page: 0, size: 20);
       if (!mounted) return;
-      // Tarihe göre (lastMessageAt) yukarıdan aşağı en yeni → en eski
-      final sorted = [...page.content]..sort((a, b) {
-          final da = DateTime.tryParse(a.lastMessageAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
-          final db = DateTime.tryParse(b.lastMessageAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
-          return db.compareTo(da);
-        });
+      final sorted = _sortedConversations(page.content);
+      ConversationListCache.instance.remember(sorted);
       setState(() {
         _conversations = sorted;
         _isLoading = false;
@@ -123,6 +132,38 @@ class _ConversationListPageState extends State<ConversationListPage> {
         _isLoading = false;
       });
     }
+  }
+
+  List<ConversationDto> _sortedConversations(List<ConversationDto> list) {
+    return [...list]..sort((a, b) {
+        final da = DateTime.tryParse(a.lastMessageAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final db = DateTime.tryParse(b.lastMessageAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return db.compareTo(da);
+      });
+  }
+
+  Future<void> _refreshConversationsInBackground() async {
+    try {
+      final token = await _sessionHelper.ensureSession();
+      if (token == null) return;
+      final page = await _messageRepository.getConversations(page: 0, size: 20);
+      if (!mounted) return;
+      final sorted = _sortedConversations(page.content);
+      ConversationListCache.instance.remember(sorted);
+      bool changed = sorted.length != _conversations.length;
+      if (!changed) {
+        for (int i = 0; i < sorted.length; i++) {
+          final n = sorted[i]; final o = _conversations[i];
+          if (n.id != o.id || n.lastMessage != o.lastMessage || n.unreadCount != o.unreadCount) {
+            changed = true; break;
+          }
+        }
+      }
+      if (changed && mounted) {
+        setState(() => _conversations = sorted);
+        _enrichConversationAvatars(sorted);
+      }
+    } catch (_) {}
   }
 
   void _warmAvatarCacheForConversations(List<ConversationDto> list) {

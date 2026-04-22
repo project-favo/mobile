@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../core/cache/friend_feed_memory_cache.dart';
+import '../../../core/cache/product_memory_cache.dart';
+import '../data/models/product_dto.dart';
+import '../data/models/tag_dto.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
@@ -177,6 +180,20 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
   Future<void> _openItem(ActivityItem item) async {
     final pid = item.targetContent?.productId;
     if (pid == null || pid.isEmpty) return;
+    // Ürün cache'de yoksa thumbnailUrl ile önceden doldur —
+    // ReviewPage açılır açılmaz fotoğraf gösterilsin.
+    if (ProductMemoryCache.instance.peek(pid) == null) {
+      final thumb = item.targetContent?.thumbnailUrl ?? '';
+      final name  = item.targetContent?.title ?? '';
+      if (thumb.isNotEmpty) {
+        ProductMemoryCache.instance.remember(ProductDto(
+          id: pid,
+          name: name,
+          imageURL: thumb,
+          tag: TagDto(id: '', name: ''),
+        ));
+      }
+    }
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => ReviewPage(productId: pid, productName: item.targetContent?.title),

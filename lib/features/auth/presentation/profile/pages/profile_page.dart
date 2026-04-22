@@ -906,6 +906,7 @@ class _ProfilePageState extends State<ProfilePage>
                 horizontal: AppSpacing.xLarge,
               ),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Text(
                     'Sort by date',
@@ -1119,31 +1120,32 @@ class _SortDropdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DropdownButton<String>(
-      value: value,
-      isDense: true,
-      underline: const SizedBox.shrink(),
-      borderRadius: BorderRadius.circular(10),
-      iconSize: 20,
-      style: AppTextStyles.bodySmall.copyWith(
-        color: AppColors.textPrimary,
-        fontWeight: FontWeight.w600,
-      ),
-      items:
-          items.map((String item) {
-            return DropdownMenuItem<String>(value: item, child: Text(item));
-          }).toList(),
-      onChanged: onChanged,
-      icon: const Icon(
-        Icons.expand_more_rounded,
-        size: 20,
-        color: AppColors.textSecondary,
+    return DropdownButtonHideUnderline(
+      child: DropdownButton<String>(
+        value: value,
+        isDense: true,
+        alignment: AlignmentDirectional.centerEnd,
+        borderRadius: BorderRadius.circular(10),
+        iconSize: 18,
+        style: AppTextStyles.bodySmall.copyWith(
+          color: AppColors.textPrimary,
+          fontWeight: FontWeight.w600,
+        ),
+        items: items.map((String item) {
+          return DropdownMenuItem<String>(value: item, child: Text(item));
+        }).toList(),
+        onChanged: onChanged,
+        icon: const Icon(
+          Icons.expand_more_rounded,
+          size: 18,
+          color: AppColors.textSecondary,
+        ),
       ),
     );
   }
 }
 
-// ─── Wishlist minimal satır kartı ────────────────────────────────────────────
+// ─── Wishlist satır kartı ─────────────────────────────────────────────────────
 
 class _WishlistRow extends StatelessWidget {
   final ProductDto product;
@@ -1162,31 +1164,35 @@ class _WishlistRow extends StatelessWidget {
     final liked = product.isLiked ?? true;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
+            // Ürün görseli
             ClipRRect(
               borderRadius: BorderRadius.circular(10),
               child: Image.network(
                 product.imageURL,
-                width: 56,
-                height: 56,
+                width: 68,
+                height: 68,
                 fit: BoxFit.cover,
+                cacheWidth: 136,
+                cacheHeight: 136,
                 errorBuilder: (_, __, ___) => Container(
-                  width: 56,
-                  height: 56,
+                  width: 68,
+                  height: 68,
                   color: AppColors.border,
                   child: const Icon(
                     Icons.image_not_supported_outlined,
-                    size: 22,
+                    size: 24,
                     color: AppColors.textSecondary,
                   ),
                 ),
               ),
             ),
             const SizedBox(width: 14),
+            // İsim + kategori
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1197,11 +1203,12 @@ class _WishlistRow extends StatelessWidget {
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
                       color: AppColors.textPrimary,
+                      height: 1.3,
                     ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 4),
                   Text(
                     product.tag.name,
                     style: const TextStyle(
@@ -1209,22 +1216,22 @@ class _WishlistRow extends StatelessWidget {
                       color: AppColors.textSecondary,
                       fontWeight: FontWeight.w400,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 8),
+            // Like butonu — ProductCard ile aynı stil
             GestureDetector(
               onTap: onFavoriteTap,
               behavior: HitTestBehavior.opaque,
               child: Padding(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                 child: Icon(
-                  liked
-                      ? Icons.favorite_rounded
-                      : Icons.favorite_border_rounded,
-                  size: 20,
-                  color: liked ? Colors.redAccent : AppColors.textSecondary,
+                  liked ? Icons.favorite : Icons.favorite_border,
+                  size: 22,
+                  color: liked ? AppColors.primary : AppColors.textSecondary,
                 ),
               ),
             ),

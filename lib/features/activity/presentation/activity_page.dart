@@ -17,6 +17,9 @@ import '../../auth/presentation/profile/pages/profile_page.dart';
 import '../../auth/presentation/profile/pages/user_profile_page.dart';
 import '../../auth/presentation/review/pages/review_page.dart';
 import '../../auth/presentation/search_page.dart';
+import '../../../core/cache/product_memory_cache.dart';
+import '../../auth/data/models/product_dto.dart';
+import '../../auth/data/models/tag_dto.dart';
 import 'activity_controller.dart';
 import 'widgets/activity_feed_row.dart';
 
@@ -208,13 +211,24 @@ class _ActivityPageState extends State<ActivityPage>
       case ActivityType.review:
         final pid = item.targetContent?.productId;
         if (pid != null && pid.isNotEmpty) {
+          if (ProductMemoryCache.instance.peek(pid) == null) {
+            final thumb = item.targetContent?.thumbnailUrl ?? '';
+            final name  = item.targetContent?.title ?? '';
+            if (thumb.isNotEmpty) {
+              ProductMemoryCache.instance.remember(ProductDto(
+                id: pid,
+                name: name,
+                imageURL: thumb,
+                tag: TagDto(id: '', name: ''),
+              ));
+            }
+          }
           Navigator.of(context).push(
             MaterialPageRoute<void>(
-              builder:
-                  (_) => ReviewPage(
-                    productId: pid,
-                    productName: item.targetContent?.title,
-                  ),
+              builder: (_) => ReviewPage(
+                productId: pid,
+                productName: item.targetContent?.title,
+              ),
             ),
           );
         }
