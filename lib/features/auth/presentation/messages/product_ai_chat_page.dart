@@ -380,12 +380,7 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
                     controller: _scrollController,
                     keyboardDismissBehavior:
                         ScrollViewKeyboardDismissBehavior.onDrag,
-                    padding: const EdgeInsets.fromLTRB(
-                      AppSpacing.large,
-                      AppSpacing.large,
-                      AppSpacing.large,
-                      84,
-                    ),
+                    padding: const EdgeInsets.all(AppSpacing.large),
                     itemCount: _messages.length,
                     itemBuilder: (context, index) {
                       final m = _messages[index];
