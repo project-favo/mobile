@@ -574,43 +574,52 @@ class _SearchPageState extends State<SearchPage> {
                                             child: ListView.separated(
                                               padding: EdgeInsets.zero,
                                               itemCount: _currentCategories.length,
-                                              separatorBuilder: (_, __) => const Divider(height: 1, thickness: 0.6, indent: 18),
+                                              separatorBuilder: (_, __) => const SizedBox(height: 8),
                                               itemBuilder: (context, index) {
                                                 final category = _currentCategories[index];
-                                                return InkWell(
-                                                  onTap: () => _openCategory(category),
-                                                  child: Padding(
-                                                    padding: const EdgeInsets.symmetric(
-                                                      horizontal: 4,
-                                                      vertical: 11,
-                                                    ),
-                                                    child: Row(
-                                                      children: [
-                                                        Container(
-                                                          width: 6,
-                                                          height: 6,
-                                                          decoration: const BoxDecoration(
-                                                            color: AppColors.primary,
-                                                            shape: BoxShape.circle,
-                                                          ),
-                                                        ),
-                                                        const SizedBox(width: 12),
-                                                        Expanded(
-                                                          child: Text(
-                                                            category.name,
-                                                            style: const TextStyle(
-                                                              fontSize: 15,
-                                                              fontWeight: FontWeight.w500,
-                                                              color: AppColors.textPrimary,
+                                                return Material(
+                                                  color: AppColors.surface,
+                                                  borderRadius: BorderRadius.circular(12),
+                                                  child: InkWell(
+                                                    onTap: () => _openCategory(category),
+                                                    borderRadius: BorderRadius.circular(12),
+                                                    child: Container(
+                                                      decoration: BoxDecoration(
+                                                        borderRadius: BorderRadius.circular(12),
+                                                        border: Border.all(color: AppColors.border, width: 1),
+                                                      ),
+                                                      padding: const EdgeInsets.symmetric(
+                                                        horizontal: 14,
+                                                        vertical: 13,
+                                                      ),
+                                                      child: Row(
+                                                        children: [
+                                                          Container(
+                                                            width: 6,
+                                                            height: 6,
+                                                            decoration: const BoxDecoration(
+                                                              color: AppColors.primary,
+                                                              shape: BoxShape.circle,
                                                             ),
                                                           ),
-                                                        ),
-                                                        const Icon(
-                                                          Icons.chevron_right_rounded,
-                                                          size: 18,
-                                                          color: AppColors.textSecondary,
-                                                        ),
-                                                      ],
+                                                          const SizedBox(width: 12),
+                                                          Expanded(
+                                                            child: Text(
+                                                              category.name,
+                                                              style: const TextStyle(
+                                                                fontSize: 15,
+                                                                fontWeight: FontWeight.w500,
+                                                                color: AppColors.textPrimary,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                          const Icon(
+                                                            Icons.chevron_right_rounded,
+                                                            size: 18,
+                                                            color: AppColors.textSecondary,
+                                                          ),
+                                                        ],
+                                                      ),
                                                     ),
                                                   ),
                                                 );

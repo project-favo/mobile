@@ -71,11 +71,7 @@ class ActivityFeedRow extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    GestureDetector(
-                      onTap: onUserTap,
-                      behavior: HitTestBehavior.opaque,
-                      child: _buildLineText(),
-                    ),
+                    _buildLineText(),
                     if (showFollow) ...[
                       const SizedBox(height: 8),
                       _FollowChip(

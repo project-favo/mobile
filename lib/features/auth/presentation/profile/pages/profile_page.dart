@@ -500,17 +500,31 @@ class _ProfilePageState extends State<ProfilePage>
       physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
       itemCount: _wishlistProducts.length,
-      separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
         final product = _wishlistProducts[index];
-        return _WishlistRow(
-          key: ValueKey(product.id),
-          product: product,
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => ReviewPage(product: product)),
+        return Container(
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.border, width: 1),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.03),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
-          onFavoriteTap: () => _toggleWishlistLike(product),
+          child: _WishlistRow(
+            key: ValueKey(product.id),
+            product: product,
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => ReviewPage(product: product)),
+            ),
+            onFavoriteTap: () => _toggleWishlistLike(product),
+          ),
         );
       },
     );
@@ -1164,8 +1178,9 @@ class _WishlistRow extends StatelessWidget {
     final liked = product.isLiked ?? true;
     return InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
