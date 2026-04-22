@@ -574,7 +574,7 @@ class _SearchPageState extends State<SearchPage> {
                                             child: ListView.separated(
                                               padding: EdgeInsets.zero,
                                               itemCount: _currentCategories.length,
-                                              separatorBuilder: (_, __) => const Divider(height: 1, thickness: 0.5),
+                                              separatorBuilder: (_, __) => const Divider(height: 1, thickness: 0.6, indent: 18),
                                               itemBuilder: (context, index) {
                                                 final category = _currentCategories[index];
                                                 return InkWell(

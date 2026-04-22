@@ -14,6 +14,7 @@ import '../../../../core/utils/load_profile_image_bytes.dart';
 import '../../data/repositories/message_repository.dart';
 import '../../data/models/conversation_dto.dart';
 import '../../data/services/auth_service.dart';
+import '../../../../core/notifications/message_unread_service.dart';
 import 'chat_detail_page.dart';
 
 class ConversationListPage extends StatefulWidget {
@@ -39,6 +40,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
   void initState() {
     super.initState();
     _loadConversations();
+    MessageUnreadService.instance.attach();
     // Her 5 saniyede sessizce tazele — yeni mesaj gelince liste güncellenir
     _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       _silentRefresh();
@@ -48,6 +50,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
   @override
   void dispose() {
     _pollTimer?.cancel();
+    MessageUnreadService.instance.detach();
     super.dispose();
   }
 
@@ -76,6 +79,10 @@ class _ConversationListPageState extends State<ConversationListPage> {
           }
         }
       }
+      // Unread badge'ini her zaman güncelle (değişiklik olmasa da sayı senkron kalsın)
+      final unread = sorted.where((c) => c.unreadCount > 0).length;
+      MessageUnreadService.instance.unreadCount.value = unread;
+
       if (changed && mounted) {
         setState(() => _conversations = sorted);
         _enrichConversationAvatars(sorted);

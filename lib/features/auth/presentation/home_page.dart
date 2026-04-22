@@ -8,6 +8,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/session_helper.dart';
 import '../../../core/notifications/notification_realtime_service.dart';
+import '../../../core/notifications/message_unread_service.dart';
 import '../../../core/widgets/main_bottom_nav_items.dart';
 import '../../../features/activity/presentation/activity_page.dart';
 import '../../../core/widgets/custom_refresh_indicator.dart';
@@ -18,7 +19,6 @@ import '../widgets/product_card.dart';
 import '../widgets/top_product_card.dart';
 import 'messages/conversation_list_page.dart';
 import 'messages/ai_chat_page.dart';
-import '../data/repositories/message_repository.dart';
 import 'search_page.dart';
 import 'friend_feed_page.dart';
 import 'profile/pages/profile_page.dart';
@@ -49,7 +49,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   final ProductRepository _productRepository = ProductRepository();
   final InteractionRepository _interactionRepository = InteractionRepository();
   final SessionHelper _sessionHelper = SessionHelper();
-  final MessageRepository _messageRepository = MessageRepository();
 
   List<TagDto> _tags = [];
   List<TagDto> _subTags = [];
@@ -84,9 +83,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   bool _isLoadingSubTags = false;
   String? _errorMessage;
   final ScrollController _scrollController = ScrollController();
-  int _unreadMessageCount = 0;
   bool _notificationSvcAttached = false;
-  Timer? _unreadBadgeTimer;
 
   Route _noAnimationRoute(Widget page) {
     return PageRouteBuilder(
@@ -181,12 +178,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     } else {
       _loadData();
     }
-    _loadUnreadCount();
-    // Her 30 saniyede badge'i arka planda güncelle
-    _unreadBadgeTimer = Timer.periodic(
-      const Duration(seconds: 30),
-      (_) => _loadUnreadCount(),
-    );
+    MessageUnreadService.instance.attach();
     _scrollController.addListener(_onScroll);
   }
 
@@ -200,7 +192,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   @override
   void dispose() {
-    _unreadBadgeTimer?.cancel();
+    MessageUnreadService.instance.detach();
     _topPicksTabController
       ..removeListener(_onTopPicksTabControllerChanged)
       ..dispose();
@@ -213,26 +205,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     super.dispose();
   }
 
-  Future<void> _loadUnreadCount() async {
-    try {
-      final token = await _sessionHelper.ensureSession();
-      if (token == null) return;
-      final page = await _messageRepository.getConversations(page: 0, size: 50);
-      if (!mounted) return;
-      final convCountWithUnread =
-          page.content.where((c) => c.unreadCount > 0).length;
-      setState(() {
-        _unreadMessageCount = convCountWithUnread;
-      });
-      unawaited(NotificationRealtimeService.instance.refreshUnread());
-    } catch (_) {
-      // Sessiyon/yetki hatalarında badge'i sadece sıfır bırak
-      if (!mounted) return;
-      setState(() {
-        _unreadMessageCount = 0;
-      });
-    }
-  }
 
   String _topPicksTabLabel(_TopPicksTab tab) => switch (tab) {
     _TopPicksTab.trendingReviews => 'Trending Reviews',
@@ -832,49 +804,54 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             child: Stack(
               clipBehavior: Clip.none,
               children: [
-                IconButton(
-                  icon: const Icon(Icons.chat_bubble_outline),
-                  color: AppColors.primary,
-                  onPressed: () async {
-                    final result = await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const ConversationListPage(),
-                      ),
+                ValueListenableBuilder<int>(
+                  valueListenable: MessageUnreadService.instance.unreadCount,
+                  builder: (context, unreadMsgCount, _) {
+                    return Stack(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.chat_bubble_outline),
+                          color: AppColors.primary,
+                          onPressed: () async {
+                            await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const ConversationListPage(),
+                              ),
+                            );
+                            // Geri dönünce anında sayıyı güncelle
+                            unawaited(MessageUnreadService.instance.refreshNow());
+                          },
+                        ),
+                        if (unreadMsgCount > 0)
+                          Positioned(
+                            right: 4,
+                            top: 6,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                unreadMsgCount > 9
+                                    ? '9+'
+                                    : unreadMsgCount.toString(),
+                                style: AppTextStyles.bodySecondary.copyWith(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
                     );
-                    if (result == true) {
-                      await _loadUnreadCount();
-                    } else {
-                      // Yine de olası yeni mesajlar için refresh et
-                      unawaited(_loadUnreadCount());
-                    }
                   },
                 ),
-                if (_unreadMessageCount > 0)
-                  Positioned(
-                    right: 4,
-                    top: 6,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 5,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        _unreadMessageCount > 9
-                            ? '9+'
-                            : _unreadMessageCount.toString(),
-                        style: AppTextStyles.bodySecondary.copyWith(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
               ],
             ),
           ),
