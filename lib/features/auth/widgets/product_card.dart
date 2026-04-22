@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/widgets/profile_avatar.dart';
 import '../../../../core/theme/app_icon_sizes.dart';
 import '../../../../core/theme/app_decorations.dart';
 import '../../../../core/theme/app_spacing.dart';
@@ -44,6 +45,10 @@ class ProductCard extends StatefulWidget {
   /// Grid/listelerde `false` bırakın: her kart için review API çağrısı yapılmaz (çok daha hızlı).
   final bool loadReviewCount;
 
+  /// Avatar URL'leri — bu ürünü beğenen takip edilen kullanıcılar.
+  /// Boş liste ise hiç gösterilmez.
+  final List<String> friendAvatarUrls;
+
   const ProductCard({
     super.key,
     required this.imageUrl,
@@ -55,6 +60,7 @@ class ProductCard extends StatefulWidget {
     required this.productId,
     this.isFavorite = false,
     this.loadReviewCount = false,
+    this.friendAvatarUrls = const [],
     this.onTap,
     this.onFavoriteTap,
   });
@@ -148,32 +154,46 @@ class _ProductCardState extends State<ProductCard> {
               tag: 'product_image_${widget.productId}_${widget.imageUrl}',
               child: AspectRatio(
                 aspectRatio: 1,
-                child: Container(
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    borderRadius: AppDecorations.cardRadius,
-                    color: AppColors.background,
-                  ),
-                  child: ClipRRect(
-                    borderRadius: AppDecorations.cardRadius,
-                    child: Image.network(
-                      widget.imageUrl,
-                      fit: BoxFit.cover,
-                      alignment: Alignment.center,
-                      cacheWidth: imageCacheW,
-                      cacheHeight: imageCacheH,
-                      filterQuality: FilterQuality.medium,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: Container(
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          borderRadius: AppDecorations.cardRadius,
                           color: AppColors.background,
-                          child: const Icon(
-                            Icons.image_not_supported,
-                            color: AppColors.textSecondary,
+                        ),
+                        child: ClipRRect(
+                          borderRadius: AppDecorations.cardRadius,
+                          child: Image.network(
+                            widget.imageUrl,
+                            fit: BoxFit.cover,
+                            alignment: Alignment.center,
+                            cacheWidth: imageCacheW,
+                            cacheHeight: imageCacheH,
+                            filterQuality: FilterQuality.medium,
+                            errorBuilder: (context, error, stackTrace) {
+                              return Container(
+                                color: AppColors.background,
+                                child: const Icon(
+                                  Icons.image_not_supported,
+                                  color: AppColors.textSecondary,
+                                ),
+                              );
+                            },
                           ),
-                        );
-                      },
+                        ),
+                      ),
                     ),
-                  ),
+                    if (widget.friendAvatarUrls.isNotEmpty)
+                      Positioned(
+                        left: 7,
+                        bottom: 7,
+                        child: _FriendAvatarStack(
+                          avatarUrls: widget.friendAvatarUrls,
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -298,6 +318,84 @@ class _ProductCardState extends State<ProductCard> {
       ),
     );
   }
-
 }
 
+// ─── Friend avatar stack overlay ─────────────────────────────────────────────
+
+class _FriendAvatarStack extends StatelessWidget {
+  final List<String> avatarUrls;
+
+  const _FriendAvatarStack({required this.avatarUrls});
+
+  @override
+  Widget build(BuildContext context) {
+    const double size = 22;
+    const double step = 15;
+    const double border = 1.8;
+
+    final shown = avatarUrls.take(5).toList();
+    final extra = avatarUrls.length - shown.length;
+    final itemCount = shown.length + (extra > 0 ? 1 : 0);
+    final stackWidth = step * (itemCount - 1) + size;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.28),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: SizedBox(
+        height: size,
+        width: stackWidth,
+        child: Stack(
+          children: [
+            ...List.generate(shown.length, (i) {
+              return Positioned(
+                left: i * step,
+                child: Container(
+                  width: size,
+                  height: size,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: border),
+                  ),
+                  child: ClipOval(
+                    child: ProfileAvatar(
+                      key: ValueKey('friend_avatar_$i/${shown[i]}'),
+                      radius: (size - border * 2) / 2,
+                      imageUrl: shown[i],
+                      fallbackInitial: '?',
+                    ),
+                  ),
+                ),
+              );
+            }),
+            if (extra > 0)
+              Positioned(
+                left: shown.length * step,
+                child: Container(
+                  width: size,
+                  height: size,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: border),
+                    color: AppColors.primary,
+                  ),
+                  child: Center(
+                    child: Text(
+                      '+$extra',
+                      style: const TextStyle(
+                        fontSize: 7,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}

@@ -223,6 +223,14 @@ class _ContentThumb extends StatelessWidget {
                   url!,
                   fit: BoxFit.contain,
                   alignment: Alignment.center,
+                  gaplessPlayback: true,
+                  frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                    if (wasSynchronouslyLoaded || frame != null) return child;
+                    return AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 200),
+                      child: frame == null ? _placeholder(context) : child,
+                    );
+                  },
                   errorBuilder: (_, __, ___) => _placeholder(context),
                 ),
               )
