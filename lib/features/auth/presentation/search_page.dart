@@ -329,7 +329,14 @@ class _SearchPageState extends State<SearchPage> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         automaticallyImplyLeading: false,
-        title: const Text('Search', style: AppTextStyles.heading2),
+        title: Text(
+          'Search',
+          style: AppTextStyles.heading2.copyWith(
+            color: AppColors.primary,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        centerTitle: true,
       ),
       body: _isLoading
           ? const SearchPageBodySkeleton()
@@ -348,15 +355,66 @@ class _SearchPageState extends State<SearchPage> {
                   padding: const EdgeInsets.all(AppSpacing.xLarge),
                   child: Column(
                     children: [
-                      TextField(
-                        controller: _searchController,
-                        focusNode: _searchFocusNode,
-                        onChanged: _onSearchChanged,
-                        decoration: InputDecoration(
-                          hintText: 'Search by tag or product name...',
-                          prefixIcon: const Icon(Icons.search),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: _searchFocusNode.hasFocus
+                                ? AppColors.primary
+                                : AppColors.border,
+                            width: _searchFocusNode.hasFocus ? 1.5 : 1.0,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.04),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: TextField(
+                          controller: _searchController,
+                          focusNode: _searchFocusNode,
+                          onChanged: _onSearchChanged,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: 'Search products or categories...',
+                            hintStyle: TextStyle(
+                              color: AppColors.textSecondary.withValues(alpha: 0.7),
+                              fontSize: 15,
+                              fontWeight: FontWeight.w400,
+                            ),
+                            prefixIcon: Icon(
+                              Icons.search_rounded,
+                              color: _searchFocusNode.hasFocus
+                                  ? AppColors.primary
+                                  : AppColors.textSecondary,
+                              size: 22,
+                            ),
+                            suffixIcon: _searchController.text.isNotEmpty
+                                ? GestureDetector(
+                                    onTap: () {
+                                      _searchController.clear();
+                                      _onSearchChanged('');
+                                      _searchFocusNode.unfocus();
+                                    },
+                                    child: const Icon(
+                                      Icons.close_rounded,
+                                      color: AppColors.textSecondary,
+                                      size: 20,
+                                    ),
+                                  )
+                                : null,
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 14,
+                            ),
                           ),
                         ),
                       ),
@@ -402,14 +460,7 @@ class _SearchPageState extends State<SearchPage> {
                                           );
                                         },
                                       ))
-                            : _searchFocusNode.hasFocus
-                                ? const Center(
-                                    child: Text(
-                                      'Search by product name or tag',
-                                      style: AppTextStyles.bodySecondary,
-                                    ),
-                                  )
-                                : _showCategoryResults
+                            : _showCategoryResults
                                     ? Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
@@ -417,6 +468,9 @@ class _SearchPageState extends State<SearchPage> {
                                             children: [
                                               TextButton.icon(
                                                 onPressed: _goBackCategoryLevel,
+                                                style: TextButton.styleFrom(
+                                                  foregroundColor: AppColors.primary,
+                                                ),
                                                 icon: const Icon(Icons.arrow_back_ios_new, size: 14),
                                                 label: const Text('Back'),
                                               ),
@@ -493,6 +547,9 @@ class _SearchPageState extends State<SearchPage> {
                                               children: [
                                                 TextButton.icon(
                                                   onPressed: _goBackCategoryLevel,
+                                                  style: TextButton.styleFrom(
+                                                    foregroundColor: AppColors.primary,
+                                                  ),
                                                   icon: const Icon(Icons.arrow_back_ios_new, size: 14),
                                                   label: const Text('Back'),
                                                 ),
@@ -507,20 +564,72 @@ class _SearchPageState extends State<SearchPage> {
                                                 ),
                                               ],
                                             ),
+                                          if (_categoryPath.isEmpty) ...[
+                                            Padding(
+                                              padding: const EdgeInsets.only(bottom: 10, left: 2),
+                                              child: Text(
+                                                'Browse Categories',
+                                                style: TextStyle(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: AppColors.textSecondary,
+                                                  letterSpacing: 0.4,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
                                           Expanded(
                                             child: ListView.separated(
                                               itemCount: _currentCategories.length,
-                                              separatorBuilder: (_, __) => const SizedBox(height: 8),
+                                              separatorBuilder: (_, __) => const SizedBox(height: 6),
                                               itemBuilder: (context, index) {
                                                 final category = _currentCategories[index];
-                                                return ListTile(
-                                                  shape: RoundedRectangleBorder(
+                                                return Material(
+                                                  color: AppColors.surface,
+                                                  borderRadius: BorderRadius.circular(12),
+                                                  child: InkWell(
                                                     borderRadius: BorderRadius.circular(12),
+                                                    onTap: () => _openCategory(category),
+                                                    child: Padding(
+                                                      padding: const EdgeInsets.symmetric(
+                                                        horizontal: 16,
+                                                        vertical: 14,
+                                                      ),
+                                                      child: Row(
+                                                        children: [
+                                                          Container(
+                                                            width: 32,
+                                                            height: 32,
+                                                            decoration: BoxDecoration(
+                                                              color: AppColors.primary.withValues(alpha: 0.08),
+                                                              borderRadius: BorderRadius.circular(8),
+                                                            ),
+                                                            child: const Icon(
+                                                              Icons.category_outlined,
+                                                              size: 17,
+                                                              color: AppColors.primary,
+                                                            ),
+                                                          ),
+                                                          const SizedBox(width: 12),
+                                                          Expanded(
+                                                            child: Text(
+                                                              category.name,
+                                                              style: const TextStyle(
+                                                                fontSize: 14,
+                                                                fontWeight: FontWeight.w600,
+                                                                color: AppColors.textPrimary,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                          const Icon(
+                                                            Icons.chevron_right_rounded,
+                                                            size: 20,
+                                                            color: AppColors.textSecondary,
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
                                                   ),
-                                                  tileColor: AppColors.surface,
-                                                  title: Text(category.name),
-                                                  trailing: const Icon(Icons.chevron_right),
-                                                  onTap: () => _openCategory(category),
                                                 );
                                               },
                                             ),

@@ -31,13 +31,14 @@ class ActivityFeedRow extends StatelessWidget {
       child: InkWell(
         onTap: onOpen,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Okunmamış nokta veya küçük boşluk
               if (!item.isRead)
                 Padding(
-                  padding: const EdgeInsets.only(top: 6, right: 8),
+                  padding: const EdgeInsets.only(top: 7, right: 6),
                   child: Container(
                     width: 6,
                     height: 6,
@@ -48,7 +49,7 @@ class ActivityFeedRow extends StatelessWidget {
                   ),
                 )
               else
-                const SizedBox(width: 14),
+                const SizedBox(width: 6),
               ProfileAvatar(
                 key: ValueKey('avatar_${item.user.id}'),
                 radius: 20,
@@ -57,29 +58,15 @@ class ActivityFeedRow extends StatelessWidget {
                     ? item.user.username
                     : '?',
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
+              // İçerik: metin + follow chip
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(child: _buildLineText()),
-                        const SizedBox(width: 8),
-                        Text(
-                          time,
-                          style: TextStyle(
-                            color: AppColors.textSecondary,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            letterSpacing: 0.2,
-                          ),
-                        ),
-                      ],
-                    ),
+                    _buildLineText(),
                     if (showFollow) ...[
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 8),
                       _FollowChip(
                         following: following,
                         onTap: onToggleFollow,
@@ -88,13 +75,25 @@ class ActivityFeedRow extends StatelessWidget {
                   ],
                 ),
               ),
+              // Thumbnail (varsa)
               if (_showThumbnail) ...[
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
                 _ContentThumb(
                   url: item.targetContent?.thumbnailUrl,
                   title: item.targetContent?.title ?? '',
                 ),
               ],
+              // Saat — her zaman sağ üstte, thumbnail'dan bağımsız
+              const SizedBox(width: 8),
+              Text(
+                time,
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  letterSpacing: 0.1,
+                ),
+              ),
             ],
           ),
         ),
