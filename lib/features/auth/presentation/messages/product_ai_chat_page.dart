@@ -83,6 +83,9 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
       }
     });
 
+    // İlk render'dan sonra en alta git (cache'den gelen mesajlar için)
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+
     _loadMe();
   }
 

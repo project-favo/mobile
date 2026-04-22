@@ -64,13 +64,14 @@ class _AiChatPageState extends State<AiChatPage>
 
     _scrollController.addListener(_onScrollChanged);
 
-    // Klavye açılmaya başladığı anda (focus kazanılınca) scroll'u tetikle
-    // → klavye ile liste aynı anda yukarı gider, gecikme olmaz
     _inputFocusNode.addListener(() {
       if (_inputFocusNode.hasFocus && !_userScrolledUp) {
         _scrollToBottom();
       }
     });
+
+    // İlk render'dan sonra en alta git (cache'den gelen mesajlar için)
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
 
     _loadMe();
   }
