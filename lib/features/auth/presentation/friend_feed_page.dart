@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../core/cache/friend_feed_memory_cache.dart';
+import 'profile/pages/user_profile_page.dart';
 import '../../../core/cache/product_memory_cache.dart';
 import '../data/models/product_dto.dart';
 import '../data/models/tag_dto.dart';
@@ -354,6 +355,18 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
                 following: false,
                 onToggleFollow: () {},
                 onOpen: () => _openItem(item),
+                onUserTap: () {
+                  if (item.user.id.isEmpty) return;
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => UserProfilePage(
+                        userId: item.user.id,
+                        userName: item.user.username,
+                        profileImageUrl: item.user.avatarUrl,
+                      ),
+                    ),
+                  );
+                },
               ),
             );
           },

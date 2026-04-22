@@ -13,12 +13,15 @@ class ActivityFeedRow extends StatelessWidget {
     required this.following,
     required this.onToggleFollow,
     required this.onOpen,
+    this.onUserTap,
   });
 
   final ActivityItem item;
   final bool following;
   final VoidCallback onToggleFollow;
   final VoidCallback onOpen;
+  /// Kullanıcının pp/ismine tıklanınca çağrılır (null ise devre dışı).
+  final VoidCallback? onUserTap;
 
   @override
   Widget build(BuildContext context) {
@@ -50,13 +53,17 @@ class ActivityFeedRow extends StatelessWidget {
                 )
               else
                 const SizedBox(width: 6),
-              ProfileAvatar(
-                key: ValueKey('avatar_${item.user.id}'),
-                radius: 20,
-                imageUrl: item.user.avatarUrl,
-                fallbackInitial: item.user.username.isNotEmpty
-                    ? item.user.username
-                    : '?',
+              GestureDetector(
+                onTap: onUserTap,
+                behavior: HitTestBehavior.opaque,
+                child: ProfileAvatar(
+                  key: ValueKey('avatar_${item.user.id}'),
+                  radius: 20,
+                  imageUrl: item.user.avatarUrl,
+                  fallbackInitial: item.user.username.isNotEmpty
+                      ? item.user.username
+                      : '?',
+                ),
               ),
               const SizedBox(width: 10),
               // İçerik: metin + follow chip
@@ -64,7 +71,11 @@ class ActivityFeedRow extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildLineText(),
+                    GestureDetector(
+                      onTap: onUserTap,
+                      behavior: HitTestBehavior.opaque,
+                      child: _buildLineText(),
+                    ),
                     if (showFollow) ...[
                       const SizedBox(height: 8),
                       _FollowChip(

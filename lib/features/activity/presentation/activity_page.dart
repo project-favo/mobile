@@ -236,6 +236,19 @@ class _ActivityPageState extends State<ActivityPage>
     }
   }
 
+  void _onUserTap(BuildContext context, ActivityItem item) {
+    if (item.user.id.isEmpty) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => UserProfilePage(
+          userId: item.user.id,
+          userName: item.user.username,
+          profileImageUrl: item.user.avatarUrl,
+        ),
+      ),
+    );
+  }
+
   Future<void> _onToggleFollow(BuildContext context, String userId) async {
     try {
       await _controller.toggleFollow(userId);
@@ -446,9 +459,9 @@ class _ActivityPageState extends State<ActivityPage>
                     key: ValueKey('row_${item.id}'),
                     item: item,
                     following: _controller.isFollowingUser(item.user.id),
-                    onToggleFollow:
-                        () => _onToggleFollow(context, item.user.id),
+                    onToggleFollow: () => _onToggleFollow(context, item.user.id),
                     onOpen: () => _onOpenItem(context, item),
+                    onUserTap: () => _onUserTap(context, item),
                   ),
                 );
               },

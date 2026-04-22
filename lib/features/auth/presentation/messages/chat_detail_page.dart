@@ -18,6 +18,7 @@ import '../../data/services/auth_service.dart';
 import '../../../../core/widgets/skeleton_loader.dart';
 import '../../../../core/widgets/profile_avatar.dart';
 import '../../../../core/cache/message_list_cache.dart';
+import '../profile/pages/user_profile_page.dart';
 
 class ChatDetailPage extends StatefulWidget {
   final ConversationDto conversation;
@@ -476,27 +477,42 @@ class _ChatDetailPageState extends State<ChatDetailPage>
           onPressed: () => Navigator.of(context).pop(true),
         ),
         iconTheme: const IconThemeData(color: AppColors.primary),
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ProfileAvatarImage(
-              size: 32,
-              imageUrl: _effectiveOtherUrl,
-              memoryBytes: _effectiveOtherBytes,
-              fallbackInitial: widget.conversation.otherParticipant.username,
-            ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                widget.conversation.otherParticipant.username,
-                style: AppTextStyles.heading3.copyWith(
-                  color: AppColors.textPrimary,
-                  fontWeight: FontWeight.w700,
+        title: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            final other = widget.conversation.otherParticipant;
+            if (other.id <= 0) return;
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => UserProfilePage(
+                  userId: other.id.toString(),
+                  userName: other.username,
                 ),
-                overflow: TextOverflow.ellipsis,
               ),
-            ),
-          ],
+            );
+          },
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ProfileAvatarImage(
+                size: 32,
+                imageUrl: _effectiveOtherUrl,
+                memoryBytes: _effectiveOtherBytes,
+                fallbackInitial: widget.conversation.otherParticipant.username,
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  widget.conversation.otherParticipant.username,
+                  style: AppTextStyles.heading3.copyWith(
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
         ),
         centerTitle: true,
       ),
