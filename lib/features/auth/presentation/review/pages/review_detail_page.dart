@@ -13,6 +13,7 @@ import '../../../../../core/network/api_client.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
 import 'review_page.dart';
+import '../../profile/pages/user_profile_page.dart';
 import '../../../data/models/review_dto.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/repositories/interaction_repository.dart';
@@ -242,6 +243,23 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
           ),
         );
       },
+    );
+  }
+
+  void _openOwnerProfile() {
+    if (_viewerUserId != null &&
+        _viewerUserId!.trim() == _currentReview.ownerId.trim()) {
+      return;
+    }
+    Navigator.push(
+      context,
+      SlideRightRoute(
+        page: UserProfilePage(
+          userId: _currentReview.ownerId,
+          userName: _currentReview.ownerUserName,
+          profileImageUrl: _currentReview.ownerProfilePhotoUrl,
+        ),
+      ),
     );
   }
 
@@ -476,55 +494,62 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
               /// REVIEWER INFO
-              Container(
-                padding: const EdgeInsets.all(AppSpacing.large),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.border.withValues(alpha: 0.7)),
-                ),
-                child: Row(
-                  children: [
-                    ProfileAvatarImage(
-                      size: 48,
-                      imageUrl: _currentReview.ownerProfilePhotoUrl,
-                      fallbackInitial: _currentReview.ownerUserName,
+                  onTap: _openOwnerProfile,
+                  child: Container(
+                    padding: const EdgeInsets.all(AppSpacing.large),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppColors.border.withValues(alpha: 0.7)),
                     ),
-                    const SizedBox(width: AppSpacing.medium),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
+                    child: Row(
+                      children: [
+                        ProfileAvatarImage(
+                          size: 48,
+                          imageUrl: _currentReview.ownerProfilePhotoUrl,
+                          fallbackInitial: _currentReview.ownerUserName,
+                        ),
+                        const SizedBox(width: AppSpacing.medium),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                '@${_currentReview.ownerUserName}',
-                                style: AppTextStyles.bodyBold.copyWith(fontSize: 17),
-                              ),
-                              if (_currentReview.isCollaborative) ...[
-                                const SizedBox(width: AppSpacing.small),
-                                Text(
-                                  'Sponsored',
-                                  style: AppTextStyles.chip.copyWith(
-                                    color: AppColors.primary,
+                              Row(
+                                children: [
+                                  Text(
+                                    '@${_currentReview.ownerUserName}',
+                                    style: AppTextStyles.bodyBold.copyWith(fontSize: 17),
                                   ),
+                                  if (_currentReview.isCollaborative) ...[
+                                    const SizedBox(width: AppSpacing.small),
+                                    Text(
+                                      'Sponsored',
+                                      style: AppTextStyles.chip.copyWith(
+                                        color: AppColors.primary,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                _currentReview.isCollaborative
+                                    ? 'Sponsored review · ${_formatDate(_currentReview.createdAt)}'
+                                    : 'Verified review · ${_formatDate(_currentReview.createdAt)}',
+                                style: AppTextStyles.bodySmall.copyWith(
+                                  color: AppColors.textSecondary,
                                 ),
-                              ],
+                              ),
                             ],
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            _currentReview.isCollaborative
-                                ? 'Sponsored review · ${_formatDate(_currentReview.createdAt)}'
-                                : 'Verified review · ${_formatDate(_currentReview.createdAt)}',
-                            style: AppTextStyles.bodySmall.copyWith(
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
               const SizedBox(height: AppSpacing.xLarge),
