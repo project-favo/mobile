@@ -47,11 +47,30 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
   /// Şikayet butonunu gizlemek için (kendi yorumu).
   String? _viewerUserId;
 
+  /// Media futures cached by media ID — prevents FutureBuilder from restarting on every rebuild.
+  final Map<String, Future<Uint8List?>> _mediaFutures = {};
+
   @override
   void initState() {
     super.initState();
     _currentReview = widget.review;
-    _refreshReview();
+    _initMediaFutures();
+    // Defer the refresh so the first frame renders fully before making an API call.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _refreshReview();
+    });
+  }
+
+  /// Pre-creates and caches a Future for each auth-required media item.
+  /// Using putIfAbsent means existing futures survive rebuilds caused by _refreshReview.
+  void _initMediaFutures() {
+    for (final media in _currentReview.mediaList) {
+      if ((media.url == null || media.url!.isEmpty) &&
+          (media.imageUrl == null || media.imageUrl!.isEmpty)) {
+        final mediaUrl = media.getMediaUrl(ApiConfig.baseUrl);
+        _mediaFutures.putIfAbsent(media.id, () => _loadMediaImage(mediaUrl));
+      }
+    }
   }
 
   bool get _canShowChatIcon {
@@ -83,6 +102,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
         viewerId = (await AuthService().getMe()).id;
       } catch (_) {}
 
+      _initMediaFutures();
       setState(() {
         _currentReview = updatedReview;
         _viewerUserId = viewerId;
@@ -381,44 +401,31 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
         throw Exception('Failed to get Firebase ID token');
       }
 
-      // Upvote toggle yap
+      // Toggle and confirm with actual server response
       final newLikeStatus = await _interactionRepository.toggleReviewLike(
         firebaseIdToken,
         _currentReview.id,
       );
 
-      // Review'ı backend'den tekrar çek (güncel durum için)
-      try {
-        final updatedReview = await _reviewRepository.getReviewById(
-          _currentReview.id,
-          firebaseIdToken: firebaseIdToken,
+      setState(() {
+        _currentReview = ReviewDto(
+          id: _currentReview.id,
+          title: _currentReview.title,
+          description: _currentReview.description,
+          isCollaborative: _currentReview.isCollaborative,
+          rating: _currentReview.rating,
+          createdAt: _currentReview.createdAt,
+          productId: _currentReview.productId,
+          productName: _currentReview.productName,
+          ownerId: _currentReview.ownerId,
+          ownerUserName: _currentReview.ownerUserName,
+          mediaList: _currentReview.mediaList,
+          likeCount: newLikeStatus
+              ? (previousLikeCount + 1)
+              : (previousLikeCount > 0 ? previousLikeCount - 1 : 0),
+          isLikedByCurrentUser: newLikeStatus,
         );
-        
-        setState(() {
-          _currentReview = updatedReview;
-        });
-      } catch (e) {
-        // Backend'den çekme başarısız olursa, toggle'dan dönen değeri kullan
-        setState(() {
-          _currentReview = ReviewDto(
-            id: _currentReview.id,
-            title: _currentReview.title,
-            description: _currentReview.description,
-            isCollaborative: _currentReview.isCollaborative,
-            rating: _currentReview.rating,
-            createdAt: _currentReview.createdAt,
-            productId: _currentReview.productId,
-            productName: _currentReview.productName,
-            ownerId: _currentReview.ownerId,
-            ownerUserName: _currentReview.ownerUserName,
-            mediaList: _currentReview.mediaList,
-            likeCount: newLikeStatus
-                ? (previousLikeCount + 1)
-                : (previousLikeCount > 0 ? previousLikeCount - 1 : 0),
-            isLikedByCurrentUser: newLikeStatus,
-          );
-        });
-      }
+      });
     } catch (e) {
       // Hata durumunda optimistic update'i geri al
       setState(() {
@@ -624,6 +631,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                             height: 100,
                             fit: BoxFit.contain,
                             alignment: Alignment.center,
+                            gaplessPlayback: true,
                             errorBuilder: (context, error, stackTrace) {
                               return Container(
                                 width: 100,
@@ -752,7 +760,8 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                       
                       // Backend'den URL gelmiyorsa, authentication ile yükle
                       return FutureBuilder<Uint8List?>(
-                        future: _loadMediaImage(mediaUrl),
+                        future: _mediaFutures[media.id] ??
+                            (_mediaFutures[media.id] = _loadMediaImage(mediaUrl)),
                         builder: (context, snapshot) {
                           if (snapshot.connectionState == ConnectionState.waiting) {
                             return Container(

@@ -249,9 +249,12 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
                   children: [
                     const Icon(Icons.star, size: 20, color: AppColors.primary),
                     const SizedBox(width: 6),
-                    Text(
-                      rating.toStringAsFixed(1),
-                      style: AppTextStyles.heading3.copyWith(color: AppColors.primary),
+                    Flexible(
+                      child: Text(
+                        rating.toStringAsFixed(1),
+                        style: AppTextStyles.heading3.copyWith(color: AppColors.primary),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     const SizedBox(width: 8),
                     Text(
@@ -322,9 +325,12 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
                             children: [
                               const Icon(Icons.star, size: 14, color: AppColors.primary),
                               const SizedBox(width: 4),
-                              Text(
-                                '${r.rating} / 5',
-                                style: AppTextStyles.bodySmall.copyWith(fontWeight: FontWeight.w600),
+                              Flexible(
+                                child: Text(
+                                  '${r.rating} / 5',
+                                  style: AppTextStyles.bodySmall.copyWith(fontWeight: FontWeight.w600),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                             ],
                           ),

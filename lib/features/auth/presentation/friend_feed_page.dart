@@ -14,6 +14,9 @@ import '../../../features/activity/domain/activity_models.dart';
 import '../../../features/activity/domain/activity_type.dart';
 import '../../../features/activity/presentation/widgets/activity_feed_row.dart';
 import '../../../features/activity/presentation/activity_page.dart';
+import '../data/models/product_dto.dart';
+import '../data/models/tag_dto.dart';
+import '../../../core/cache/product_memory_cache.dart';
 import 'home_page.dart';
 import 'profile/pages/profile_page.dart';
 import 'review/pages/review_page.dart';
@@ -177,9 +180,21 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
   Future<void> _openItem(ActivityItem item) async {
     final pid = item.targetContent?.productId;
     if (pid == null || pid.isEmpty) return;
+
+    // Use cached product if available; otherwise build a pre-filled placeholder
+    // so ReviewPage shows the thumbnail immediately instead of a blank skeleton.
+    final cached = ProductMemoryCache.instance.peek(pid);
+    final placeholder = cached ??
+        ProductDto(
+          id: pid,
+          name: item.targetContent?.title ?? '',
+          imageURL: item.targetContent?.thumbnailUrl ?? '',
+          tag: TagDto(id: '', name: ''),
+        );
+
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => ReviewPage(productId: pid, productName: item.targetContent?.title),
+        builder: (_) => ReviewPage(product: placeholder),
       ),
     );
   }
@@ -203,7 +218,7 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
           toolbarHeight: AppSpacing.toolbarHeight,
           centerTitle: true,
           title: Text(
-            'Following Feed',
+            'Friends Feed',
             style: AppTextStyles.heading2.copyWith(
               color: AppColors.primary,
               fontWeight: FontWeight.w700,

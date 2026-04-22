@@ -270,6 +270,8 @@ class _CompareProductSelectPageState extends State<CompareProductSelectPage> {
                                               Text(
                                                 p.tag.name,
                                                 style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
                                               ),
                                               if (productHasMeaningfulRating(
                                                   p.averageRating)) ...[
@@ -280,15 +282,18 @@ class _CompareProductSelectPageState extends State<CompareProductSelectPage> {
                                                         size: 14,
                                                         color: AppColors.primary),
                                                     const SizedBox(width: 4),
-                                                    Text(
-                                                      p.averageRating!
-                                                          .toStringAsFixed(1),
-                                                      style: AppTextStyles
-                                                          .bodySmall
-                                                          .copyWith(
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .w600),
+                                                    Flexible(
+                                                      child: Text(
+                                                        p.averageRating!
+                                                            .toStringAsFixed(1),
+                                                        style: AppTextStyles
+                                                            .bodySmall
+                                                            .copyWith(
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w600),
+                                                        overflow: TextOverflow.ellipsis,
+                                                      ),
                                                     ),
                                                   ],
                                                 ),
