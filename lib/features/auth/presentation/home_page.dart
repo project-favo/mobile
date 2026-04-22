@@ -86,6 +86,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   final ScrollController _scrollController = ScrollController();
   int _unreadMessageCount = 0;
   bool _notificationSvcAttached = false;
+  Timer? _unreadBadgeTimer;
 
   Route _noAnimationRoute(Widget page) {
     return PageRouteBuilder(
@@ -181,6 +182,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _loadData();
     }
     _loadUnreadCount();
+    // Her 30 saniyede badge'i arka planda güncelle
+    _unreadBadgeTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _loadUnreadCount(),
+    );
     _scrollController.addListener(_onScroll);
   }
 
@@ -194,6 +200,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   @override
   void dispose() {
+    _unreadBadgeTimer?.cancel();
     _topPicksTabController
       ..removeListener(_onTopPicksTabControllerChanged)
       ..dispose();

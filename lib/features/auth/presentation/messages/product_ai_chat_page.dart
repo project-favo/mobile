@@ -42,6 +42,7 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
   final FocusNode _inputFocusNode = FocusNode();
 
   bool _isSending = false;
+  bool _userScrolledUp = false; // kullanıcı yukarı kaydırdıysa auto-scroll durdur
   late final AnimationController _logoController;
   String? _userAvatarUrl;
   Uint8List? _userAvatarBytes;
@@ -73,9 +74,16 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
       duration: const Duration(milliseconds: 1400),
     )..repeat(reverse: true);
 
+    _scrollController.addListener(() {
+      if (!_scrollController.hasClients) return;
+      final atBottom = _scrollController.position.pixels >=
+          _scrollController.position.maxScrollExtent - 60;
+      _userScrolledUp = !atBottom;
+    });
+
     _loadMe();
     _inputFocusNode.addListener(() {
-      if (_inputFocusNode.hasFocus) {
+      if (_inputFocusNode.hasFocus && !_userScrolledUp) {
         _scrollToBottom();
       }
     });
@@ -112,7 +120,9 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
   @override
   void didChangeMetrics() {
     super.didChangeMetrics();
-    _scrollToBottom();
+    if (!_userScrolledUp) {
+      _scrollToBottom();
+    }
   }
 
   String get _encodedProductId => Uri.encodeComponent(widget.productId);
@@ -133,6 +143,7 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
       _messages.add(_ProductAiMessage(role: 'user', text: text));
     });
     _controller.clear();
+    _userScrolledUp = false; // mesaj gönderilince en alta dön
     _scrollToBottom();
 
     try {

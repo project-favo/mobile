@@ -38,6 +38,7 @@ class _AiChatPageState extends State<AiChatPage>
   String? _userAvatarUrl;
   Uint8List? _userAvatarBytes;
   String? _userInitial;
+  bool _userScrolledUp = false; // kullanıcı yukarı kaydırdıysa auto-scroll durdur
 
   late final List<_AiMessage> _messages;
 
@@ -60,9 +61,18 @@ class _AiChatPageState extends State<AiChatPage>
       duration: const Duration(milliseconds: 1400),
     )..repeat(reverse: true);
 
+    _scrollController.addListener(() {
+      if (!_scrollController.hasClients) return;
+      final atBottom = _scrollController.position.pixels >=
+          _scrollController.position.maxScrollExtent - 60;
+      if (_userScrolledUp != !atBottom) {
+        _userScrolledUp = !atBottom;
+      }
+    });
+
     _loadMe();
     _inputFocusNode.addListener(() {
-      if (_inputFocusNode.hasFocus) {
+      if (_inputFocusNode.hasFocus && !_userScrolledUp) {
         _scrollToBottom();
       }
     });
@@ -99,7 +109,10 @@ class _AiChatPageState extends State<AiChatPage>
   @override
   void didChangeMetrics() {
     super.didChangeMetrics();
-    _scrollToBottom();
+    // Sadece kullanıcı zaten en alttaysa (yeni mesaj yazınca) aşağıya git
+    if (!_userScrolledUp) {
+      _scrollToBottom();
+    }
   }
 
   Future<Response<dynamic>> _callChatApi(String text) {
@@ -115,6 +128,7 @@ class _AiChatPageState extends State<AiChatPage>
       _messages.add(_AiMessage(role: 'user', text: text));
     });
     _controller.clear();
+    _userScrolledUp = false; // mesaj gönderilince en alta dön
     _scrollToBottom();
 
     try {

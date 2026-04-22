@@ -33,10 +33,56 @@ class _ConversationListPageState extends State<ConversationListPage> {
   /// Konuşma API’si avatar göndermiyorsa [getUserById] ile doldurulur.
   final Map<int, ({String? url, Uint8List? bytes})> _avatarExtras = {};
 
+  Timer? _pollTimer;
+
   @override
   void initState() {
     super.initState();
     _loadConversations();
+    // Her 5 saniyede sessizce tazele — yeni mesaj gelince liste güncellenir
+    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _silentRefresh();
+    });
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _silentRefresh() async {
+    try {
+      final page = await _messageRepository.getConversations(page: 0, size: 20);
+      if (!mounted) return;
+      final sorted = [...page.content]..sort((a, b) {
+          final da = DateTime.tryParse(a.lastMessageAt) ??
+              DateTime.fromMillisecondsSinceEpoch(0);
+          final db = DateTime.tryParse(b.lastMessageAt) ??
+              DateTime.fromMillisecondsSinceEpoch(0);
+          return db.compareTo(da);
+        });
+      // Sadece gerçek değişiklik varsa rebuild et
+      bool changed = sorted.length != _conversations.length;
+      if (!changed) {
+        for (int i = 0; i < sorted.length; i++) {
+          final n = sorted[i];
+          final o = _conversations[i];
+          if (n.id != o.id ||
+              n.lastMessage != o.lastMessage ||
+              n.unreadCount != o.unreadCount) {
+            changed = true;
+            break;
+          }
+        }
+      }
+      if (changed && mounted) {
+        setState(() => _conversations = sorted);
+        _enrichConversationAvatars(sorted);
+      }
+    } catch (_) {
+      // Arka plan poll hatasını sustur
+    }
   }
 
   Future<void> _loadConversations() async {
