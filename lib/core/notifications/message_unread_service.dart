@@ -8,9 +8,9 @@ import '../utils/session_helper.dart';
 /// Singleton that tracks total unread-conversation count across the app.
 ///
 /// Works like [NotificationRealtimeService]: callers call [attach]/[detach]
-/// and the service maintains a background 5-second polling loop while any
-/// widget is attached.  [unreadCount] is a [ValueNotifier] so widgets can
-/// react with [ValueListenableBuilder] without ever calling [setState].
+/// and the service maintains a background polling loop while any widget is
+/// attached.  [unreadCount] is a [ValueNotifier] so widgets can react with
+/// [ValueListenableBuilder] without ever calling [setState].
 class MessageUnreadService {
   MessageUnreadService._();
   static final MessageUnreadService instance = MessageUnreadService._();
@@ -37,7 +37,7 @@ class MessageUnreadService {
 
   void _startPolling() {
     _refresh();
-    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _refresh());
+    _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
   }
 
   void _stopPolling() {

@@ -43,7 +43,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
     _loadConversations();
     MessageUnreadService.instance.attach();
     // Her 5 saniyede sessizce tazele — yeni mesaj gelince liste güncellenir
-    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       _silentRefresh();
     });
   }
