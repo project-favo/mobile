@@ -74,19 +74,9 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
       duration: const Duration(milliseconds: 1400),
     )..repeat(reverse: true);
 
-    _scrollController.addListener(() {
-      if (!_scrollController.hasClients) return;
-      final atBottom = _scrollController.position.pixels >=
-          _scrollController.position.maxScrollExtent - 60;
-      _userScrolledUp = !atBottom;
-    });
+    _scrollController.addListener(_onScrollChanged);
 
     _loadMe();
-    _inputFocusNode.addListener(() {
-      if (_inputFocusNode.hasFocus && !_userScrolledUp) {
-        _scrollToBottom();
-      }
-    });
   }
 
   Future<void> _loadMe() async {
@@ -106,23 +96,24 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
     } catch (_) {}
   }
 
+  void _onScrollChanged() {
+    if (!_scrollController.hasClients) return;
+    final pos = _scrollController.position;
+    if (!pos.hasContentDimensions) return;
+    final atBottom = pos.pixels >= pos.maxScrollExtent - 80;
+    _userScrolledUp = !atBottom;
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _ProductAiTranscriptCache.save(widget.productId, _messages);
     _logoController.dispose();
     _controller.dispose();
+    _scrollController.removeListener(_onScrollChanged);
     _scrollController.dispose();
     _inputFocusNode.dispose();
     super.dispose();
-  }
-
-  @override
-  void didChangeMetrics() {
-    super.didChangeMetrics();
-    if (!_userScrolledUp) {
-      _scrollToBottom();
-    }
   }
 
   String get _encodedProductId => Uri.encodeComponent(widget.productId);
@@ -200,7 +191,7 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
         );
         _isSending = false;
       });
-      _scrollToBottom();
+      if (!_userScrolledUp) _scrollToBottom();
     } catch (e) {
       if (!mounted) return;
       final msg = ErrorHandler.getUserFriendlyMessage(e);
@@ -245,13 +236,13 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
-      final max = _scrollController.position.maxScrollExtent;
-      if (max.isFinite) _scrollController.jumpTo(max);
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
-      final max = _scrollController.position.maxScrollExtent;
-      if (max.isFinite) _scrollController.jumpTo(max);
+      final pos = _scrollController.position;
+      if (!pos.hasContentDimensions) return;
+      _scrollController.animateTo(
+        pos.maxScrollExtent,
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
+      );
     });
   }
 

@@ -61,21 +61,9 @@ class _AiChatPageState extends State<AiChatPage>
       duration: const Duration(milliseconds: 1400),
     )..repeat(reverse: true);
 
-    _scrollController.addListener(() {
-      if (!_scrollController.hasClients) return;
-      final atBottom = _scrollController.position.pixels >=
-          _scrollController.position.maxScrollExtent - 60;
-      if (_userScrolledUp != !atBottom) {
-        _userScrolledUp = !atBottom;
-      }
-    });
+    _scrollController.addListener(_onScrollChanged);
 
     _loadMe();
-    _inputFocusNode.addListener(() {
-      if (_inputFocusNode.hasFocus && !_userScrolledUp) {
-        _scrollToBottom();
-      }
-    });
   }
 
   Future<void> _loadMe() async {
@@ -95,24 +83,24 @@ class _AiChatPageState extends State<AiChatPage>
     } catch (_) {}
   }
 
+  void _onScrollChanged() {
+    if (!_scrollController.hasClients) return;
+    final pos = _scrollController.position;
+    if (!pos.hasContentDimensions) return;
+    final atBottom = pos.pixels >= pos.maxScrollExtent - 80;
+    _userScrolledUp = !atBottom;
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _AiChatTranscriptCache.save(_messages);
     _logoController.dispose();
     _controller.dispose();
+    _scrollController.removeListener(_onScrollChanged);
     _scrollController.dispose();
     _inputFocusNode.dispose();
     super.dispose();
-  }
-
-  @override
-  void didChangeMetrics() {
-    super.didChangeMetrics();
-    // Sadece kullanıcı zaten en alttaysa (yeni mesaj yazınca) aşağıya git
-    if (!_userScrolledUp) {
-      _scrollToBottom();
-    }
   }
 
   Future<Response<dynamic>> _callChatApi(String text) {
@@ -168,7 +156,8 @@ class _AiChatPageState extends State<AiChatPage>
         );
         _isSending = false;
       });
-      _scrollToBottom();
+      // Sadece kullanıcı zaten en alttaysa aşağıya git
+      if (!_userScrolledUp) _scrollToBottom();
     } catch (e) {
       if (!mounted) return;
       final msg = ErrorHandler.getUserFriendlyMessage(e);
@@ -213,17 +202,13 @@ class _AiChatPageState extends State<AiChatPage>
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
-      final max = _scrollController.position.maxScrollExtent;
-      if (max.isFinite) {
-        _scrollController.jumpTo(max);
-      }
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
-      final max = _scrollController.position.maxScrollExtent;
-      if (max.isFinite) {
-        _scrollController.jumpTo(max);
-      }
+      final pos = _scrollController.position;
+      if (!pos.hasContentDimensions) return;
+      _scrollController.animateTo(
+        pos.maxScrollExtent,
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
+      );
     });
   }
 
