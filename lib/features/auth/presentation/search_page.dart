@@ -129,18 +129,14 @@ class _SearchPageState extends State<SearchPage> {
       });
       SearchWarmCache.instance.rememberRootTags(rootTags);
 
-      // Ürünleri arka planda yükle (tümünü değil, ilk sayfa – hız için)
+      // Tüm ürünleri yükle — yerel arama tüm veritabanında çalışsın
       try {
-        final result = await _productRepository.getHomeFeed(
-          page: 0,
-          size: 30,
-          firebaseIdToken: token,
-        );
+        final products = await _productRepository.getAllProductsRaw();
         if (!mounted) return;
         setState(() {
-          _allProducts = result.content;
+          _allProducts = products;
         });
-        SearchWarmCache.instance.rememberSeedProducts(result.content);
+        SearchWarmCache.instance.rememberSeedProducts(products);
       } catch (_) {
         // Ürünler yüklenemezse arama boş kalır, kategoriler çalışır
       }
@@ -174,15 +170,11 @@ class _SearchPageState extends State<SearchPage> {
       }
 
       try {
-        final result = await _productRepository.getHomeFeed(
-          page: 0,
-          size: 30,
-          firebaseIdToken: token,
-        );
-        SearchWarmCache.instance.rememberSeedProducts(result.content);
+        final products = await _productRepository.getAllProductsRaw();
+        SearchWarmCache.instance.rememberSeedProducts(products);
         if (mounted) {
           setState(() {
-            _allProducts = result.content;
+            _allProducts = products;
           });
         }
       } catch (_) {}
@@ -580,54 +572,45 @@ class _SearchPageState extends State<SearchPage> {
                                           ],
                                           Expanded(
                                             child: ListView.separated(
+                                              padding: EdgeInsets.zero,
                                               itemCount: _currentCategories.length,
-                                              separatorBuilder: (_, __) => const SizedBox(height: 6),
+                                              separatorBuilder: (_, __) => const Divider(height: 1, thickness: 0.5),
                                               itemBuilder: (context, index) {
                                                 final category = _currentCategories[index];
-                                                return Material(
-                                                  color: AppColors.surface,
-                                                  borderRadius: BorderRadius.circular(12),
-                                                  child: InkWell(
-                                                    borderRadius: BorderRadius.circular(12),
-                                                    onTap: () => _openCategory(category),
-                                                    child: Padding(
-                                                      padding: const EdgeInsets.symmetric(
-                                                        horizontal: 16,
-                                                        vertical: 14,
-                                                      ),
-                                                      child: Row(
-                                                        children: [
-                                                          Container(
-                                                            width: 32,
-                                                            height: 32,
-                                                            decoration: BoxDecoration(
-                                                              color: AppColors.primary.withValues(alpha: 0.08),
-                                                              borderRadius: BorderRadius.circular(8),
-                                                            ),
-                                                            child: const Icon(
-                                                              Icons.category_outlined,
-                                                              size: 17,
-                                                              color: AppColors.primary,
-                                                            ),
+                                                return InkWell(
+                                                  onTap: () => _openCategory(category),
+                                                  child: Padding(
+                                                    padding: const EdgeInsets.symmetric(
+                                                      horizontal: 4,
+                                                      vertical: 11,
+                                                    ),
+                                                    child: Row(
+                                                      children: [
+                                                        Container(
+                                                          width: 6,
+                                                          height: 6,
+                                                          decoration: const BoxDecoration(
+                                                            color: AppColors.primary,
+                                                            shape: BoxShape.circle,
                                                           ),
-                                                          const SizedBox(width: 12),
-                                                          Expanded(
-                                                            child: Text(
-                                                              category.name,
-                                                              style: const TextStyle(
-                                                                fontSize: 14,
-                                                                fontWeight: FontWeight.w600,
-                                                                color: AppColors.textPrimary,
-                                                              ),
+                                                        ),
+                                                        const SizedBox(width: 12),
+                                                        Expanded(
+                                                          child: Text(
+                                                            category.name,
+                                                            style: const TextStyle(
+                                                              fontSize: 15,
+                                                              fontWeight: FontWeight.w500,
+                                                              color: AppColors.textPrimary,
                                                             ),
                                                           ),
-                                                          const Icon(
-                                                            Icons.chevron_right_rounded,
-                                                            size: 20,
-                                                            color: AppColors.textSecondary,
-                                                          ),
-                                                        ],
-                                                      ),
+                                                        ),
+                                                        const Icon(
+                                                          Icons.chevron_right_rounded,
+                                                          size: 18,
+                                                          color: AppColors.textSecondary,
+                                                        ),
+                                                      ],
                                                     ),
                                                   ),
                                                 );
