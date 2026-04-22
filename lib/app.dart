@@ -25,6 +25,11 @@ class MyApp extends StatelessWidget {
       scaffoldMessengerKey: appScaffoldMessengerKey,
       routes: AppRoutes.routes,
       home: AuthSplashGate(onboardingCompleted: onboardingCompleted),
+      builder: (context, child) => GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+        child: child,
+      ),
     );
   }
 }
