@@ -42,7 +42,8 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
   final FocusNode _inputFocusNode = FocusNode();
 
   bool _isSending = false;
-  bool _userScrolledUp = false; // kullanıcı yukarı kaydırdıysa auto-scroll durdur
+  bool _userScrolledUp = false;
+  double _prevKeyboardHeight = 0;
   late final AnimationController _logoController;
   String? _userAvatarUrl;
   Uint8List? _userAvatarBytes;
@@ -102,6 +103,19 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
     if (!pos.hasContentDimensions) return;
     final atBottom = pos.pixels >= pos.maxScrollExtent - 80;
     _userScrolledUp = !atBottom;
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final kbHeight = MediaQuery.of(context).viewInsets.bottom;
+      if (kbHeight > _prevKeyboardHeight && !_userScrolledUp) {
+        _scrollToBottom();
+      }
+      _prevKeyboardHeight = kbHeight;
+    });
   }
 
   @override

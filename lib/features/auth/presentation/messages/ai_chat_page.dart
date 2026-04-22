@@ -38,7 +38,8 @@ class _AiChatPageState extends State<AiChatPage>
   String? _userAvatarUrl;
   Uint8List? _userAvatarBytes;
   String? _userInitial;
-  bool _userScrolledUp = false; // kullanıcı yukarı kaydırdıysa auto-scroll durdur
+  bool _userScrolledUp = false;
+  double _prevKeyboardHeight = 0;
 
   late final List<_AiMessage> _messages;
 
@@ -89,6 +90,20 @@ class _AiChatPageState extends State<AiChatPage>
     if (!pos.hasContentDimensions) return;
     final atBottom = pos.pixels >= pos.maxScrollExtent - 80;
     _userScrolledUp = !atBottom;
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    // Sadece klavye açılınca (keyboard height arttığında) en alta git
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final kbHeight = MediaQuery.of(context).viewInsets.bottom;
+      if (kbHeight > _prevKeyboardHeight && !_userScrolledUp) {
+        _scrollToBottom();
+      }
+      _prevKeyboardHeight = kbHeight;
+    });
   }
 
   @override
