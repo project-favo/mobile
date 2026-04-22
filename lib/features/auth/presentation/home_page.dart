@@ -102,6 +102,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       unselectedItemColor: AppColors.textSecondary,
       showSelectedLabels: false,
       showUnselectedLabels: false,
+      selectedFontSize: 0,
+      unselectedFontSize: 0,
       onTap: (index) {
         if (index == 0) {
           Navigator.pushReplacement(

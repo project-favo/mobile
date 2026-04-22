@@ -99,6 +99,8 @@ class _ProfilePageState extends State<ProfilePage>
       unselectedItemColor: AppColors.textSecondary,
       showSelectedLabels: false,
       showUnselectedLabels: false,
+      selectedFontSize: 0,
+      unselectedFontSize: 0,
       onTap: (index) {
         if (index == 4) return;
         if (index == 1) {

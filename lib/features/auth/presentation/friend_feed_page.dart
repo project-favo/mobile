@@ -156,6 +156,8 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
       unselectedItemColor: AppColors.textSecondary,
       showSelectedLabels: false,
       showUnselectedLabels: false,
+      selectedFontSize: 0,
+      unselectedFontSize: 0,
       onTap: (index) {
         if (index == 1) return;
         if (index == 0) {

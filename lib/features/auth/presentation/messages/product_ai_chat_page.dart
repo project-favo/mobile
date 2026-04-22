@@ -77,6 +77,12 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
 
     _scrollController.addListener(_onScrollChanged);
 
+    _inputFocusNode.addListener(() {
+      if (_inputFocusNode.hasFocus && !_userScrolledUp) {
+        _scrollToBottom();
+      }
+    });
+
     _loadMe();
   }
 
@@ -252,11 +258,7 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
       if (!_scrollController.hasClients) return;
       final pos = _scrollController.position;
       if (!pos.hasContentDimensions) return;
-      _scrollController.animateTo(
-        pos.maxScrollExtent,
-        duration: const Duration(milliseconds: 150),
-        curve: Curves.easeOut,
-      );
+      _scrollController.jumpTo(pos.maxScrollExtent);
     });
   }
 

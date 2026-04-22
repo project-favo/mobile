@@ -64,6 +64,14 @@ class _AiChatPageState extends State<AiChatPage>
 
     _scrollController.addListener(_onScrollChanged);
 
+    // Klavye açılmaya başladığı anda (focus kazanılınca) scroll'u tetikle
+    // → klavye ile liste aynı anda yukarı gider, gecikme olmaz
+    _inputFocusNode.addListener(() {
+      if (_inputFocusNode.hasFocus && !_userScrolledUp) {
+        _scrollToBottom();
+      }
+    });
+
     _loadMe();
   }
 
@@ -219,11 +227,7 @@ class _AiChatPageState extends State<AiChatPage>
       if (!_scrollController.hasClients) return;
       final pos = _scrollController.position;
       if (!pos.hasContentDimensions) return;
-      _scrollController.animateTo(
-        pos.maxScrollExtent,
-        duration: const Duration(milliseconds: 150),
-        curve: Curves.easeOut,
-      );
+      _scrollController.jumpTo(pos.maxScrollExtent);
     });
   }
 

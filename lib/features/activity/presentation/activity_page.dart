@@ -55,6 +55,8 @@ class _ActivityPageState extends State<ActivityPage>
       unselectedItemColor: AppColors.textSecondary,
       showSelectedLabels: false,
       showUnselectedLabels: false,
+      selectedFontSize: 0,
+      unselectedFontSize: 0,
       onTap: (index) {
         if (index == 3) return;
         if (index == 1) {

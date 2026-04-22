@@ -639,6 +639,8 @@ class _SearchPageState extends State<SearchPage> {
         unselectedItemColor: AppColors.textSecondary,
         showSelectedLabels: false,
         showUnselectedLabels: false,
+      selectedFontSize: 0,
+      unselectedFontSize: 0,
         onTap: (index) {
           if (index == 0) return;
           if (index == 1) {
