@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -53,6 +54,7 @@ class _ProfilePageState extends State<ProfilePage>
   final ProductRepository _productRepository = ProductRepository();
   final SessionHelper _sessionHelper = SessionHelper();
   UserResponseDto? _user;
+  Uint8List? _cachedProfilePhotoBytes; // build()'da yeniden decode etme — her rebuild'de yeni nesne oluşur ve avatar titrer
   bool _isLoading = true;
   String? _errorMessage;
   List<ProductDto> _wishlistProducts = [];
@@ -75,6 +77,9 @@ class _ProfilePageState extends State<ProfilePage>
       user: _user!,
       myReviews: _myReviews,
       wishlist: _wishlistProducts,
+      reviewProductHints: _reviewProductHints,
+      followerCount: _followerCount,
+      followingCount: _followingCount,
     );
   }
 
@@ -136,15 +141,23 @@ class _ProfilePageState extends State<ProfilePage>
     final warm = ProfileWarmCache.instance.peek();
     if (warm != null) {
       _user = warm.user;
+      _cachedProfilePhotoBytes = decodeProfilePhotoBytes(warm.user.profilePhotoData);
       _myReviews = List<ReviewDto>.from(warm.myReviews);
       _wishlistProducts = List<ProductDto>.from(warm.wishlist);
       _wishlistProductsOriginalOrder = List<ProductDto>.from(warm.wishlist);
+      _reviewProductHints.addAll(warm.reviewProductHints);
+      _followerCount = warm.followerCount;
+      _followingCount = warm.followingCount;
       _isLoading = false;
       _isLoadingMyReviews = false;
       _isLoadingWishlist = false;
       _sortMyReviews();
       _sortWishlist();
-      unawaited(_loadUserData(background: true));
+      // Sıcak önbellek varken _loadUserData atla — getMe() avatar titremeye neden oluyor.
+      // Sadece follower sayılarını ve içerikleri arka planda tazele.
+      if (warm.user.id.isNotEmpty) {
+        unawaited(_loadFollowCounts(warm.user.id));
+      }
       unawaited(_loadMyReviews(background: true));
       unawaited(_loadWishlist(background: true));
     } else {
@@ -153,6 +166,7 @@ class _ProfilePageState extends State<ProfilePage>
       _loadMyReviews();
     }
     _tabController.addListener(() {
+      if (_tabController.indexIsChanging) return;
       if (_tabController.index == 1 &&
           _wishlistProducts.isEmpty &&
           !_isLoadingWishlist) {
@@ -183,7 +197,8 @@ class _ProfilePageState extends State<ProfilePage>
         setState(() {
           _myReviews = reviews;
           _isLoadingMyReviews = false;
-          _reviewProductHints.clear();
+          // Background modda hint'leri silme — review kartları titrer
+          if (!background) _reviewProductHints.clear();
         });
         _rememberWarmProfile();
         _sortMyReviews();
@@ -209,24 +224,35 @@ class _ProfilePageState extends State<ProfilePage>
     if (ids.isEmpty) return;
     final token = await _sessionHelper.getTokenAndSetHeader();
     final list = ids.toList();
-    const batch = 5;
-    for (var i = 0; i < list.length; i += batch) {
+    const batchSize = 5;
+    for (var i = 0; i < list.length; i += batchSize) {
       if (!mounted) return;
-      final end = (i + batch > list.length) ? list.length : i + batch;
+      final end = (i + batchSize > list.length) ? list.length : i + batchSize;
       final slice = list.sublist(i, end);
-      await Future.wait(
+      final results = await Future.wait(
         slice.map((id) async {
           try {
-            final p = await _productRepository.getProductById(
+            return MapEntry(
               id,
-              firebaseIdToken: token,
+              await _productRepository.getProductById(
+                id,
+                firebaseIdToken: token,
+              ),
             );
-            if (mounted) {
-              setState(() => _reviewProductHints[id] = p);
-            }
-          } catch (_) {}
+          } catch (_) {
+            return null;
+          }
         }),
       );
+      if (!mounted) return;
+      final updates = results.whereType<MapEntry<String, ProductDto>>().toList();
+      if (updates.isNotEmpty) {
+        setState(() {
+          for (final e in updates) {
+            _reviewProductHints[e.key] = e.value;
+          }
+        });
+      }
     }
   }
 
@@ -296,6 +322,7 @@ class _ProfilePageState extends State<ProfilePage>
         final review = _myReviews[index];
         final hint = _reviewProductHints[review.productId];
         return ProfileReviewRowCard(
+          key: ValueKey(review.id),
           review: review,
           productImageUrl: hint?.imageURL,
           onTap: () {
@@ -329,14 +356,19 @@ class _ProfilePageState extends State<ProfilePage>
     }
 
     try {
-      await _authService.syncFirebaseUserAndRefreshIdToken();
+      // Background modda token sync atla — yavaş ve avatar flicker'a sebep oluyor
+      if (!background) {
+        await _authService.syncFirebaseUserAndRefreshIdToken();
+      }
       var user = await _authService.getMe();
       if (!user.hasProfileAvatarVisual && user.id.isNotEmpty) {
         final extra = await _authService.getUserById(user.id);
         user = user.withFilledAvatarFrom(extra);
       }
+      if (!mounted) return;
       setState(() {
         _user = user;
+        _cachedProfilePhotoBytes = decodeProfilePhotoBytes(user.profilePhotoData);
         _isLoading = false;
         if (user.id.isEmpty) {
           _followerCount = 0;
@@ -352,6 +384,7 @@ class _ProfilePageState extends State<ProfilePage>
         _isLoading = false;
         return;
       }
+      if (!mounted) return;
       setState(() {
         _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
         _isLoading = false;
@@ -467,24 +500,16 @@ class _ProfilePageState extends State<ProfilePage>
       physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
       itemCount: _wishlistProducts.length,
-      separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.large),
+      separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
       itemBuilder: (context, index) {
         final product = _wishlistProducts[index];
-        return ProductCard(
-          productId: product.id,
-          imageUrl: product.imageURL,
-          title: product.name,
-          category: product.tag.name,
-          categoryPath: product.tag.categoryPath,
-          rating: product.averageRating ?? 0.0,
-          desc: product.description ?? '',
-          isFavorite: product.isLiked ?? true,
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => ReviewPage(product: product)),
-            );
-          },
+        return _WishlistRow(
+          key: ValueKey(product.id),
+          product: product,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => ReviewPage(product: product)),
+          ),
           onFavoriteTap: () => _toggleWishlistLike(product),
         );
       },
@@ -515,6 +540,7 @@ class _ProfilePageState extends State<ProfilePage>
         product.id,
       );
 
+      if (!mounted) return;
       setState(() {
         if (!liked) {
           _wishlistProducts.removeWhere((p) => p.id == product.id);
@@ -531,13 +557,13 @@ class _ProfilePageState extends State<ProfilePage>
       });
     } catch (e) {
       // Hata durumunda önceki haline dön
+      if (!mounted) return;
       setState(() {
         final idx = _wishlistProducts.indexWhere((p) => p.id == previous.id);
         if (idx != -1) {
           _wishlistProducts[idx] = previous;
         }
       });
-      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(ErrorHandler.getUserFriendlyMessage(e)),
@@ -764,7 +790,7 @@ class _ProfilePageState extends State<ProfilePage>
             ProfileAvatar(
               radius: 50,
               imageUrl: _user!.profileImageUrl,
-              memoryBytes: decodeProfilePhotoBytes(_user!.profilePhotoData),
+              memoryBytes: _cachedProfilePhotoBytes,
               fallbackInitial: _user!.userName,
             ),
             const SizedBox(height: AppSpacing.large),
@@ -1112,6 +1138,98 @@ class _SortDropdown extends StatelessWidget {
         Icons.expand_more_rounded,
         size: 20,
         color: AppColors.textSecondary,
+      ),
+    );
+  }
+}
+
+// ─── Wishlist minimal satır kartı ────────────────────────────────────────────
+
+class _WishlistRow extends StatelessWidget {
+  final ProductDto product;
+  final VoidCallback onTap;
+  final VoidCallback onFavoriteTap;
+
+  const _WishlistRow({
+    super.key,
+    required this.product,
+    required this.onTap,
+    required this.onFavoriteTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final liked = product.isLiked ?? true;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.network(
+                product.imageURL,
+                width: 56,
+                height: 56,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  width: 56,
+                  height: 56,
+                  color: AppColors.border,
+                  child: const Icon(
+                    Icons.image_not_supported_outlined,
+                    size: 22,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    product.name,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    product.tag.name,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w400,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: onFavoriteTap,
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Icon(
+                  liked
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
+                  size: 20,
+                  color: liked ? Colors.redAccent : AppColors.textSecondary,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

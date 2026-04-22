@@ -51,7 +51,7 @@ class _AuthSplashGateState extends State<AuthSplashGate> {
   }
 
   Future<void> _bootstrap() async {
-    final minSplashFuture = Future.delayed(const Duration(seconds: 2));
+    final minSplashFuture = Future.delayed(const Duration(milliseconds: 800));
 
     if (!widget.onboardingCompleted) {
       await minSplashFuture;
@@ -109,8 +109,8 @@ class _FavoLaunchSplash extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           TweenAnimationBuilder<double>(
-            tween: Tween<double>(begin: 0.94, end: 1.04),
-            duration: const Duration(milliseconds: 950),
+            tween: Tween<double>(begin: 0.96, end: 1.0),
+            duration: const Duration(milliseconds: 500),
             curve: Curves.easeInOut,
             builder: (context, value, child) =>
                 Transform.scale(scale: value, child: child),

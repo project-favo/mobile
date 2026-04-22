@@ -7,32 +7,23 @@ class AppChipStyles {
       color: selected ? AppColors.primary : Colors.white,
       borderRadius: BorderRadius.circular(999),
       border: Border.all(
-        color: selected ? AppColors.primary : AppColors.textSecondary.withOpacity(0.28),
-        width: 1,
+        color: selected ? AppColors.primary : AppColors.border,
+        width: 1.5,
       ),
-      boxShadow: selected
-          ? [
-              BoxShadow(
-                color: AppColors.primary.withValues(alpha: 0.2),
-                blurRadius: 18,
-                spreadRadius: -2,
-                offset: const Offset(0, 6),
-              ),
-            ]
-          : [],
     );
   }
 
-  /// Alt kategori: gölge yok — köşede gölge taşması / kirli görünümü önler.
   static BoxDecoration subCategoryChipDecoration({bool selected = false}) {
     return BoxDecoration(
       color: selected
-          ? AppColors.primary.withValues(alpha: 0.12)
-          : Colors.white,
+          ? AppColors.primary.withValues(alpha: 0.08)
+          : Colors.transparent,
       borderRadius: BorderRadius.circular(999),
       border: Border.all(
-        color: selected ? AppColors.primary : AppColors.border,
-        width: 1,
+        color: selected
+            ? AppColors.primary
+            : AppColors.textSecondary.withValues(alpha: 0.35),
+        width: 1.2,
       ),
     );
   }
@@ -42,16 +33,16 @@ class AppChipStyles {
       color: selected ? Colors.white : AppColors.textPrimary,
       fontSize: 13,
       fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-      letterSpacing: 0.2,
+      letterSpacing: 0.1,
     );
   }
 
   static TextStyle subCategoryChipText({bool selected = false}) {
     return TextStyle(
-      color: selected ? AppColors.primary : AppColors.textPrimary,
+      color: selected ? AppColors.primary : AppColors.textSecondary,
       fontSize: 12,
-      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-      letterSpacing: 0.15,
+      fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+      letterSpacing: 0.1,
     );
   }
 }

@@ -53,6 +53,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   List<TagDto> _tags = [];
   List<TagDto> _subTags = [];
+  // Statik bellek cache — sayfa yeniden açıldığında anında göster
+  static final Map<_TopPicksTab, List<ProductDto>> _topPicksStaticCache = {};
+
   final Map<_TopPicksTab, List<ProductDto>> _topPicksByTab = {
     _TopPicksTab.trendingReviews: [],
     _TopPicksTab.weeklyLikes: [],
@@ -69,7 +72,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   late final TabController _topPicksTabController;
   final ScrollController _topPicksScrollController = ScrollController();
   _TopPicksTab _selectedTopPicksTab = _TopPicksTab.trendingReviews;
-  bool _isTopPicksLoading = false;
+  bool _isTopPicksLoading = true; // başlangıçta skeleton göster
   List<ProductDto> _filteredProducts = []; // Current page products
   int _currentPage = 0;
   int _totalPages = 0;
@@ -149,11 +152,21 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_hookNotificationsIfSignedIn());
     });
+    // Top picks statik cache'den yükle → anında göster
+    for (final tab in _TopPicksTab.values) {
+      final cached = _topPicksStaticCache[tab];
+      if (cached != null && cached.isNotEmpty) {
+        _topPicksByTab[tab] = List<ProductDto>.from(cached);
+      }
+    }
+    if (_topPicksByTab[_selectedTopPicksTab]?.isNotEmpty == true) {
+      _isTopPicksLoading = false;
+    }
     final warmTags = SearchWarmCache.instance.peekRootTags();
     final warmProducts = SearchWarmCache.instance.peekSeedProducts();
     if (warmTags.isNotEmpty || warmProducts.isNotEmpty) {
       _tags = warmTags;
-      _topPicksByTab[_TopPicksTab.trendingReviews] = warmProducts;
+      // warmProducts home feed'den gelir — trending olarak gösterme
       _filteredProducts = warmProducts;
       _isLoading = false;
       _isFiltering = false;
@@ -257,70 +270,57 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   Widget _buildTopPicksHeader() {
-    final currentIndex = _TopPicksTab.values.indexOf(_selectedTopPicksTab);
-    return Column(
-      children: [
-        GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onHorizontalDragEnd: (details) {
-            final velocity = details.primaryVelocity ?? 0;
-            if (velocity < -120) {
-              _changeTopPicksTabByDelta(1);
-            } else if (velocity > 120) {
-              _changeTopPicksTabByDelta(-1);
-            }
-          },
-          child: Row(
-            children: [
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                onPressed:
-                    currentIndex == 0 ? null : () => _changeTopPicksTabByDelta(-1),
-                icon: const Icon(Icons.chevron_left_rounded),
-                color: AppColors.textSecondary,
-              ),
-              Expanded(
-                child: Text(
-                  _topPicksTabLabel(_selectedTopPicksTab),
-                  textAlign: TextAlign.center,
-                  style: AppTextStyles.heading3.copyWith(
-                    color: AppColors.primary,
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onHorizontalDragEnd: (details) {
+        final velocity = details.primaryVelocity ?? 0;
+        if (velocity < -120) _changeTopPicksTabByDelta(1);
+        else if (velocity > 120) _changeTopPicksTabByDelta(-1);
+      },
+      child: Row(
+        children: _TopPicksTab.values.map((tab) {
+          final selected = tab == _selectedTopPicksTab;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => _selectTopPicksTab(tab),
+              behavior: HitTestBehavior.opaque,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 180),
+                    style: TextStyle(
+                      color: selected
+                          ? AppColors.primary
+                          : AppColors.textSecondary,
+                      fontWeight:
+                          selected ? FontWeight.w700 : FontWeight.w500,
+                      fontSize: 13,
+                      letterSpacing: 0.1,
+                    ),
+                    child: Text(
+                      _topPicksTabLabel(tab),
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 6),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    height: 2.5,
+                    width: selected ? 28.0 : 0.0,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ],
               ),
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                onPressed:
-                    currentIndex == _TopPicksTab.values.length - 1
-                        ? null
-                        : () => _changeTopPicksTabByDelta(1),
-                icon: const Icon(Icons.chevron_right_rounded),
-                color: AppColors.textSecondary,
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(_TopPicksTab.values.length, (index) {
-            final selected = index == currentIndex;
-            return AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              margin: const EdgeInsets.symmetric(horizontal: 4),
-              width: selected ? 16 : 6,
-              height: 6,
-              decoration: BoxDecoration(
-                color:
-                    selected
-                        ? AppColors.primary
-                        : AppColors.textSecondary.withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(99),
-              ),
-            );
-          }),
-        ),
-      ],
+            ),
+          );
+        }).toList(),
+      ),
     );
   }
 
@@ -388,8 +388,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       }
       if (!mounted) return;
       if (_topPicksLatestRequestByTab[tab] != requestId) return;
+      final products = result.content.take(10).toList();
+      _topPicksStaticCache[tab] = products; // statik cache'e kaydet
       setState(() {
-        _topPicksByTab[tab] = result.content.take(10).toList();
+        _topPicksByTab[tab] = products;
         _topPicksErrorByTab[tab] = null;
         if (tab == _selectedTopPicksTab) {
           _isTopPicksLoading = false;
@@ -501,6 +503,35 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         ),
       );
     }
+  }
+
+  void _showCategorySheet(BuildContext ctx) {
+    showModalBottomSheet<void>(
+      context: ctx,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _CategorySheet(
+        tags: _tags,
+        selectedIndex: _selectedCategoryIndex,
+        onSelectAll: () async {
+          Navigator.pop(ctx);
+          setState(() {
+            _selectedCategoryIndex = -1;
+            _selectedSubCategoryIndex = -1;
+            _subTags = [];
+            _activeCategoryPathPrefix = null;
+            _isFiltering = true;
+          });
+          await _loadProductsPage(0);
+        },
+        onSelectCategory: (tag, index) {
+          Navigator.pop(ctx);
+          _onRootCategoryTap(tag, index);
+        },
+      ),
+    );
   }
 
   Future<void> _onRootCategoryTap(TagDto rootTag, int rootIndex) async {
@@ -939,119 +970,129 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 ),
               ],
               const SizedBox(height: AppSpacing.medium),
-              Container(
-                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-                decoration: BoxDecoration(
-                  color: AppColors.surface.withValues(alpha: 0.9),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.border.withValues(alpha: 0.7)),
-                ),
-                child: SizedBox(
-                  height: AppSpacing.categoryChipHeight,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: _tags.length + 1,
-                    separatorBuilder: (_, __) => const SizedBox(width: 8),
-                    itemBuilder: (context, i) {
-                      if (i == 0) {
-                        return _CategoryChip(
-                          title: 'All',
-                          selected: _selectedCategoryIndex == -1,
-                          onTap: () async {
-                            setState(() {
-                              _selectedCategoryIndex = -1;
-                              _selectedSubCategoryIndex = -1;
-                              _subTags = [];
-                              _activeCategoryPathPrefix = null;
-                              _isFiltering = true;
-                            });
-                            await _loadProductsPage(0);
-                          },
-                        );
-                      }
-                      final index = i - 1;
-                      final tag = _tags[index];
-                      return _CategoryChip(
-                        title: tag.name,
-                        selected: index == _selectedCategoryIndex,
-                        onTap: () => _onRootCategoryTap(tag, index),
-                      );
-                    },
+              // Kategori filtre butonu — outer padding outer ScrollView'dan geliyor
+              Row(
+                children: [
+                  _CategoryFilterButton(
+                    label: _selectedCategoryIndex == -1
+                        ? 'All Categories'
+                        : _tags[_selectedCategoryIndex].name,
+                    isActive: _selectedCategoryIndex != -1,
+                    onTap: _tags.isEmpty
+                        ? null
+                        : () => _showCategorySheet(context),
                   ),
-                ),
+                  if (_selectedCategoryIndex != -1) ...[
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: () async {
+                        setState(() {
+                          _selectedCategoryIndex = -1;
+                          _selectedSubCategoryIndex = -1;
+                          _subTags = [];
+                          _activeCategoryPathPrefix = null;
+                          _isFiltering = true;
+                        });
+                        await _loadProductsPage(0);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.close_rounded,
+                          size: 16,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
-              if (_selectedCategoryIndex != -1) ...[
-                const SizedBox(height: AppSpacing.large),
-                if (_isLoadingSubTags)
-                  // Alt kategori skeleton'ları: ana chip'lerle aynı hizada, shimmer'lı
-                  SizedBox(
-                    height: AppSpacing.categoryChipHeight,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: 4,
-                      separatorBuilder:
-                          (_, __) => const SizedBox(width: AppSpacing.large),
-                      itemBuilder:
-                          (context, index) => const SkeletonLoader(
-                            width: 70,
-                            height: AppSpacing.categoryChipHeight - 8,
-                            borderRadius: BorderRadius.all(Radius.circular(20)),
-                          ),
-                    ),
-                  )
-                else if (_subTags.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface.withValues(alpha: 0.88),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: AppColors.border.withValues(alpha: 0.75),
-                      ),
-                    ),
-                    child: SizedBox(
-                      height: AppSpacing.categoryChipHeight,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: _subTags.length + 1,
-                        separatorBuilder: (_, __) => const SizedBox(width: 8),
-                        itemBuilder: (context, i) {
-                          if (i == 0) {
-                            return _CategoryChip(
-                              title: 'All',
-                              selected: _selectedSubCategoryIndex == -1,
-                              isSubCategory: true,
-                              onTap: () async {
-                                final rootTag = _tags[_selectedCategoryIndex];
-                                setState(() {
-                                  _selectedSubCategoryIndex = -1;
-                                  _activeCategoryPathPrefix = rootTag.categoryPath;
-                                  _isFiltering = true;
-                                });
-                                await _loadProductsPage(0);
-                              },
-                            );
-                          }
-                          final subIndex = i - 1;
-                          final subTag = _subTags[subIndex];
-                          return _CategoryChip(
-                            title: subTag.name,
-                            selected: subIndex == _selectedSubCategoryIndex,
-                            isSubCategory: true,
-                            onTap: () async {
-                              setState(() {
-                                _selectedSubCategoryIndex = subIndex;
-                                _activeCategoryPathPrefix = subTag.categoryPath;
-                                _isFiltering = true;
-                              });
-                              await _loadProductsPage(0);
-                            },
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-              ],
+              // Alt kategori satırı (AnimatedSize ile yumuşak)
+              AnimatedSize(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                child: _selectedCategoryIndex != -1
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const SizedBox(height: 10),
+                          if (_isLoadingSubTags)
+                            SizedBox(
+                              height: 32,
+                              child: ListView.separated(
+                                scrollDirection: Axis.horizontal,
+                                padding: EdgeInsets.zero,
+                                itemCount: 5,
+                                separatorBuilder:
+                                    (_, __) => const SizedBox(width: 8),
+                                itemBuilder:
+                                    (_, __) => const SkeletonLoader(
+                                      width: 64,
+                                      height: 32,
+                                      borderRadius: BorderRadius.all(
+                                        Radius.circular(16),
+                                      ),
+                                    ),
+                              ),
+                            )
+                          else if (_subTags.isNotEmpty)
+                            SizedBox(
+                              height: 32,
+                              child: ListView.separated(
+                                scrollDirection: Axis.horizontal,
+                                padding: EdgeInsets.zero,
+                                itemCount: _subTags.length + 1,
+                                separatorBuilder:
+                                    (_, __) => const SizedBox(width: 6),
+                                itemBuilder: (context, i) {
+                                  if (i == 0) {
+                                    return _CategoryChip(
+                                      title: 'All',
+                                      selected:
+                                          _selectedSubCategoryIndex == -1,
+                                      isSubCategory: true,
+                                      onTap: () async {
+                                        final rootTag =
+                                            _tags[_selectedCategoryIndex];
+                                        setState(() {
+                                          _selectedSubCategoryIndex = -1;
+                                          _activeCategoryPathPrefix =
+                                              rootTag.categoryPath;
+                                          _isFiltering = true;
+                                        });
+                                        await _loadProductsPage(0);
+                                      },
+                                    );
+                                  }
+                                  final subIndex = i - 1;
+                                  final subTag = _subTags[subIndex];
+                                  return _CategoryChip(
+                                    title: subTag.name,
+                                    selected:
+                                        subIndex == _selectedSubCategoryIndex,
+                                    isSubCategory: true,
+                                    onTap: () async {
+                                      setState(() {
+                                        _selectedSubCategoryIndex = subIndex;
+                                        _activeCategoryPathPrefix =
+                                            subTag.categoryPath;
+                                        _isFiltering = true;
+                                      });
+                                      await _loadProductsPage(0);
+                                    },
+                                  );
+                                },
+                              ),
+                            ),
+                        ],
+                      )
+                    : const SizedBox.shrink(),
+              ),
               const SizedBox(height: AppSpacing.xxLarge),
               _isFiltering
                   // Kategori / sayfa değişirken, gerçek grid yapısına benzeyen skeleton grid göster
@@ -1097,7 +1138,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                           final product = _filteredProducts[index];
                           return ProductCard(
                             key: ValueKey(
-                              'product_${product.id}_${product.isLiked}_${product.averageRating}',
+                              'product_${product.id}_${product.averageRating}',
                             ),
                             productId: product.id,
                             imageUrl: product.imageURL,
@@ -1241,32 +1282,276 @@ class _CategoryChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final decoration =
-        isSubCategory
-            ? AppChipStyles.subCategoryChipDecoration(selected: selected)
-            : AppChipStyles.categoryChipDecoration(selected: selected);
+    if (isSubCategory) {
+      // Alt kategori: solid fill pill
+      return GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOut,
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 6),
+          decoration: BoxDecoration(
+            color: selected
+                ? AppColors.primary
+                : AppColors.surface,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: selected
+                  ? AppColors.primary
+                  : AppColors.border,
+              width: 1.1,
+            ),
+          ),
+          child: Text(
+            title,
+            style: TextStyle(
+              color: selected ? Colors.white : AppColors.textPrimary,
+              fontSize: 12.5,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+              letterSpacing: 0.1,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      );
+    }
 
-    final textStyle =
-        isSubCategory
-            ? AppChipStyles.subCategoryChipText(selected: selected)
-            : AppChipStyles.categoryChipText(selected: selected);
+    // Ana kategori: underline tab stili
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            AnimatedDefaultTextStyle(
+              duration: const Duration(milliseconds: 180),
+              style: TextStyle(
+                color: selected
+                    ? AppColors.textPrimary
+                    : AppColors.textSecondary,
+                fontSize: 13.5,
+                fontWeight:
+                    selected ? FontWeight.w700 : FontWeight.w500,
+                letterSpacing: 0.1,
+              ),
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(height: 4),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+              height: 2.5,
+              width: selected ? 20.0 : 0.0,
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
-    final horizontalPadding =
-        isSubCategory ? AppSpacing.large : AppSpacing.xLarge;
+// ─── Kategori filtre butonu ───────────────────────────────────────────────────
 
+class _CategoryFilterButton extends StatelessWidget {
+  final String label;
+  final bool isActive;
+  final VoidCallback? onTap;
+
+  const _CategoryFilterButton({
+    required this.label,
+    required this.isActive,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOutCubic,
-        padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-        alignment: Alignment.center,
-        decoration: decoration,
-        child: Text(
-          title,
-          style: textStyle,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        decoration: BoxDecoration(
+          color: isActive ? AppColors.primary : AppColors.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isActive
+                ? AppColors.primary
+                : AppColors.border,
+            width: 1.3,
+          ),
+          boxShadow: isActive
+              ? [
+                  BoxShadow(
+                    color: AppColors.primary.withValues(alpha: 0.18),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ]
+              : [],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.tune_rounded,
+              size: 15,
+              color: isActive ? Colors.white : AppColors.textSecondary,
+            ),
+            const SizedBox(width: 7),
+            Text(
+              label,
+              style: TextStyle(
+                color: isActive ? Colors.white : AppColors.textPrimary,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+                letterSpacing: 0.1,
+              ),
+            ),
+            const SizedBox(width: 5),
+            Icon(
+              Icons.keyboard_arrow_down_rounded,
+              size: 17,
+              color: isActive
+                  ? Colors.white.withValues(alpha: 0.85)
+                  : AppColors.textSecondary,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Kategori seçim bottom sheet ─────────────────────────────────────────────
+
+class _CategorySheet extends StatelessWidget {
+  final List<TagDto> tags;
+  final int selectedIndex;
+  final VoidCallback onSelectAll;
+  final void Function(TagDto, int) onSelectCategory;
+
+  const _CategorySheet({
+    required this.tags,
+    required this.selectedIndex,
+    required this.onSelectAll,
+    required this.onSelectCategory,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              margin: const EdgeInsets.only(top: 12, bottom: 16),
+              decoration: BoxDecoration(
+                color: AppColors.border,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.xLarge,
+            ),
+            child: Text(
+              'Browse by Category',
+              style: TextStyle(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w700,
+                fontSize: 16,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Divider(height: 1),
+          LimitedBox(
+            maxHeight: 340,
+            child: ListView(
+              shrinkWrap: true,
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              children: [
+                _SheetRow(
+                  label: 'All Categories',
+                  selected: selectedIndex == -1,
+                  onTap: onSelectAll,
+                ),
+                ...List.generate(tags.length, (i) {
+                  return _SheetRow(
+                    label: tags[i].name,
+                    selected: i == selectedIndex,
+                    onTap: () => onSelectCategory(tags[i], i),
+                  );
+                }),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
+class _SheetRow extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _SheetRow({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.xLarge,
+          vertical: 13,
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: selected
+                      ? AppColors.primary
+                      : AppColors.textPrimary,
+                  fontWeight:
+                      selected ? FontWeight.w700 : FontWeight.w500,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+            if (selected)
+              const Icon(
+                Icons.check_rounded,
+                size: 18,
+                color: AppColors.primary,
+              ),
+          ],
         ),
       ),
     );

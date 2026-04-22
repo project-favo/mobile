@@ -24,7 +24,7 @@ class MainBottomNavItems {
         ),
         const BottomNavigationBarItem(
           icon: ActivityBottomNavIcon(),
-          label: 'Activity',
+          label: 'Notifications',
         ),
         const BottomNavigationBarItem(
           icon: Icon(Icons.person_outline),

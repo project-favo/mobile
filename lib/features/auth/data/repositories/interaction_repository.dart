@@ -34,7 +34,8 @@ class InteractionRepository {
       final response = await _apiClient.dio.post('/api/interactions/product/$productId/like');
       
       if (response.data is Map) {
-        return response.data['liked'] as bool? ?? false;
+        final v = response.data['liked'];
+        return v == true || v == 1;
       }
       
       return false;
@@ -58,7 +59,8 @@ class InteractionRepository {
       final response = await _apiClient.dio.post('/api/interactions/review/$reviewId/like');
       
       if (response.data is Map) {
-        return response.data['liked'] as bool? ?? false;
+        final v = response.data['liked'];
+        return v == true || v == 1;
       }
       
       return false;
@@ -130,7 +132,8 @@ class InteractionRepository {
       final response = await _apiClient.dio.get('/api/interactions/product/$productId/is-liked');
       
       if (response.data is Map) {
-        return response.data['isLiked'] as bool? ?? false;
+        final v = response.data['isLiked'];
+        return v == true || v == 1;
       }
       
       return false;
@@ -156,7 +159,8 @@ class InteractionRepository {
       final response = await _apiClient.dio.get('/api/interactions/review/$reviewId/is-liked');
       
       if (response.data is Map) {
-        return response.data['isLiked'] as bool? ?? false;
+        final v = response.data['isLiked'];
+        return v == true || v == 1;
       }
       
       return false;
@@ -290,7 +294,8 @@ class InteractionRepository {
       _apiClient.setAuthToken(firebaseIdToken);
       final response = await _apiClient.dio.post('/api/interactions/user/$userId/follow');
       if (response.data is Map) {
-        return response.data['following'] as bool? ?? false;
+        final v = response.data['following'];
+        return v == true || v == 1;
       }
       return false;
     } on DioException catch (e) {
@@ -373,7 +378,8 @@ class InteractionRepository {
   Future<bool> isFollowing(String? firebaseIdToken, String userId) async {
     bool parse(Response response) {
       if (response.data is Map) {
-        return response.data['following'] as bool? ?? false;
+        final v = response.data['following'];
+        return v == true || v == 1;
       }
       return false;
     }

@@ -259,7 +259,7 @@ class _ActivityPageState extends State<ActivityPage>
         toolbarHeight: AppSpacing.toolbarHeight,
         centerTitle: true,
         title: Text(
-          'Activity',
+          'Notifications',
           style: AppTextStyles.heading2.copyWith(
             color: AppColors.primary,
             fontWeight: FontWeight.w700,
@@ -413,6 +413,7 @@ class _ActivityPageState extends State<ActivityPage>
                 }
                 final item = visible[index];
                 return Container(
+                  key: ValueKey(item.id),
                   decoration: BoxDecoration(
                     color: AppColors.surface,
                     borderRadius: BorderRadius.circular(14),
@@ -428,6 +429,7 @@ class _ActivityPageState extends State<ActivityPage>
                     ],
                   ),
                   child: ActivityFeedRow(
+                    key: ValueKey('row_${item.id}'),
                     item: item,
                     following: _controller.isFollowingUser(item.user.id),
                     onToggleFollow:

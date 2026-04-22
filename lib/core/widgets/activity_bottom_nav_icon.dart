@@ -17,7 +17,7 @@ class ActivityBottomNavIcon extends StatelessWidget {
           clipBehavior: Clip.none,
           alignment: Alignment.center,
           children: [
-            const Icon(Icons.bolt_rounded, size: 26),
+            const Icon(Icons.notifications_outlined, size: 26),
             if (count > 0)
               Positioned(
                 right: -6,

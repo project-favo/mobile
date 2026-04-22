@@ -50,6 +50,7 @@ class ActivityFeedRow extends StatelessWidget {
               else
                 const SizedBox(width: 14),
               ProfileAvatar(
+                key: ValueKey('avatar_${item.user.id}'),
                 radius: 20,
                 imageUrl: item.user.avatarUrl,
                 fallbackInitial: item.user.username.isNotEmpty

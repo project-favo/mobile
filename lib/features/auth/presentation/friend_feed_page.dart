@@ -316,6 +316,7 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
             }
             final item = list[index];
             return Container(
+              key: ValueKey(item.id),
               decoration: BoxDecoration(
                 color: AppColors.surface,
                 borderRadius: BorderRadius.circular(14),
@@ -331,6 +332,7 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
                 ],
               ),
               child: ActivityFeedRow(
+                key: ValueKey('row_${item.id}'),
                 item: item,
                 following: false,
                 onToggleFollow: () {},

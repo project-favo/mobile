@@ -78,18 +78,48 @@ class ProductRepository {
     );
   }
 
+  /// Ortak sayfalı feed — enrichment YOK (top picks gibi sadece görsel için hızlı yükleme).
+  Future<ProductSearchResultDto> _getRawPagedFeed({
+    required String path,
+    required int page,
+    int size = 20,
+    bool skipAuth = false,
+  }) async {
+    final safeSize = size.clamp(1, 50);
+    try {
+      final response = await _apiClient.dio.get(
+        path,
+        queryParameters: {'page': page, 'size': safeSize},
+        options: skipAuth
+            ? Options(extra: const {kDioExtraSkipFirebaseAuth: true})
+            : null,
+      );
+      return ProductSearchResultDto.fromJson(
+        response.data as Map<String, dynamic>,
+      );
+    } on DioException catch (e) {
+      if (e.response != null) {
+        final errorData = e.response?.data;
+        final errorMessage = errorData is Map
+            ? (errorData['message'] ?? errorData['error'] ?? 'Failed to load feed')
+            : errorData?.toString() ?? 'Failed to load feed';
+        throw Exception(errorMessage);
+      }
+      throw Exception('Network error: ${e.message}');
+    }
+  }
+
   /// GET /api/products/feed/trending-reviews — public; son 7 gün yorum trendi.
   Future<ProductSearchResultDto> getTrendingReviewsFeed({
     required int page,
     int size = 20,
     String? firebaseIdToken,
   }) async {
-    return _getEnrichedPagedFeed(
+    return _getRawPagedFeed(
       path: '/api/products/feed/trending-reviews',
       page: page,
       size: size,
-      firebaseIdToken: firebaseIdToken,
-      skipFirebaseAuthOnFeedRequest: true,
+      skipAuth: true,
     );
   }
 
@@ -99,12 +129,11 @@ class ProductRepository {
     int size = 20,
     String? firebaseIdToken,
   }) async {
-    return _getEnrichedPagedFeed(
+    return _getRawPagedFeed(
       path: '/api/products/feed/trending-likes-week',
       page: page,
       size: size,
-      firebaseIdToken: firebaseIdToken,
-      skipFirebaseAuthOnFeedRequest: true,
+      skipAuth: true,
     );
   }
 
@@ -114,11 +143,10 @@ class ProductRepository {
     int size = 20,
     required String firebaseIdToken,
   }) async {
-    return _getEnrichedPagedFeed(
+    return _getRawPagedFeed(
       path: '/api/products/feed/personalized',
       page: page,
       size: size,
-      firebaseIdToken: firebaseIdToken,
     );
   }
 

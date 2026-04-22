@@ -47,6 +47,20 @@ class ActivityController extends ChangeNotifier {
   bool isFollowingUser(String userId) =>
       userId.isNotEmpty && _followingUserIds.contains(userId);
 
+  /// Aynı actor + type + target kombinasyonundan sadece en yeni birini tutar.
+  List<ActivityItem> _deduplicateItems(List<ActivityItem> items) {
+    final seen = <String>{};
+    final result = <ActivityItem>[];
+    for (final item in items) {
+      final key =
+          '${item.user.id}|${item.type.name}|${item.targetContent?.reviewId ?? ''}|${item.targetContent?.productId ?? ''}';
+      if (item.user.id.isEmpty || seen.add(key)) {
+        result.add(item);
+      }
+    }
+    return result;
+  }
+
   bool hydrateFromCache() {
     final warm = ActivityMemoryCache.instance.peek();
     if (warm == null || warm.items.isEmpty) return false;
@@ -85,13 +99,19 @@ class ActivityController extends ChangeNotifier {
   }
 
   Future<void> loadFirstPage() async {
-    _loadingFirst = true;
+    // Cache'den içerik zaten gösteriliyorsa skeleton açma (stale-while-revalidate)
+    final silentRefresh = _items.isNotEmpty;
+    if (!silentRefresh) {
+      _loadingFirst = true;
+      notifyListeners();
+    }
     _errorMessage = null;
     _page = 0;
-    notifyListeners();
     try {
       final page = await _notifications.getNotifications(page: 0, size: 20);
-      _items = page.content.map(activityItemFromNotification).toList();
+      _items = _deduplicateItems(
+        page.content.map(activityItemFromNotification).toList(),
+      );
       _page = page.number;
       _totalPages = page.totalPages;
       _totalElements = page.totalElements;
@@ -119,7 +139,7 @@ class ActivityController extends ChangeNotifier {
       final next =
           await _notifications.getNotifications(page: _page + 1, size: 20);
       final appended = next.content.map(activityItemFromNotification).toList();
-      _items = [..._items, ...appended];
+      _items = _deduplicateItems([..._items, ...appended]);
       _page = next.number;
       _totalPages = next.totalPages;
       ActivityMemoryCache.instance.remember(
@@ -143,21 +163,25 @@ class ActivityController extends ChangeNotifier {
     if (token == null) return;
 
     final ids = _items
-        .where((e) =>
-            e.type == ActivityType.follow && e.user.id.isNotEmpty)
+        .where((e) => e.type == ActivityType.follow && e.user.id.isNotEmpty)
         .map((e) => e.user.id)
-        .toSet();
+        .toSet()
+        .toList();
 
-    for (final id in ids) {
-      try {
-        final f = await _interactions.isFollowing(token, id);
-        if (f) {
-          _followingUserIds.add(id);
-        } else {
-          _followingUserIds.remove(id);
-        }
-      } catch (_) {}
-    }
+    if (ids.isEmpty) return;
+
+    await Future.wait(
+      ids.map((id) async {
+        try {
+          final f = await _interactions.isFollowing(token, id);
+          if (f) {
+            _followingUserIds.add(id);
+          } else {
+            _followingUserIds.remove(id);
+          }
+        } catch (_) {}
+      }),
+    );
   }
 
   Future<void> toggleFollow(String userId) async {
@@ -205,6 +229,29 @@ class ActivityController extends ChangeNotifier {
   void prependFromPush(NotificationDto n) {
     final mapped = activityItemFromNotification(n);
     if (_items.any((e) => e.id == mapped.id)) return;
+
+    // Same actor + type + target already exists: move to top (dedup like/unlike spam)
+    if (mapped.user.id.isNotEmpty) {
+      final dupeIndex = _items.indexWhere(
+        (e) =>
+            e.type == mapped.type &&
+            e.user.id == mapped.user.id &&
+            e.targetContent?.reviewId == mapped.targetContent?.reviewId &&
+            e.targetContent?.productId == mapped.targetContent?.productId,
+      );
+      if (dupeIndex != -1) {
+        _items = [
+          mapped,
+          ..._items.sublist(0, dupeIndex),
+          ..._items.sublist(dupeIndex + 1),
+        ];
+        _prefetchAvatarsForItems([mapped]);
+        notifyListeners();
+        unawaited(_syncFollowStatesForCurrentItems());
+        return;
+      }
+    }
+
     _items = [mapped, ..._items];
     if (_totalElements > 0) _totalElements += 1;
     _prefetchAvatarsForItems([mapped]);

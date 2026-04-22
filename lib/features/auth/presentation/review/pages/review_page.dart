@@ -9,7 +9,6 @@ import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/widgets/app_button.dart';
 import '../../../../../core/widgets/custom_refresh_indicator.dart';
-import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/utils/product_rating_display.dart';
@@ -59,7 +58,8 @@ class _ReviewPageState extends State<ReviewPage> {
   bool _isLoadingReviews = true;
   String? _errorMessage;
   int _likeCount = 0;
-  bool _hasLoadedLikeCount = false;
+  bool _hasLoadedLikeCount = true;
+  Map<int, int>? _cachedRatingCounts;
   bool _isRatingExpanded = false;
   bool _isDescriptionExpanded = false;
   static const EdgeInsets _contentHorizontalPadding = EdgeInsets.symmetric(
@@ -94,6 +94,10 @@ class _ReviewPageState extends State<ReviewPage> {
   }
 
   Map<int, int> _ratingCounts() {
+    return _cachedRatingCounts ??= _computeRatingCounts();
+  }
+
+  Map<int, int> _computeRatingCounts() {
     final counts = <int, int>{5: 0, 4: 0, 3: 0, 2: 0, 1: 0};
     for (final review in _reviews) {
       final r = review.rating.clamp(1, 5);
@@ -207,7 +211,8 @@ class _ReviewPageState extends State<ReviewPage> {
       ProductMemoryCache.instance.remember(_currentProduct);
       _hydrateReviewsFromCache();
       _loadReviews(background: _reviews.isNotEmpty);
-      _refreshProductData();
+      unawaited(_loadLikeCount());
+      unawaited(_refreshProductData());
       return;
     }
     final pid = widget.productId!;
@@ -217,6 +222,7 @@ class _ReviewPageState extends State<ReviewPage> {
       _isLoadingProduct = false;
       _hydrateReviewsFromCache();
       _loadReviews(background: _reviews.isNotEmpty);
+      unawaited(_loadLikeCount());
       unawaited(_refreshProductData());
       return;
     }
@@ -398,6 +404,7 @@ class _ReviewPageState extends State<ReviewPage> {
         );
       },
     );
+    controller.dispose();
   }
 
   /// Product'ı backend'den yeniden yükler (rating ve like durumu için)
@@ -406,17 +413,15 @@ class _ReviewPageState extends State<ReviewPage> {
       final token = await _sessionHelper.getTokenAndSetHeader();
       if (token == null) return;
 
-      // Product'ı tamamen yeniden yükle
       final updatedProduct = await _productRepository.getProductById(
         _currentProduct.id,
         firebaseIdToken: token,
-        bypassCache: true,
       );
 
+      if (!mounted) return;
       setState(() {
         _currentProduct = updatedProduct;
       });
-      await _loadLikeCount();
     } catch (_) {}
   }
 
@@ -442,6 +447,7 @@ class _ReviewPageState extends State<ReviewPage> {
           ReviewMemoryCache.instance.remember(_currentProduct.id, reviews);
           setState(() {
             _reviews = reviews;
+            _cachedRatingCounts = null;
             _isLoadingReviews = false;
           });
           return;
@@ -460,13 +466,15 @@ class _ReviewPageState extends State<ReviewPage> {
         throw Exception('Failed to get Firebase ID token');
       }
 
-      // Mevcut kullanıcının backend username'ini al (kendi review'larını tespit için)
-      try {
-        final authService = AuthService();
-        final me = await authService.getMe();
-        _currentUsername = me.userName;
-        _currentUserId = me.id;
-      } catch (_) {}
+      // Mevcut kullanıcının backend username'ini al — sadece bir kez yükle
+      if (_currentUsername == null) {
+        try {
+          final authService = AuthService();
+          final me = await authService.getMe();
+          _currentUsername = me.userName;
+          _currentUserId = me.id;
+        } catch (_) {}
+      }
 
       // Review'ları çek
       final reviews = await _reviewRepository.getReviewsByProductId(
@@ -477,6 +485,7 @@ class _ReviewPageState extends State<ReviewPage> {
 
       setState(() {
         _reviews = reviews;
+        _cachedRatingCounts = null;
         _isLoadingReviews = false;
       });
     } catch (e) {
@@ -506,6 +515,7 @@ class _ReviewPageState extends State<ReviewPage> {
     final previousLikeStatus = _currentProduct.isLiked ?? false;
     setState(() {
       _currentProduct = _currentProduct.copyWith(isLiked: !previousLikeStatus);
+      _likeCount = (_likeCount + (previousLikeStatus ? -1 : 1)).clamp(0, 999999);
     });
 
     try {
@@ -521,15 +531,15 @@ class _ReviewPageState extends State<ReviewPage> {
         _currentProduct.id,
       );
 
-      // Backend'den gelen gerçek durumu güncelle (arka planda, kullanıcı fark etmez)
+      // Backend'den gelen gerçek durumu güncelle
       setState(() {
         _currentProduct = _currentProduct.copyWith(isLiked: newLikeStatus);
       });
-      await _loadLikeCount();
     } catch (e) {
       // Hata durumunda optimistic update'i geri al
       setState(() {
         _currentProduct = _currentProduct.copyWith(isLiked: previousLikeStatus);
+        _likeCount = (_likeCount + (previousLikeStatus ? 1 : -1)).clamp(0, 999999);
       });
 
       if (mounted) {
@@ -1186,17 +1196,7 @@ class _ReviewPageState extends State<ReviewPage> {
 
                 /// REVIEWS LIST
                 if (_isLoadingReviews)
-                  ...List.generate(
-                    3,
-                    (index) => Padding(
-                      padding: const EdgeInsets.only(
-                        left: AppSpacing.xxLarge,
-                        right: AppSpacing.xxLarge,
-                        bottom: AppSpacing.large,
-                      ),
-                      child: const ReviewCardSkeleton(),
-                    ),
-                  )
+                  const SizedBox(height: AppSpacing.xxLarge)
                 else if (_errorMessage != null)
                   Center(
                     child: Padding(

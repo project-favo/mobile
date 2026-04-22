@@ -39,7 +39,10 @@ class _ProfileAvatarState extends State<ProfileAvatar> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.imageUrl != widget.imageUrl ||
         oldWidget.memoryBytes != widget.memoryBytes) {
-      _networkBytes = peekProfileImageBytes(widget.imageUrl);
+      // setState ile hemen yeniden çiz — yoksa eski avatar bir frame kalır
+      setState(() {
+        _networkBytes = peekProfileImageBytes(widget.imageUrl);
+      });
       _kickLoad();
     }
   }
@@ -153,7 +156,9 @@ class _ProfileAvatarImageState extends State<ProfileAvatarImage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.imageUrl != widget.imageUrl ||
         oldWidget.memoryBytes != widget.memoryBytes) {
-      _networkBytes = peekProfileImageBytes(widget.imageUrl);
+      setState(() {
+        _networkBytes = peekProfileImageBytes(widget.imageUrl);
+      });
       _kickLoad();
     }
   }

@@ -77,6 +77,19 @@ class _ProductCardState extends State<ProductCard> {
     }
   }
 
+  @override
+  void didUpdateWidget(ProductCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.isFavorite != widget.isFavorite && _likeCount != null) {
+      final delta = widget.isFavorite ? 1 : -1;
+      final updated = (_likeCount! + delta).clamp(0, 999999);
+      _LikeCountCache.set(widget.productId, updated);
+      setState(() {
+        _likeCount = updated;
+      });
+    }
+  }
+
   Future<void> _loadSocialCounts() async {
     // Basit cache: productId -> reviewCount, böylece liste yeniden
     // yüklense bile sayı anında görünür, gidip gelmez.
@@ -231,7 +244,7 @@ class _ProductCardState extends State<ProductCard> {
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      '${_reviewCount ?? 0} review',
+                      '${_reviewCount ?? 0} review${(_reviewCount ?? 0) > 1 ? 's' : ''}',
                       style: AppTextStyles.bodySmall.copyWith(
                         color: AppColors.textSecondary,
                         fontSize: 12,
