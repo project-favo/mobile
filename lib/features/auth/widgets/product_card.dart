@@ -128,9 +128,11 @@ class _ProductCardState extends State<ProductCard> {
   Widget build(BuildContext context) {
     final dpr = MediaQuery.devicePixelRatioOf(context);
     final screenW = MediaQuery.sizeOf(context).width;
-    final imageCacheW =
-        ((screenW * 0.55) * dpr).round().clamp(120, 900);
-    final imageCacheH = ((screenW * 0.42) * dpr).round().clamp(100, 800);
+    // 2 sütunlu grid: her kart (screenW - 2×16 dış padding - 16 ara boşluk) / 2
+    // Görseller 800×800 kare → cache de kare olsun, bozulma olmasın
+    final cardPx = ((screenW - 48) / 2 * dpr).round().clamp(150, 600);
+    final imageCacheW = cardPx;
+    final imageCacheH = cardPx;
 
     return GestureDetector(
       onTap: widget.onTap,
@@ -156,7 +158,7 @@ class _ProductCardState extends State<ProductCard> {
                     borderRadius: AppDecorations.cardRadius,
                     child: Image.network(
                       widget.imageUrl,
-                      fit: BoxFit.contain,
+                      fit: BoxFit.cover,
                       alignment: Alignment.center,
                       cacheWidth: imageCacheW,
                       cacheHeight: imageCacheH,

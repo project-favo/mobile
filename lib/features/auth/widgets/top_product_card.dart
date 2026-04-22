@@ -25,8 +25,10 @@ class _TopProductListState extends State<TopProductList> {
   @override
   Widget build(BuildContext context) {
     final dpr = MediaQuery.devicePixelRatioOf(context);
-    final topImgW = (220 * dpr).round().clamp(140, 700);
-    final topImgH = (160 * dpr).round().clamp(120, 600);
+    // Top picks kutusu 164×154 — 800×800 kare görsel için kare cache yeterli
+    final topImgSide = (164 * dpr).round().clamp(140, 600);
+    final topImgW = topImgSide;
+    final topImgH = topImgSide;
     
     return GestureDetector(
       onTap: () {
@@ -62,7 +64,7 @@ class _TopProductListState extends State<TopProductList> {
                   borderRadius: AppDecorations.cardRadius,
                   child: Image.network(
                     widget.product.imageURL,
-                    fit: BoxFit.contain,
+                    fit: BoxFit.cover,
                     alignment: Alignment.center,
                     cacheWidth: topImgW,
                     cacheHeight: topImgH,
