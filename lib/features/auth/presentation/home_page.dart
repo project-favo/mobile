@@ -6,6 +6,7 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/session_helper.dart';
+import '../../../core/utils/entity_active.dart';
 import '../../../core/notifications/notification_realtime_service.dart';
 import '../../../core/notifications/message_unread_service.dart';
 import '../../../core/widgets/main_bottom_nav_items.dart';
@@ -1512,7 +1513,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       setProductCardSocialCaches(
         productId,
         likeCount: likeCount,
-        reviewCount: reviews.length,
+        reviewCount: filterVisibleReviews(reviews).length,
       );
       if (!mounted) return;
       setState(() {

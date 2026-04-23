@@ -7,10 +7,10 @@ import '../widgets/report_review_sheet.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
-import '../../../../../core/widgets/app_button.dart';
 import '../../../../../core/widgets/custom_refresh_indicator.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
 import '../../../../../core/utils/error_handler.dart';
+import '../../../../../core/utils/exceptions.dart';
 import '../../../../../core/utils/product_rating_display.dart';
 import '../../../../../core/widgets/new_product_badge.dart';
 import '../../../../../core/cache/current_user_cache.dart';
@@ -19,6 +19,9 @@ import '../../../../../core/cache/review_memory_cache.dart';
 import '../../../../../core/utils/in_flight_id_lock.dart';
 import '../../../../../core/utils/product_report_storage.dart';
 import '../../../../../core/utils/session_helper.dart';
+import '../../../../../core/utils/content_availability_messages.dart';
+import '../../../../../core/utils/content_unavailable_dialog.dart';
+import '../../../../../core/utils/entity_active.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/models/review_dto.dart';
 import '../../../data/models/tag_dto.dart';
@@ -34,6 +37,7 @@ import '../../messages/product_ai_chat_page.dart';
 import '../../profile/pages/user_profile_page.dart';
 import '../review_page_pop_result.dart';
 import '../widgets/review_delete_flow.dart';
+import '../../home_page.dart';
 
 class ReviewPage extends StatefulWidget {
   /// Tam product verilirse doğrudan kullanılır.
@@ -48,7 +52,7 @@ class ReviewPage extends StatefulWidget {
   State<ReviewPage> createState() => _ReviewPageState();
 }
 
-class _ReviewPageState extends State<ReviewPage> {
+class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
   final InteractionRepository _interactionRepository = InteractionRepository();
   final ReviewRepository _reviewRepository = ReviewRepository();
   final ProductRepository _productRepository = ProductRepository();
@@ -63,18 +67,22 @@ class _ReviewPageState extends State<ReviewPage> {
   bool _isLoadingReviews = true;
   String? _errorMessage;
   int _likeCount = 0;
-  bool _hasLoadedLikeCount = true;
   Map<int, int>? _cachedRatingCounts;
   bool _isRatingExpanded = false;
   bool _isDescriptionExpanded = false;
   final InFlightFlag _productPageLikeLock = InFlightFlag();
   final InFlightIdLock _reviewListLikeLock = InFlightIdLock();
   final InFlightIdLock _reviewDeleteLock = InFlightIdLock();
+  static const Duration _productListingPollInterval = Duration(seconds: 5);
+  Timer? _productListingPollTimer;
+  bool _poppedBecauseProductUnlisted = false;
+  /// [_syncProductPageInBackground] tekil çalışsın; üst üste API çağrısı olmasın.
+  bool _pageBackgroundSyncInFlight = false;
+  /// Review detail ile aynı: home ilk 50 dışı + önceki tur vitrin = askı sinyali.
+  bool? _lastProductOnHomeFirstPage;
   static const EdgeInsets _contentHorizontalPadding = EdgeInsets.symmetric(
     horizontal: AppSpacing.xxLarge,
   );
-
-  bool get _hasLoadedReviewSummary => !_isLoadingReviews && _hasLoadedLikeCount;
 
   String _formatReviewRelativeDate(String raw) {
     final parsed = DateTime.tryParse(raw);
@@ -221,6 +229,7 @@ class _ReviewPageState extends State<ReviewPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final cu = CurrentUserCache.instance;
     if (cu.hasUserId) {
       _currentUserId = cu.userId;
@@ -229,22 +238,37 @@ class _ReviewPageState extends State<ReviewPage> {
     unawaited(_loadCurrentUserEarly());
     if (widget.product != null) {
       _currentProduct = widget.product!;
+      if (!isProductEntityActive(_currentProduct)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _exitProductPageBecauseUnavailable();
+        });
+        return;
+      }
       ProductMemoryCache.instance.remember(_currentProduct);
       _hydrateReviewsFromCache();
       _loadReviews(background: _reviews.isNotEmpty);
       unawaited(_loadLikeCount());
       unawaited(_refreshProductData());
+      _startProductListingPoll();
       return;
     }
     final pid = widget.productId!;
     final warm = ProductMemoryCache.instance.peek(pid);
     if (warm != null) {
       _currentProduct = warm;
+      if (!isProductEntityActive(_currentProduct)) {
+        _isLoadingProduct = false;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _exitProductPageBecauseUnavailable();
+        });
+        return;
+      }
       _isLoadingProduct = false;
       _hydrateReviewsFromCache();
       _loadReviews(background: _reviews.isNotEmpty);
       unawaited(_loadLikeCount());
       unawaited(_refreshProductData());
+      _startProductListingPoll();
       return;
     }
     // productId ile açıldı: placeholder ile hemen göster, arka planda ürünü yükle
@@ -253,6 +277,190 @@ class _ReviewPageState extends State<ReviewPage> {
     _hydrateReviewsFromCache();
     _loadReviews(background: _reviews.isNotEmpty);
     _loadProductById();
+    _startProductListingPoll();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _productListingPollTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_syncProductPageInBackground());
+    }
+  }
+
+  void _startProductListingPoll() {
+    _productListingPollTimer?.cancel();
+    unawaited(_syncProductPageInBackground());
+    _productListingPollTimer = Timer.periodic(
+      _productListingPollInterval,
+      (_) {
+        if (!mounted) return;
+        unawaited(_syncProductPageInBackground());
+      },
+    );
+  }
+
+  /// GET /api/products/home `page=0&size=50` — hata: yanlış geri sarma riskine karşı 'vitrinde' kabul.
+  Future<bool> _isProductIdOnHomeFirst50(
+    String productId,
+    String? token,
+  ) async {
+    final id = productId.trim();
+    if (id.isEmpty) return true;
+    try {
+      final feed = await _productRepository.getHomeFeed(
+        page: 0,
+        size: 50,
+        firebaseIdToken: token,
+      );
+      final on = feed.content.map((e) => e.id.trim()).toSet();
+      return on.contains(id);
+    } catch (_) {
+      return true;
+    }
+  }
+
+  Future<void> _seedLastHomeProductSnapshot(
+    ProductDto p,
+    String? token,
+  ) async {
+    if (!mounted) return;
+    final on = await _isProductIdOnHomeFirst50(p.id, token);
+    if (!mounted) return;
+    _lastProductOnHomeFirstPage = on;
+  }
+
+  static bool _productPageDataChanged(ProductDto a, ProductDto b) {
+    return a.name != b.name ||
+        a.imageURL != b.imageURL ||
+        (a.description ?? '') != (b.description ?? '') ||
+        a.isProductNotListed != b.isProductNotListed ||
+        (a.averageRating ?? 0) != (b.averageRating ?? 0) ||
+        a.isLiked != b.isLiked;
+  }
+
+  static bool _reviewListDataChanged(
+    List<ReviewDto> previous,
+    List<ReviewDto> next,
+  ) {
+    final a = filterVisibleReviews(previous);
+    final b = filterVisibleReviews(next);
+    if (a.length != b.length) return true;
+    final nextById = {for (final r in b) r.id: r};
+    for (final x in a) {
+      final y = nextById[x.id];
+      if (y == null) return true;
+      if (x.rating != y.rating || x.likeCount != y.likeCount) return true;
+      if (x.title != y.title) return true;
+      if ((x.description ?? '') != (y.description ?? '')) return true;
+    }
+    for (final y in b) {
+      if (!a.any((x) => x.id == y.id)) return true;
+    }
+    return false;
+  }
+
+  /// 5 sn: [getProductById] + yorum listesi; değişmediyse [setState] yok. Askı/404’te geri dön.
+  Future<void> _syncProductPageInBackground() async {
+    if (!mounted || _poppedBecauseProductUnlisted) return;
+    // Placeholder olsa da [productId] varken taze GET ile askı tespit edilebilsin.
+    if (_pageBackgroundSyncInFlight) return;
+    final id = _currentProduct.id.trim();
+    if (id.isEmpty) return;
+    _pageBackgroundSyncInFlight = true;
+    try {
+      final token = await _sessionHelper.getTokenAndSetHeader();
+      // Token yok bile GET /products/{id} ile askı tespiti (cache [bypassCache] ile atlanır).
+      final p = await _productRepository.getProductById(
+        id,
+        firebaseIdToken: token,
+        bypassCache: true,
+      );
+      if (!mounted) return;
+      if (p.isUnavailableForStorefront) {
+        _exitProductPageBecauseUnavailable();
+        return;
+      }
+      final onHome = await _isProductIdOnHomeFirst50(p.id, token);
+      if (!mounted) return;
+      if (_lastProductOnHomeFirstPage == true && onHome == false) {
+        _exitProductPageBecauseUnavailable();
+        return;
+      }
+      _lastProductOnHomeFirstPage = onHome;
+      if (_productPageDataChanged(p, _currentProduct)) {
+        if (mounted) {
+          setState(() {
+            _currentProduct = p;
+            _cachedRatingCounts = null;
+          });
+        }
+        ProductMemoryCache.instance.remember(p);
+      }
+      if (!mounted) return;
+      String? reviewsToken;
+      if (FirebaseAuth.instance.currentUser != null) {
+        reviewsToken = await _sessionHelper.ensureSession();
+        if (reviewsToken == null || !mounted) return;
+      }
+      final reviews = filterVisibleReviews(
+        await _reviewRepository.getReviewsByProductId(
+        _currentProduct.id,
+        firebaseIdToken: reviewsToken,
+        ),
+      );
+      if (!mounted) return;
+      ReviewMemoryCache.instance.remember(_currentProduct.id, reviews);
+      if (_reviewListDataChanged(_reviews, reviews)) {
+        if (mounted) {
+          setState(() {
+            _reviews = reviews;
+            _cachedRatingCounts = null;
+          });
+        }
+      }
+      if (mounted && FirebaseAuth.instance.currentUser != null) {
+        unawaited(_loadLikeCount());
+      }
+    } on ProductNotAvailableException {
+      if (!mounted) return;
+      _exitProductPageBecauseUnavailable();
+    } catch (_) {
+    } finally {
+      _pageBackgroundSyncInFlight = false;
+    }
+  }
+
+  /// Unlisted or missing product: dialog, then [HomePage] (clear stack).
+  void _exitProductPageBecauseUnavailable() {
+    if (!mounted || _poppedBecauseProductUnlisted) return;
+    _poppedBecauseProductUnlisted = true;
+    _productListingPollTimer?.cancel();
+    _productListingPollTimer = null;
+    final id = _currentProduct.id.trim();
+    if (id.isNotEmpty) {
+      ProductMemoryCache.instance.remove(id);
+    }
+    unawaited(
+      showContentUnavailableDialog(
+        context,
+        title: kTitleProductUnavailable,
+        message: kMessageProductNoLongerAvailable,
+        onContinue: () async {
+          if (!mounted) return;
+          await Navigator.of(context).pushAndRemoveUntil<void>(
+            MaterialPageRoute<void>(builder: (_) => const HomePage()),
+            (route) => false,
+          );
+        },
+      ),
+    );
   }
 
   /// Review satırında kendi incelemeni tespit et: [getMe] ürün/review cevabından önce tamamlanır, gri→kırmızı flash olmaz.
@@ -287,7 +495,7 @@ class _ReviewPageState extends State<ReviewPage> {
   void _hydrateReviewsFromCache() {
     final cached = ReviewMemoryCache.instance.peek(_currentProduct.id);
     if (cached == null || cached.isEmpty) return;
-    _reviews = cached;
+    _reviews = filterVisibleReviews(cached);
     _isLoadingReviews = false;
     _errorMessage = null;
   }
@@ -307,13 +515,25 @@ class _ReviewPageState extends State<ReviewPage> {
       final product = await _productRepository.getProductById(
         widget.productId!,
         firebaseIdToken: token,
+        bypassCache: true,
       );
       if (!mounted) return;
       setState(() {
         _currentProduct = product;
         _isLoadingProduct = false;
       });
+      if (product.isUnavailableForStorefront) {
+        _exitProductPageBecauseUnavailable();
+        return;
+      }
+      unawaited(_seedLastHomeProductSnapshot(product, token));
       await _loadLikeCount();
+    } on ProductNotAvailableException {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingProduct = false;
+      });
+      _exitProductPageBecauseUnavailable();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -330,18 +550,16 @@ class _ReviewPageState extends State<ReviewPage> {
       if (!mounted) return;
       setState(() {
         _likeCount = count;
-        _hasLoadedLikeCount = true;
       });
     } catch (_) {
-      // Hata durumunda mevcut değeri koru ama loading state'ten çık
       if (!mounted) return;
-      setState(() {
-        _hasLoadedLikeCount = true;
-      });
     }
   }
 
   Future<void> _onChatIconTap(ReviewDto review) async {
+    if (!isProductEntityActive(_currentProduct) || !isReviewEntityVisible(review)) {
+      return;
+    }
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       if (mounted) {
@@ -461,17 +679,31 @@ class _ReviewPageState extends State<ReviewPage> {
   Future<void> _refreshProductData() async {
     try {
       final token = await _sessionHelper.getTokenAndSetHeader();
-      if (token == null) return;
-
       final updatedProduct = await _productRepository.getProductById(
         _currentProduct.id,
         firebaseIdToken: token,
+        bypassCache: true,
       );
 
       if (!mounted) return;
+      if (updatedProduct.isUnavailableForStorefront) {
+        _exitProductPageBecauseUnavailable();
+        return;
+      }
+      final onHome = await _isProductIdOnHomeFirst50(updatedProduct.id, token);
+      if (!mounted) return;
+      if (_lastProductOnHomeFirstPage == true && onHome == false) {
+        _exitProductPageBecauseUnavailable();
+        return;
+      }
+      _lastProductOnHomeFirstPage = onHome;
       setState(() {
         _currentProduct = updatedProduct;
       });
+      ProductMemoryCache.instance.remember(updatedProduct);
+    } on ProductNotAvailableException {
+      if (!mounted) return;
+      _exitProductPageBecauseUnavailable();
     } catch (_) {}
   }
 
@@ -490,9 +722,11 @@ class _ReviewPageState extends State<ReviewPage> {
       if (user == null) {
         // Kullanıcı giriş yapmamışsa, review'ları token olmadan çekmeyi dene
         try {
-          final reviews = await _reviewRepository.getReviewsByProductId(
+          final reviews = filterVisibleReviews(
+            await _reviewRepository.getReviewsByProductId(
             _currentProduct.id,
             firebaseIdToken: null,
+            ),
           );
           ReviewMemoryCache.instance.remember(_currentProduct.id, reviews);
           setState(() {
@@ -534,9 +768,11 @@ class _ReviewPageState extends State<ReviewPage> {
       }
 
       // Review'ları çek
-      final reviews = await _reviewRepository.getReviewsByProductId(
+      final reviews = filterVisibleReviews(
+        await _reviewRepository.getReviewsByProductId(
         _currentProduct.id,
         firebaseIdToken: firebaseIdToken,
+        ),
       );
       ReviewMemoryCache.instance.remember(_currentProduct.id, reviews);
 
@@ -778,6 +1014,11 @@ class _ReviewPageState extends State<ReviewPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_poppedBecauseProductUnlisted) {
+      return const Scaffold(
+        body: SizedBox.shrink(),
+      );
+    }
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (bool didPop, Object? value) {
@@ -1139,7 +1380,10 @@ class _ReviewPageState extends State<ReviewPage> {
                                     height: 24,
                                     fit: BoxFit.contain,
                                   ),
-                                  onTap: () {
+                                  onTap: !isProductEntityActive(_currentProduct) ||
+                                          _isLoadingProduct
+                                      ? null
+                                      : () {
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
@@ -1365,6 +1609,8 @@ class _ReviewPageState extends State<ReviewPage> {
                         isCurrentUser: _isMyReview(review),
                         showChatIcon:
                             _currentUsername != null &&
+                            isProductEntityActive(_currentProduct) &&
+                            isReviewEntityVisible(review) &&
                             review.ownerUserName.toLowerCase() !=
                                 _currentUsername!.toLowerCase(),
                         onReportTap:
@@ -1452,6 +1698,7 @@ class _ReviewPageState extends State<ReviewPage> {
                                 productName: review.productName,
                                 ownerId: review.ownerId,
                                 ownerUserName: review.ownerUserName,
+                                ownerProfilePhotoUrl: review.ownerProfilePhotoUrl,
                                 mediaList: review.mediaList,
                                 likeCount:
                                     previousLikeStatus
@@ -1460,6 +1707,8 @@ class _ReviewPageState extends State<ReviewPage> {
                                             : 0)
                                         : previousLikeCount + 1,
                                 isLikedByCurrentUser: !previousLikeStatus,
+                                isProductNotListed: review.isProductNotListed,
+                                isReviewInactive: review.isReviewInactive,
                               );
                             });
                           }
@@ -1485,12 +1734,48 @@ class _ReviewPageState extends State<ReviewPage> {
                                     review.id,
                                     firebaseIdToken: token,
                                   );
-
-                              // Review listesini güncelle
+                              if (!isReviewEntityVisible(updatedReview)) {
+                                if (reviewIndex != -1 && mounted) {
+                                  setState(() {
+                                    _reviews.removeAt(reviewIndex);
+                                    _cachedRatingCounts = null;
+                                  });
+                                  ReviewMemoryCache.instance.remember(
+                                    _currentProduct.id,
+                                    _reviews,
+                                  );
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        kMessageReviewNoLongerAvailable,
+                                      ),
+                                    ),
+                                  );
+                                }
+                                return;
+                              }
                               if (reviewIndex != -1) {
                                 setState(() {
                                   _reviews[reviewIndex] = updatedReview;
                                 });
+                              }
+                            } on ReviewNotAvailableException {
+                              if (reviewIndex != -1 && mounted) {
+                                setState(() {
+                                  _reviews.removeAt(reviewIndex);
+                                  _cachedRatingCounts = null;
+                                });
+                                ReviewMemoryCache.instance.remember(
+                                  _currentProduct.id,
+                                  _reviews,
+                                );
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      kMessageReviewNoLongerAvailable,
+                                    ),
+                                  ),
+                                );
                               }
                             } catch (e) {
                               // Backend'den çekme başarısız olursa, toggle'dan dönen değeri kullan
@@ -1509,6 +1794,8 @@ class _ReviewPageState extends State<ReviewPage> {
                                     productName: currentReview.productName,
                                     ownerId: currentReview.ownerId,
                                     ownerUserName: currentReview.ownerUserName,
+                                    ownerProfilePhotoUrl:
+                                        currentReview.ownerProfilePhotoUrl,
                                     mediaList: currentReview.mediaList,
                                     likeCount:
                                         newLikeStatus
@@ -1517,6 +1804,10 @@ class _ReviewPageState extends State<ReviewPage> {
                                                 ? currentReview.likeCount - 1
                                                 : 0),
                                     isLikedByCurrentUser: newLikeStatus,
+                                    isProductNotListed:
+                                        currentReview.isProductNotListed,
+                                    isReviewInactive:
+                                        currentReview.isReviewInactive,
                                   );
                                 });
                               }

@@ -2,11 +2,14 @@ import 'package:dio/dio.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../../core/utils/session_helper.dart';
+import '../../auth/data/services/auth_service.dart';
+import '../../auth/data/utils/notification_remote_user_filter.dart';
 import 'friends_feed_dto.dart';
 
 class FriendsFeedRepository {
   final ApiClient _apiClient = ApiClient();
   final SessionHelper _sessionHelper = SessionHelper();
+  final AuthService _auth = AuthService();
 
   Future<String> _requireFreshToken() async {
     final t = await _sessionHelper.ensureSession();
@@ -35,8 +38,19 @@ class FriendsFeedRepository {
           headers: {'Authorization': 'Bearer $token'},
         ),
       );
-      return FriendsFeedPageDto.fromJson(
+      final raw = FriendsFeedPageDto.fromJson(
         response.data as Map<String, dynamic>,
+      );
+      final content = await filterFriendsFeedHidingUnlistedActors(
+        raw.content,
+        _auth,
+      );
+      return FriendsFeedPageDto(
+        content: content,
+        totalElements: raw.totalElements,
+        totalPages: raw.totalPages,
+        size: raw.size,
+        number: raw.number,
       );
     } on DioException catch (e) {
       if (e.response != null) {

@@ -15,6 +15,7 @@ import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/utils/exceptions.dart';
 import '../../../../../core/utils/product_listing_flags.dart';
+import '../../../../../core/utils/entity_active.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../auth/data/services/auth_service.dart';
 import '../../../../auth/data/models/user_response_dto.dart';
@@ -73,7 +74,7 @@ class _ProfilePageState extends State<ProfilePage>
 
   /// My Reviews satırlarında ürün görseli için (prefetch).
   final Map<String, ProductDto> _reviewProductHints = {};
-  /// GET /api/products/{id} 404/410/403 — ürün artık yok / askı (backend review JSON’u işaretlemese bile).
+  /// GET /api/products/{id} 404/401 — ürün yok/erişim yok (backend review JSON’u işaretlemese bile).
   final Set<String> _unlistedProductIdsFromFailedFetch = {};
   /// [InteractionRepository.isProductReported] — cihaz dışı veya yeni oturum senkronu.
   final Set<String> _productIdsReportedByMeFromServer = {};
@@ -210,8 +211,11 @@ class _ProfilePageState extends State<ProfilePage>
     });
   }
 
-  /// [refreshProductState] true: pull / ürün active→suspend gibi; ipuçları + [ProductMemoryCache] sıfırlanır, poll’da false.
+  /// [refreshProductState] true: aşağı çek; ipuçları + [ProductMemoryCache] setState’te temizlenir, sonra
+  /// tek pasotta zenginleştirme taze sinyal uygular.
   /// [waitForEnrichment] true: prefetch + ana sayfa + reported bitene kadar iskelet (ilk açılış / pull titremesin).
+  /// Arka plan (5 sn poll): parça parça setState olmadan tek birleşik zenginleştirme — eski [ProductDto]
+  /// (vitrin dışı + eski URL) askıyı tespit etmeyi geciktirmesin.
   Future<void> _loadMyReviews({
     bool background = false,
     bool refreshProductState = false,
@@ -287,9 +291,7 @@ class _ProfilePageState extends State<ProfilePage>
       });
       _rememberWarmProfile();
       _sortMyReviews();
-      unawaited(_prefetchProductsForReviews(reviews));
-      unawaited(_syncMyReportedProductFlagsFromServer());
-      unawaited(_syncNotOnHomeFirstPageSet(reviews));
+      unawaited(_reconcileMyReviewsEnrichment(reviews, token));
     } catch (e) {
       if (mounted) {
         if (background && _myReviews.isNotEmpty) {
@@ -443,124 +445,47 @@ class _ProfilePageState extends State<ProfilePage>
     return fromApi;
   }
 
-  Future<void> _prefetchProductsForReviews(List<ReviewDto> reviews) async {
-    final ids =
+  /// Arka planda (5 sn poll vb.) tüm sinyalleri aynı anda türet; önce [setState] ile
+  /// ayrı ayrı güncellemek eski [ProductDto] (ör. vitrinde artık yok) ile askıyı
+  /// tespit etmeyi geciktiriyordu — tek [setState] ile taze hali uygular.
+  Future<void> _reconcileMyReviewsEnrichment(
+    List<ReviewDto> reviews,
+    String token,
+  ) async {
+    final pids =
         reviews.map((r) => r.productId).where((s) => s.isNotEmpty).toSet();
-    if (ids.isEmpty) return;
-    final token = await _sessionHelper.getTokenAndSetHeader();
-    final list = ids.toList();
-    const batchSize = 5;
-    for (var i = 0; i < list.length; i += batchSize) {
-      if (!mounted) return;
-      final end = (i + batchSize > list.length) ? list.length : i + batchSize;
-      final slice = list.sublist(i, end);
-      final results = await Future.wait(
-        slice.map((id) async {
-          try {
-            return MapEntry(
-              id,
-              await _productRepository.getProductById(
-                id,
-                firebaseIdToken: token,
-                bypassCache: true,
-              ),
-            );
-          } on ProductNotAvailableException {
-            return MapEntry<String, ProductDto?>(id, null);
-          } catch (_) {
-            return null;
-          }
-        }),
-      );
-      if (!mounted) return;
-      final unlisted = <String>[];
-      final updates = <MapEntry<String, ProductDto>>[];
-      for (final e in results) {
-        if (e == null) continue;
-        if (e.value == null) {
-          unlisted.add(e.key);
-          continue;
+    if (pids.isEmpty) return;
+    final enrich = await _enrichMyReviewsData(reviews, token);
+    if (!mounted) return;
+    setState(() {
+      for (final id in pids) {
+        _reviewProductHints.remove(id);
+        ProductMemoryCache.instance.remove(id);
+      }
+      for (final e in enrich.hints.entries) {
+        if (pids.contains(e.key)) {
+          _reviewProductHints[e.key] = e.value;
         }
-        updates.add(MapEntry(e.key, e.value!));
       }
-      if (unlisted.isNotEmpty || updates.isNotEmpty) {
-        setState(() {
-          _unlistedProductIdsFromFailedFetch.addAll(unlisted);
-          for (final e in updates) {
-            _reviewProductHints[e.key] = e.value;
-          }
-        });
+      _unlistedProductIdsFromFailedFetch
+        ..removeWhere((id) => pids.contains(id))
+        ..addAll(enrich.unlisted404);
+      _myReviewProductIdsNotOnHomeFirstPage
+        ..removeWhere((id) => pids.contains(id))
+        ..addAll(enrich.notOnHome);
+      for (final id in pids) {
+        if (enrich.reportedIds.contains(id)) {
+          _productIdsReportedByMeFromServer.add(id);
+        } else {
+          _productIdsReportedByMeFromServer.remove(id);
+        }
       }
-    }
-  }
-
-  /// `GET /api/products/home` ilk sayfa: listede yokluk = vitrin/feed dışı (askı iPhone senaryosu).
-  Future<void> _syncNotOnHomeFirstPageSet(List<ReviewDto> reviews) async {
-    final mine = reviews
-        .map((r) => r.productId.trim())
-        .where((s) => s.isNotEmpty)
-        .toSet();
-    if (mine.isEmpty) return;
-    try {
-      final token = await _sessionHelper.getTokenAndSetHeader();
-      if (!mounted) return;
-      final feed = await _productRepository.getHomeFeed(
-        page: 0,
-        size: 50,
-        firebaseIdToken: token,
-      );
-      if (!mounted) return;
-      final onHome = feed.content.map((e) => e.id.trim()).toSet();
-      final missing = mine.where((id) => !onHome.contains(id)).toSet();
-      if (mounted) {
-        setState(() {
-          _myReviewProductIdsNotOnHomeFirstPage
-            ..clear()
-            ..addAll(missing);
-        });
-      }
-    } catch (_) {}
-  }
-
-  /// Sunucu “bu ürünü ben raporladım” bilgisini getirir (yerel [ProductReportStorage] ile birleşir).
-  Future<void> _syncMyReportedProductFlagsFromServer() async {
-    final ids = _myReviews
-        .map((r) => r.productId)
-        .where((s) => s.isNotEmpty)
-        .toSet();
-    if (ids.isEmpty) return;
-    final token = await _sessionHelper.getTokenAndSetHeader();
-    if (token == null) return;
-    final list = ids.toList();
-    const batch = 5;
-    final fromApi = <String>{};
-    for (var i = 0; i < list.length; i += batch) {
-      if (!mounted) return;
-      final j = i + batch > list.length ? list.length : i + batch;
-      final slice = list.sublist(i, j);
-      final rows = await Future.wait(
-        slice.map((id) async {
-          final ok = await _interactionRepository.isProductReported(
-            token,
-            id,
-          );
-          return MapEntry(id, ok);
-        }),
-      );
-      for (final e in rows) {
-        if (e.value) fromApi.add(e.key);
-      }
-    }
-    if (mounted) {
-      setState(() {
-        _productIdsReportedByMeFromServer
-          ..clear()
-          ..addAll(fromApi);
-      });
-    }
+    });
+    _rememberWarmProfile();
   }
 
   bool _isMyReviewRowNotListed(ReviewDto review, ProductDto? hint) {
+    if (!isReviewEntityVisible(review)) return true;
     if (review.isProductNotListed) return true;
     if (hint?.isProductNotListed == true) return true;
     if (_unlistedProductIdsFromFailedFetch.contains(review.productId)) {
@@ -582,10 +507,19 @@ class _ProfilePageState extends State<ProfilePage>
     return false;
   }
 
+  /// [ProductDto] askı/404/home sinyali ile vitrin dışı kalan yorumlar My Reviews’da listelenmez.
+  List<ReviewDto> _myReviewsVisibleInTab() {
+    return _myReviews.where((r) {
+      final hint = _reviewProductHints[r.productId];
+      return !_isMyReviewRowNotListed(r, hint);
+    }).toList();
+  }
+
   String _myReviewsAverageLabel() {
-    if (_myReviews.isEmpty) return '—';
-    final sum = _myReviews.fold<double>(0, (a, r) => a + r.rating);
-    return (sum / _myReviews.length).toStringAsFixed(1);
+    final visible = _myReviewsVisibleInTab();
+    if (visible.isEmpty) return '—';
+    final sum = visible.fold<double>(0, (a, r) => a + r.rating);
+    return (sum / visible.length).toStringAsFixed(1);
   }
 
   ProductDto _productForReviewDetail(ReviewDto review, ProductDto? hint) {
@@ -654,7 +588,8 @@ class _ProfilePageState extends State<ProfilePage>
         ),
       );
     }
-    if (_myReviews.isEmpty) {
+    final visibleMyReviews = _myReviewsVisibleInTab();
+    if (visibleMyReviews.isEmpty) {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(AppSpacing.xLarge),
@@ -666,12 +601,11 @@ class _ProfilePageState extends State<ProfilePage>
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
-      itemCount: _myReviews.length,
+      itemCount: visibleMyReviews.length,
       separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.medium),
       itemBuilder: (context, index) {
-        final review = _myReviews[index];
+        final review = visibleMyReviews[index];
         final hint = _reviewProductHints[review.productId];
-        final notListed = _isMyReviewRowNotListed(review, hint);
         final youReportedReview = ReviewReportStorage.hasReportedSync(
           review.id,
         );
@@ -682,39 +616,35 @@ class _ProfilePageState extends State<ProfilePage>
           key: ValueKey(review.id),
           review: review,
           productImageUrl: hint?.imageURL,
-          isProductNotListed: notListed,
           youReportedThisReview: youReportedReview,
           youReportedThisProduct: youReportedProduct,
           onDelete: () => _onDeleteMyReview(review),
-          onTap:
-              notListed
-                  ? null
-                  : () async {
-                    final cached =
-                        ProductMemoryCache.instance.peek(review.productId) ??
-                        _reviewProductHints[review.productId];
-                    final product = _productForReviewDetail(review, cached);
-                    final result = await Navigator.push<dynamic>(
-                      context,
-                      SlideRightRoute(
-                        page: ReviewDetailPage(
-                          review: review,
-                          product: product,
-                        ),
-                      ),
-                    );
-                    if (!mounted) return;
-                    if (result == ReviewDeleteFlow.popResultDeleted) {
-                      setState(() {
-                        _myReviews.removeWhere((r) => r.id == review.id);
-                      });
-                      ReviewMemoryCache.instance.removeReviewFromProduct(
-                        review.productId,
-                        review.id,
-                      );
-                      _rememberWarmProfile();
-                    }
-                  },
+          onTap: () async {
+            final cached =
+                ProductMemoryCache.instance.peek(review.productId) ??
+                _reviewProductHints[review.productId];
+            final product = _productForReviewDetail(review, cached);
+            final result = await Navigator.push<dynamic>(
+              context,
+              SlideRightRoute(
+                page: ReviewDetailPage(
+                  review: review,
+                  product: product,
+                ),
+              ),
+            );
+            if (!mounted) return;
+            if (result == ReviewDeleteFlow.popResultDeleted) {
+              setState(() {
+                _myReviews.removeWhere((r) => r.id == review.id);
+              });
+              ReviewMemoryCache.instance.removeReviewFromProduct(
+                review.productId,
+                review.id,
+              );
+              _rememberWarmProfile();
+            }
+          },
         );
       },
     );
@@ -780,14 +710,32 @@ class _ProfilePageState extends State<ProfilePage>
 
   Future<void> _loadFollowCounts(String userId) async {
     final results = await Future.wait([
-      _interactionRepository.getFollowerCount(userId),
-      _interactionRepository.getFollowingCount(userId),
+      _interactionRepository.countVisibleFollowers(userId),
+      _interactionRepository.countVisibleFollowing(userId),
     ]);
     if (!mounted) return;
     setState(() {
       _followerCount = results[0];
       _followingCount = results[1];
     });
+  }
+
+  /// Takip / takipçi listesinden dönünce sayıları tazele.
+  Future<void> _openFollowListAndRefresh({required bool isFollowers}) async {
+    if (_user == null || _user!.id.isEmpty) return;
+    final id = _user!.id;
+    await Navigator.push<void>(
+      context,
+      SlideRightRoute(
+        page: FollowListPage(
+          userId: id,
+          title: isFollowers ? 'Followers' : 'Following',
+          isFollowers: isFollowers,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    await _loadFollowCounts(id);
   }
 
   /// Sunucu: takip sayıları + yorumlar (suspend / ortalama) + wishlist; getMe yok (avatar titremesin).
@@ -836,6 +784,58 @@ class _ProfilePageState extends State<ProfilePage>
     super.dispose();
   }
 
+  /// Wishlist [ProductDto] satırını [getProductById] ile teyit eder; askı/404’te [null] (satır gider).
+  Future<ProductDto?> _revalidateWishlistRow(
+    ProductDto p,
+    String token,
+  ) async {
+    if (p.isProductNotListed || isNotListedImpliedByEmptyProductImage(p.imageURL)) {
+      return null;
+    }
+    try {
+      final fresh = await _productRepository.getProductById(
+        p.id,
+        firebaseIdToken: token,
+        bypassCache: true,
+      );
+      if (fresh.isProductNotListed ||
+          isNotListedImpliedByEmptyProductImage(fresh.imageURL)) {
+        return null;
+      }
+      final at = p.createdAt;
+      if (at != null) {
+        return fresh.copyWith(createdAt: at);
+      }
+      return fresh;
+    } on ProductNotAvailableException {
+      return null;
+    } catch (_) {
+      return p;
+    }
+  }
+
+  /// [getMyWishlist] cevabını vitrin/askı ile hizala (5 sn poll + ilk yükleme).
+  Future<List<ProductDto>> _filterWishlistToListedProducts(
+    List<ProductDto> fromServer,
+    String token,
+  ) async {
+    if (fromServer.isEmpty) return const [];
+    final out = <ProductDto>[];
+    const batch = 5;
+    for (var i = 0; i < fromServer.length; i += batch) {
+      if (!mounted) return out;
+      final end = (i + batch) > fromServer.length ? fromServer.length : (i + batch);
+      final slice = fromServer.sublist(i, end);
+      final part = await Future.wait(
+        slice.map((p) => _revalidateWishlistRow(p, token)),
+      );
+      for (final q in part) {
+        if (q != null) out.add(q);
+      }
+    }
+    return out;
+  }
+
   Future<void> _loadWishlist({bool background = false}) async {
     if (!background) {
       setState(() {
@@ -852,7 +852,9 @@ class _ProfilePageState extends State<ProfilePage>
         throw Exception('Failed to get Firebase ID token');
       }
 
-      final products = await _interactionRepository.getMyWishlist(token);
+      final raw = await _interactionRepository.getMyWishlist(token);
+      if (!mounted) return;
+      final products = await _filterWishlistToListedProducts(raw, token);
       if (!mounted) return;
       setState(() {
         _wishlistProducts = List.from(products);
@@ -1272,17 +1274,9 @@ class _ProfilePageState extends State<ProfilePage>
                 children: [
                   Expanded(
                     child: GestureDetector(
-                      onTap:
-                          () => Navigator.push(
-                            context,
-                            SlideRightRoute(
-                              page: FollowListPage(
-                                userId: _user!.id,
-                                title: 'Followers',
-                                isFollowers: true,
-                              ),
-                            ),
-                          ),
+                      onTap: () => unawaited(
+                        _openFollowListAndRefresh(isFollowers: true),
+                      ),
                       child: _StatItem(
                         count: _followerCount,
                         label: 'Followers',
@@ -1291,17 +1285,9 @@ class _ProfilePageState extends State<ProfilePage>
                   ),
                   Expanded(
                     child: GestureDetector(
-                      onTap:
-                          () => Navigator.push(
-                            context,
-                            SlideRightRoute(
-                              page: FollowListPage(
-                                userId: _user!.id,
-                                title: 'Following',
-                                isFollowers: false,
-                              ),
-                            ),
-                          ),
+                      onTap: () => unawaited(
+                        _openFollowListAndRefresh(isFollowers: false),
+                      ),
                       child: _StatItem(
                         count: _followingCount,
                         label: 'Following',
@@ -1310,14 +1296,14 @@ class _ProfilePageState extends State<ProfilePage>
                   ),
                   Expanded(
                     child: _StatItem(
-                      count: _myReviews.length,
+                      count: _myReviewsVisibleInTab().length,
                       label: 'Reviews',
                     ),
                   ),
                   Expanded(
                     child: Tooltip(
                       message:
-                          'Yorumlarınızdaki yıldız ortalaması (5 üzerinden)',
+                          'Average star rating of your reviews (out of 5).',
                       child: _StatTextItem(
                         value: _myReviewsAverageLabel(),
                         label: 'Review avg',

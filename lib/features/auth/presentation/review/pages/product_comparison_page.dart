@@ -6,6 +6,7 @@ import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../../../../core/utils/product_rating_display.dart';
+import '../../../../../core/utils/entity_active.dart';
 import '../../../../../core/widgets/new_product_badge.dart';
 import '../../../../../core/theme/app_decorations.dart';
 import '../../../data/models/product_dto.dart';
@@ -54,8 +55,8 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
       ]);
       if (!mounted) return;
       setState(() {
-        _reviews1 = results[0];
-        _reviews2 = results[1];
+        _reviews1 = filterVisibleReviews(results[0]);
+        _reviews2 = filterVisibleReviews(results[1]);
         _loadingReviews = false;
       });
     } catch (_) {

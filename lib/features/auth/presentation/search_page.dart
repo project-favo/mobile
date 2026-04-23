@@ -8,6 +8,7 @@ import '../../../core/cache/following_id_set_cache.dart';
 import '../../../core/cache/search_warm_cache.dart';
 import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/session_helper.dart';
+import '../../../core/utils/entity_active.dart';
 import '../../../core/notifications/notification_realtime_service.dart';
 import '../../../core/widgets/main_bottom_nav_items.dart';
 import '../../../features/activity/presentation/activity_page.dart';
@@ -127,7 +128,7 @@ class _SearchPageState extends State<SearchPage> {
       setProductCardSocialCaches(
         productId,
         likeCount: like,
-        reviewCount: reviews.length,
+        reviewCount: filterVisibleReviews(reviews).length,
       );
       if (!mounted) return;
       setState(() {

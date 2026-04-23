@@ -6,8 +6,10 @@ import '../../../../core/theme/app_icon_sizes.dart';
 import '../../../../core/theme/app_decorations.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/utils/product_rating_display.dart';
+import '../../../../core/utils/entity_active.dart';
 import '../data/repositories/interaction_repository.dart';
 import '../data/repositories/review_repository.dart';
+import '../data/models/review_dto.dart';
 
 /// Basit, in-memory review count cache (sadece app çalışırken tutulur).
 class _ReviewCountCache {
@@ -140,7 +142,9 @@ class _ProductCardState extends State<ProductCard> {
         interactionRepository.getProductLikeCount(widget.productId),
       ]);
       if (!mounted) return;
-      final reviews = futures[0] as List;
+      final reviews = filterVisibleReviews(
+        futures[0] as List<ReviewDto>,
+      );
       final likeCount = futures[1] as int;
       final count = reviews.length;
       _ReviewCountCache.set(widget.productId, count);

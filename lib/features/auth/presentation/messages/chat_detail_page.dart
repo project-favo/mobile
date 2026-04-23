@@ -7,7 +7,10 @@ import 'package:stomp_dart_client/stomp_dart_client.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_spacing.dart';
+import '../../../../core/utils/content_availability_messages.dart';
+import '../../../../core/utils/content_unavailable_dialog.dart';
 import '../../../../core/utils/error_handler.dart';
+import '../../../../core/utils/exceptions.dart';
 import '../../../../core/utils/session_helper.dart';
 import '../../../../core/config/api_config.dart';
 import '../../../../core/utils/resolve_media_url.dart';
@@ -91,8 +94,28 @@ class _ChatDetailPageState extends State<ChatDetailPage>
     }
   }
 
+  void _exitChatUserUnavailable() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(
+        showContentUnavailableDialog(
+          context,
+          title: kTitleUserUnavailable,
+          message: kMessageUserUnavailableInChat,
+          onContinue: () async {
+            if (mounted) Navigator.of(context).pop();
+          },
+        ),
+      );
+    });
+  }
+
   Future<void> _init() async {
     try {
+      if (widget.conversation.otherParticipant.isAccountInactive) {
+        _exitChatUserUnavailable();
+        return;
+      }
       final token = await _sessionHelper.ensureSession();
       if (token == null) {
         throw Exception('Please login to see messages.');
@@ -225,11 +248,16 @@ class _ChatDetailPageState extends State<ChatDetailPage>
 
   Future<void> _enrichOtherParticipant() async {
     final op = widget.conversation.otherParticipant;
-    if (_otherParticipantHasLoadableVisual(op)) return;
     if (op.id <= 0) return;
     try {
       final u = await _authService.getUserById(op.id.toString());
-      if (u == null || !mounted) return;
+      if (!mounted) return;
+      if (u == null) return;
+      if (u.isAccountInactive) {
+        _exitChatUserUnavailable();
+        return;
+      }
+      if (_otherParticipantHasLoadableVisual(op)) return;
       final bytes = decodeProfilePhotoBytes(u.profilePhotoData);
       final url = u.profileImageUrl?.trim();
       if ((url != null && url.isNotEmpty) ||
@@ -239,6 +267,8 @@ class _ChatDetailPageState extends State<ChatDetailPage>
           _resolvedOtherBytes = bytes;
         });
       }
+    } on TargetUserNotAvailableException catch (_) {
+      if (mounted) _exitChatUserUnavailable();
     } catch (_) {}
   }
 

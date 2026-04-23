@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../../../../core/config/api_config.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/utils/entity_active.dart';
 import '../../../../core/utils/exceptions.dart';
 import '../models/conversation_dto.dart';
 import '../models/product_dto.dart';
@@ -320,9 +321,10 @@ class InteractionRepository {
         queryParameters: {'page': page, 'size': size},
       );
       final content = response.data is Map ? (response.data['content'] as List? ?? []) : [];
-      return content
+      final list = content
           .map((e) => ConversationUserDto.fromJson(e as Map<String, dynamic>))
           .toList();
+      return filterVisibleConversationUsers(list);
     } on DioException {
       return [];
     }
@@ -340,12 +342,46 @@ class InteractionRepository {
         queryParameters: {'page': page, 'size': size},
       );
       final content = response.data is Map ? (response.data['content'] as List? ?? []) : [];
-      return content
+      final list = content
           .map((e) => ConversationUserDto.fromJson(e as Map<String, dynamic>))
           .toList();
+      return filterVisibleConversationUsers(list);
     } on DioException {
       return [];
     }
+  }
+
+  static const int _visibleCountPageSize = 100;
+  static const int _visibleCountMaxPages = 100;
+
+  /// Sunucu [getFollowerCount] değil; listeyle aynı filtre (pasif kullanıcılar sayılmaz).
+  Future<int> countVisibleFollowers(String userId) async {
+    var total = 0;
+    for (var page = 0; page < _visibleCountMaxPages; page++) {
+      final list = await getFollowers(
+        userId,
+        page: page,
+        size: _visibleCountPageSize,
+      );
+      total += list.length;
+      if (list.length < _visibleCountPageSize) break;
+    }
+    return total;
+  }
+
+  /// [countVisibleFollowers] ile aynı mantık (takip edilenler).
+  Future<int> countVisibleFollowing(String userId) async {
+    var total = 0;
+    for (var page = 0; page < _visibleCountMaxPages; page++) {
+      final list = await getFollowing(
+        userId,
+        page: page,
+        size: _visibleCountPageSize,
+      );
+      total += list.length;
+      if (list.length < _visibleCountPageSize) break;
+    }
+    return total;
   }
 
   /// Tüm sayfalarda takip edilen kullanıcı id’leri (string); bildirim satırlarında `isFollowing` yükünü N istek yerine 1+ akışa indirir.

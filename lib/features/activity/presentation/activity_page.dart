@@ -41,6 +41,8 @@ class _ActivityPageState extends State<ActivityPage>
   late final TabController _tabController;
   final ScrollController _scrollController = ScrollController();
   StreamSubscription<NotificationPushEvent>? _pushSub;
+  Timer? _activityPollTimer;
+  static const _activityPollInterval = Duration(seconds: 5);
 
   Route<T> _instantRoute<T>(Widget page) {
     return PageRouteBuilder<T>(
@@ -109,6 +111,9 @@ class _ActivityPageState extends State<ActivityPage>
     );
     _controller.hydrateFromCache();
     unawaited(_bootstrapActivity());
+    _activityPollTimer = Timer.periodic(_activityPollInterval, (_) {
+      unawaited(_controller.pollResyncList());
+    });
   }
 
   Future<void> _bootstrapActivity() async {
@@ -132,6 +137,7 @@ class _ActivityPageState extends State<ActivityPage>
 
   @override
   void dispose() {
+    _activityPollTimer?.cancel();
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _pushSub?.cancel();
@@ -168,7 +174,7 @@ class _ActivityPageState extends State<ActivityPage>
   void _onRealtimePush(NotificationPushEvent e) {
     final n = e.notification;
     if (n == null || !mounted) return;
-    _controller.prependFromPush(n);
+    unawaited(_controller.prependFromPush(n));
     unawaited(NotificationRealtimeService.instance.refreshUnread());
   }
 

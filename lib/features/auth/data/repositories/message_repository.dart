@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/utils/entity_active.dart';
 import '../models/message_dto.dart';
 import '../models/conversation_dto.dart';
 import '../models/unread_count_dto.dart';
@@ -54,8 +55,19 @@ class MessageRepository {
           'size': size,
         },
       );
-      return ConversationPageDto.fromJson(
+      final raw = ConversationPageDto.fromJson(
         response.data as Map<String, dynamic>,
+      );
+      final filtered = filterVisibleConversations(raw.content);
+      return ConversationPageDto(
+        content: filtered,
+        totalElements: raw.totalElements,
+        totalPages: raw.totalPages,
+        size: raw.size,
+        number: raw.number,
+        first: raw.first,
+        last: raw.last,
+        empty: filtered.isEmpty,
       );
     } on DioException catch (e) {
       if (e.response != null) {

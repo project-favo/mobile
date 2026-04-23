@@ -9,6 +9,9 @@ import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/utils/exceptions.dart';
 import '../../../../../core/utils/product_listing_flags.dart';
+import '../../../../../core/utils/entity_active.dart';
+import '../../../../../core/utils/content_availability_messages.dart';
+import '../../../../../core/utils/content_unavailable_dialog.dart';
 import '../../../../../core/utils/product_report_storage.dart';
 import '../../../../../core/utils/review_report_storage.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
@@ -29,6 +32,7 @@ import '../../messages/chat_detail_page.dart';
 import '../../review/pages/review_detail_page.dart';
 import 'follow_list_page.dart';
 import '../widgets/profile_review_row_card.dart';
+import '../../home_page.dart';
 
 class UserProfilePage extends StatefulWidget {
   final String userId;
@@ -59,6 +63,14 @@ class _UserProfilePageState extends State<UserProfilePage>
   final Set<String> _unlistedProductIdsFromFailedFetch = {};
   final Set<String> _productIdsReportedByMeFromServer = {};
   final Set<String> _reviewProductIdsNotOnHomeFirstPage = {};
+
+  Timer? _otherUserProfilePollTimer;
+  static const Duration _otherUserProfilePollInterval = Duration(seconds: 5);
+  bool _otherUserProfilePollInFlight = false;
+  /// Hedef kullanıcı yok / deaktif; [HomePage]'e dönüldü.
+  bool _exitedBecauseUserGone = false;
+  /// [getUserById] başarılı ve hesap deaktif değil; mesaj ikonu buna bağlı.
+  bool _canShowMessageToProfileUser = false;
 
   late TabController _tabController;
   String _selectedDateSort = 'Newest';
@@ -96,13 +108,99 @@ class _UserProfilePageState extends State<UserProfilePage>
       }
     } catch (_) {}
     if (!mounted) return;
+    await _revalidateTargetUserOrExit();
+    if (!mounted || _exitedBecauseUserGone) return;
     await _loadAll();
     if (mounted) await _enrichProfileFromApi();
+    if (!mounted) return;
+    _otherUserProfilePollTimer?.cancel();
+    _otherUserProfilePollTimer = Timer.periodic(
+      _otherUserProfilePollInterval,
+      (_) => unawaited(_pollOtherUserProfileData()),
+    );
+    unawaited(_pollOtherUserProfileData());
+  }
+
+  /// 5 sn: takip sayıları + yorum listesi (askı/ silinen satırlar düşer) + zenginleştirme.
+  Future<void> _pollOtherUserProfileData() async {
+    if (!mounted) return;
+    if (_exitedBecauseUserGone) return;
+    if (_otherUserProfilePollInFlight) return;
+    _otherUserProfilePollInFlight = true;
+    await _revalidateTargetUserOrExit();
+    if (!mounted || _exitedBecauseUserGone) {
+      _otherUserProfilePollInFlight = false;
+      return;
+    }
+    try {
+      final token = await _sessionHelper.ensureSession();
+      if (!mounted) return;
+      await Future.wait<void>([
+        _loadCounts(),
+        _loadIsFollowing(token),
+        _loadReviews(token, background: true),
+      ]);
+      if (!mounted) return;
+      unawaited(_prefetchProductsForReviews(_reviews));
+      unawaited(_syncReportedProductFlagsFromServer());
+      unawaited(_syncNotOnHomeFirstPageSet(_reviews));
+    } catch (_) {
+    } finally {
+      _otherUserProfilePollInFlight = false;
+    }
+  }
+
+  /// GET kullanıcı: 404/401 veya isActive false → [HomePage].
+  Future<void> _revalidateTargetUserOrExit() async {
+    if (!mounted || _exitedBecauseUserGone) return;
+    if (widget.userId.trim().isEmpty) return;
+    try {
+      final u = await _authService.getUserById(widget.userId);
+      if (!mounted) return;
+      if (u != null && u.isAccountInactive) {
+        _exitToHomeBecauseUserUnavailable();
+        return;
+      }
+      if (u != null && !u.isAccountInactive) {
+        setState(() => _canShowMessageToProfileUser = true);
+      }
+    } on TargetUserNotAvailableException {
+      if (mounted) _exitToHomeBecauseUserUnavailable();
+    } catch (_) {}
+  }
+
+  void _exitToHomeBecauseUserUnavailable() {
+    if (!mounted || _exitedBecauseUserGone) return;
+    _exitedBecauseUserGone = true;
+    _otherUserProfilePollTimer?.cancel();
+    _otherUserProfilePollTimer = null;
+    unawaited(
+      showContentUnavailableDialog(
+        context,
+        title: kTitleUserUnavailable,
+        message: kMessageUserProfileNoLongerAvailable,
+        onContinue: () async {
+          if (!mounted) return;
+          await Navigator.of(context).pushAndRemoveUntil<void>(
+            MaterialPageRoute<void>(builder: (_) => const HomePage()),
+            (route) => false,
+          );
+        },
+      ),
+    );
   }
 
   Future<void> _enrichProfileFromApi() async {
+    if (_exitedBecauseUserGone) return;
     try {
       final u = await _authService.getUserById(widget.userId);
+      if (u != null && u.isAccountInactive && mounted) {
+        _exitToHomeBecauseUserUnavailable();
+        return;
+      }
+      if (u != null && !u.isAccountInactive && mounted) {
+        setState(() => _canShowMessageToProfileUser = true);
+      }
       if (u != null && mounted) {
         final bytes = decodeProfilePhotoBytes(u.profilePhotoData);
         setState(() {
@@ -115,6 +213,8 @@ class _UserProfilePageState extends State<UserProfilePage>
           }
         });
       }
+    } on TargetUserNotAvailableException {
+      if (mounted) _exitToHomeBecauseUserUnavailable();
     } catch (_) {}
     if (!mounted) return;
     final noUrl = _avatarImageUrl == null || _avatarImageUrl!.trim().isEmpty;
@@ -133,6 +233,7 @@ class _UserProfilePageState extends State<UserProfilePage>
 
   @override
   void dispose() {
+    _otherUserProfilePollTimer?.cancel();
     _tabController.dispose();
     super.dispose();
   }
@@ -148,8 +249,8 @@ class _UserProfilePageState extends State<UserProfilePage>
 
   Future<void> _loadCounts() async {
     final results = await Future.wait([
-      _interactionRepo.getFollowerCount(widget.userId),
-      _interactionRepo.getFollowingCount(widget.userId),
+      _interactionRepo.countVisibleFollowers(widget.userId),
+      _interactionRepo.countVisibleFollowing(widget.userId),
     ]);
     if (!mounted) return;
     setState(() {
@@ -165,7 +266,7 @@ class _UserProfilePageState extends State<UserProfilePage>
     setState(() => _isFollowing = following);
   }
 
-  Future<void> _loadReviews(String? token) async {
+  Future<void> _loadReviews(String? token, {bool background = false}) async {
     try {
       final reviews = await _reviewRepo.getReviewsByUserId(
         widget.userId,
@@ -192,11 +293,17 @@ class _UserProfilePageState extends State<UserProfilePage>
         _isLoadingReviews = false;
       });
       _sortReviews();
+      if (background) {
+        return;
+      }
       unawaited(_prefetchProductsForReviews(reviews));
       unawaited(_syncReportedProductFlagsFromServer());
       unawaited(_syncNotOnHomeFirstPageSet(reviews));
     } catch (_) {
       if (!mounted) return;
+      if (background && _reviews.isNotEmpty) {
+        return;
+      }
       setState(() => _isLoadingReviews = false);
     }
   }
@@ -326,7 +433,9 @@ class _UserProfilePageState extends State<UserProfilePage>
     }
   }
 
+  /// Askı/404 gibi sinyallerle vitrin dışı ürün yorumu — liste ve istatistikte yok.
   bool _reviewRowNotListed(ReviewDto review, ProductDto? hint) {
+    if (!isReviewEntityVisible(review)) return true;
     if (review.isProductNotListed) return true;
     if (hint?.isProductNotListed == true) return true;
     if (_unlistedProductIdsFromFailedFetch.contains(review.productId)) {
@@ -344,42 +453,62 @@ class _UserProfilePageState extends State<UserProfilePage>
     return false;
   }
 
+  List<ReviewDto> _reviewsVisibleInProfile() {
+    return _reviews.where((r) {
+      final hint = _reviewProductHints[r.productId];
+      return !_reviewRowNotListed(r, hint);
+    }).toList();
+  }
+
+  Widget _buildUserProfileReviewsColumn() {
+    final visible = _reviewsVisibleInProfile();
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.xLarge,
+      ),
+      child: Column(
+        children: [
+          for (var i = 0; i < visible.length; i++) ...[
+            if (i > 0) const SizedBox(height: AppSpacing.medium),
+            _buildUserProfileReviewRow(visible[i]),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildUserProfileReviewRow(ReviewDto r) {
     final hint = _reviewProductHints[r.productId];
-    final notListed = _reviewRowNotListed(r, hint);
     return ProfileReviewRowCard(
       review: r,
       productImageUrl: hint?.imageURL,
-      isProductNotListed: notListed,
       youReportedThisReview: ReviewReportStorage.hasReportedSync(r.id),
       youReportedThisProduct:
           ProductReportStorage.hasReportedSync(r.productId) ||
           _productIdsReportedByMeFromServer.contains(r.productId),
-      onTap:
-          notListed
-              ? null
-              : () {
-                final cached =
-                    ProductMemoryCache.instance.peek(r.productId) ??
-                    _reviewProductHints[r.productId];
-                final product = _productForReviewDetail(r, cached);
-                Navigator.push(
-                  context,
-                  SlideRightRoute(
-                    page: ReviewDetailPage(
-                      review: r,
-                      product: product,
-                    ),
-                  ),
-                );
-              },
+      onTap: () {
+        final cached =
+            ProductMemoryCache.instance.peek(r.productId) ??
+            _reviewProductHints[r.productId];
+        final product = _productForReviewDetail(r, cached);
+        Navigator.push(
+          context,
+          SlideRightRoute(
+            page: ReviewDetailPage(
+              review: r,
+              product: product,
+            ),
+          ),
+        );
+      },
     );
   }
 
   String _reviewsAverageLabel() {
-    if (_reviews.isEmpty) return '—';
-    final sum = _reviews.fold<double>(0, (a, r) => a + r.rating);
-    return (sum / _reviews.length).toStringAsFixed(1);
+    final v = _reviewsVisibleInProfile();
+    if (v.isEmpty) return '—';
+    final sum = v.fold<double>(0, (a, r) => a + r.rating);
+    return (sum / v.length).toStringAsFixed(1);
   }
 
   ProductDto _productForReviewDetail(ReviewDto review, ProductDto? hint) {
@@ -408,10 +537,8 @@ class _UserProfilePageState extends State<UserProfilePage>
       }
       final nowFollowing = await _interactionRepo.toggleFollow(token, widget.userId);
       if (!mounted) return;
-      setState(() {
-        _isFollowing = nowFollowing;
-        _followerCount += nowFollowing ? 1 : -1;
-      });
+      setState(() => _isFollowing = nowFollowing);
+      await _loadCounts();
     } on UnauthorizedException {
       if (!mounted) return;
       Navigator.pushReplacementNamed(context, AppRoutes.login);
@@ -454,8 +581,8 @@ class _UserProfilePageState extends State<UserProfilePage>
     );
   }
 
-  void _openFollowerList() {
-    Navigator.push(
+  Future<void> _openFollowerList() async {
+    await Navigator.push<void>(
       context,
       SlideRightRoute(
         page: FollowListPage(
@@ -465,10 +592,11 @@ class _UserProfilePageState extends State<UserProfilePage>
         ),
       ),
     );
+    if (mounted) await _loadCounts();
   }
 
-  void _openFollowingList() {
-    Navigator.push(
+  Future<void> _openFollowingList() async {
+    await Navigator.push<void>(
       context,
       SlideRightRoute(
         page: FollowListPage(
@@ -478,10 +606,16 @@ class _UserProfilePageState extends State<UserProfilePage>
         ),
       ),
     );
+    if (mounted) await _loadCounts();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_exitedBecauseUserGone) {
+      return const Scaffold(
+        body: SizedBox.shrink(),
+      );
+    }
     final handle =
         '@${widget.userName.toLowerCase().replaceAll(' ', '')}';
 
@@ -497,12 +631,13 @@ class _UserProfilePageState extends State<UserProfilePage>
         ),
         centerTitle: true,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.chat_bubble_outline),
-            color: AppColors.primary,
-            tooltip: 'Message',
-            onPressed: _openChat,
-          ),
+          if (_canShowMessageToProfileUser)
+            IconButton(
+              icon: const Icon(Icons.chat_bubble_outline),
+              color: AppColors.primary,
+              tooltip: 'Message',
+              onPressed: _openChat,
+            ),
         ],
       ),
       body: RefreshIndicator(
@@ -563,7 +698,7 @@ class _UserProfilePageState extends State<UserProfilePage>
                         children: [
                           Expanded(
                             child: GestureDetector(
-                              onTap: _openFollowerList,
+                              onTap: () => unawaited(_openFollowerList()),
                               child: _StatItem(
                                 count: _followerCount,
                                 label: 'Followers',
@@ -572,7 +707,7 @@ class _UserProfilePageState extends State<UserProfilePage>
                           ),
                           Expanded(
                             child: GestureDetector(
-                              onTap: _openFollowingList,
+                              onTap: () => unawaited(_openFollowingList()),
                               child: _StatItem(
                                 count: _followingCount,
                                 label: 'Following',
@@ -581,14 +716,16 @@ class _UserProfilePageState extends State<UserProfilePage>
                           ),
                           Expanded(
                             child: _StatItem(
-                              count: _isLoadingReviews ? 0 : _reviews.length,
+                              count: _isLoadingReviews
+                                  ? 0
+                                  : _reviewsVisibleInProfile().length,
                               label: 'Reviews',
                             ),
                           ),
                           Expanded(
                             child: Tooltip(
                               message:
-                                  'Bu kullanıcının yorumlarındaki yıldız ortalaması (5 üzerinden)',
+                                  'Average star rating of this user’s reviews (out of 5).',
                               child: _StatTextItem(
                                 value: _reviewsAverageLabel(),
                                 label: 'Review avg',
@@ -707,7 +844,7 @@ class _UserProfilePageState extends State<UserProfilePage>
                     ],
                   ),
                 )
-              else if (_reviews.isEmpty)
+              else if (_reviewsVisibleInProfile().isEmpty)
                 Padding(
                   padding: const EdgeInsets.all(AppSpacing.xLarge),
                   child: Center(
@@ -718,20 +855,7 @@ class _UserProfilePageState extends State<UserProfilePage>
                   ),
                 )
               else
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.xLarge,
-                  ),
-                  child: Column(
-                    children: [
-                      for (var i = 0; i < _reviews.length; i++) ...[
-                        if (i > 0)
-                          const SizedBox(height: AppSpacing.medium),
-                        _buildUserProfileReviewRow(_reviews[i]),
-                      ],
-                    ],
-                  ),
-                ),
+                _buildUserProfileReviewsColumn(),
               const SizedBox(height: AppSpacing.xxLarge),
             ],
           ),

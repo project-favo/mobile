@@ -37,10 +37,25 @@ bool isProductDataNotListedInMap(Map<String, dynamic> m) {
   if (m['active'] is bool && (m['active'] as bool) == false) {
     return true;
   }
+  // Spring / Jackson: `boolean isActive()` → JSON’da çoğu zaman `active`, bazen `isActive`.
+  if (m['isActive'] is bool && (m['isActive'] as bool) == false) {
+    return true;
+  }
+  if (m['is_active'] is bool && (m['is_active'] as bool) == false) {
+    return true;
+  }
+  // Bazı API'ler 0/1 veya 0.0 sayı taşır
+  for (final k in ['active', 'isActive', 'is_active', 'productActive', 'product_active']) {
+    if (m[k] is num && (m[k] as num) == 0) {
+      return true;
+    }
+  }
   if (m['productActive'] is bool && (m['productActive'] as bool) == false) {
     return true;
   }
-  if (_falsyFlag(m['active']) ||
+  if (_falsyFlag(m['isActive']) ||
+      _falsyFlag(m['is_active']) ||
+      _falsyFlag(m['active']) ||
       _falsyFlag(m['productActive']) ||
       _falsyFlag(m['enabled']) ||
       _falsyFlag(m['isEnabled']) ||
@@ -76,6 +91,7 @@ bool isProductDataNotListedInMap(Map<String, dynamic> m) {
       st.contains('unpublish') ||
       st == 'hidden' ||
       st == 'inactive' ||
+      st == 'disabled' ||
       st == 'banned' ||
       st == 'delisted' ||
       st == 'unavailable' ||

@@ -1,5 +1,8 @@
+import 'package:favo_mobile/core/utils/product_listing_flags.dart';
+import 'package:favo_mobile/core/utils/user_account_flags.dart';
+
 class FriendsFeedItemDto {
-  const FriendsFeedItemDto({
+  FriendsFeedItemDto({
     required this.id,
     required this.type,
     required this.actorUserId,
@@ -13,6 +16,8 @@ class FriendsFeedItemDto {
     this.reviewTitle,
     this.reviewContent,
     this.createdAt,
+    this.isActorUserInactive = false,
+    this.isProductSnapshotNotListed = false,
   });
 
   final String id;
@@ -28,6 +33,10 @@ class FriendsFeedItemDto {
   final String? reviewTitle;
   final String? reviewContent;
   final DateTime? createdAt;
+  /// [actor] / [user] gövdeleri veya kök JSON’daki isActive sinyali.
+  final bool isActorUserInactive;
+  /// Satır bir ürüne atıf yapıyorsa, vitrin dışı ürün anlık görüntüsü (bayrak + nested [product]).
+  final bool isProductSnapshotNotListed;
 
   factory FriendsFeedItemDto.fromJson(Map<String, dynamic> json) {
     String firstNonEmpty(List<String> keys) {
@@ -79,6 +88,23 @@ class FriendsFeedItemDto {
       'productId',
     ]);
 
+    final productIdV = nullableFirstNonEmpty(['productId']);
+    final productNameV = nullableFirstNonEmpty(['productName']);
+    final productImageV = nullableFirstNonEmpty(['productImageUrl', 'productImageURL']);
+
+    final actorInactive = isUserAccountInactiveInMap(_mergedActorJsonForFeed(json));
+    var productNotListed = false;
+    if (productIdV != null && productIdV.trim().isNotEmpty) {
+      productNotListed = isProductDataNotListedInMap(
+        _mergedProductJsonForFeed(
+          json,
+          productId: productIdV,
+          productName: productNameV,
+          productImageUrl: productImageV,
+        ),
+      );
+    }
+
     return FriendsFeedItemDto(
       id: itemId,
       type: firstNonEmpty(['type', 'activityType']),
@@ -89,17 +115,62 @@ class FriendsFeedItemDto {
         'actorProfilePhotoUrl',
         'profilePhotoUrl',
       ]),
-      productId: nullableFirstNonEmpty(['productId']),
-      productName: nullableFirstNonEmpty(['productName']),
-      productImageUrl: nullableFirstNonEmpty(['productImageUrl']),
+      productId: productIdV,
+      productName: productNameV,
+      productImageUrl: productImageV,
       reviewId: nullableFirstNonEmpty(['reviewId']),
       reviewTitle: nullableFirstNonEmpty(['reviewTitle', 'title']),
       reviewContent: nullableFirstNonEmpty(['reviewContent', 'reviewText', 'body']),
       createdAt: parseDate(
         json['createdAt'] ?? json['timestamp'] ?? json['eventTime'],
       ),
+      isActorUserInactive: actorInactive,
+      isProductSnapshotNotListed: productNotListed,
     );
   }
+}
+
+Map<String, dynamic> _mergedActorJsonForFeed(Map<String, dynamic> json) {
+  final m = Map<String, dynamic>.from(json);
+  for (final k in ['actor', 'user', 'actorUser', 'fromUser', 'performedBy']) {
+    final v = json[k];
+    if (v is Map) {
+      m.addAll(Map<String, dynamic>.from(v));
+    }
+  }
+  return m;
+}
+
+Map<String, dynamic> _mergedProductJsonForFeed(
+  Map<String, dynamic> json, {
+  required String? productId,
+  required String? productName,
+  required String? productImageUrl,
+}) {
+  final m = <String, dynamic>{
+    'id': productId,
+    'name': productName,
+    'imageURL': productImageUrl ?? '',
+    'productName': productName,
+    'productId': productId,
+  };
+  for (final k in ['product', 'targetProduct', 'item']) {
+    final v = json[k];
+    if (v is Map) {
+      m.addAll(Map<String, dynamic>.from(v));
+    }
+  }
+  for (final e in json.entries) {
+    final key = e.key;
+    if (key.startsWith('product') &&
+        key != 'productId' &&
+        key != 'productName' &&
+        key != 'productImageUrl' &&
+        key != 'productImageURL') {
+      m[key] = e.value;
+    }
+  }
+  return m;
 }
 
 class FriendsFeedPageDto {

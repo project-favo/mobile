@@ -401,6 +401,10 @@ class ProductRepository {
     String? firebaseIdToken,
     bool bypassCache = false,
   }) async {
+    // Taze GET öncesi eski (aktif sanılan) satırı sil — askı/GET ile çelişen cache dönmesin.
+    if (bypassCache) {
+      ProductMemoryCache.instance.remove(productId);
+    }
     if (!bypassCache) {
       final cached = ProductMemoryCache.instance.peek(productId);
       if (cached != null) {
@@ -412,6 +416,11 @@ class ProductRepository {
       final data = response.data as Map<String, dynamic>;
       var product = ProductDto.fromJson(data);
       if (isProductNotListedInResponseJson(data)) {
+        product = product.copyWith(isProductNotListed: true);
+      }
+      // API `suspended` taşımıyorsa boş görsel = vitrin dışı; cache’e “aktif” yazma.
+      if (!product.isProductNotListed &&
+          isNotListedImpliedByEmptyProductImage(product.imageURL)) {
         product = product.copyWith(isProductNotListed: true);
       }
 
@@ -461,7 +470,8 @@ class ProductRepository {
     } on DioException catch (e) {
       if (e.response != null) {
         final code = e.response?.statusCode;
-        if (code == 404 || code == 410 || code == 403) {
+        // Sadece 404 / 401: ürün yok veya bu kaynağa erişim yok (API sözleşmesi).
+        if (code == 404 || code == 401) {
           throw ProductNotAvailableException(productId, statusCode: code);
         }
         final errorData = e.response?.data;

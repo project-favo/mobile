@@ -1,3 +1,8 @@
+import 'dart:convert';
+
+import '../../../../core/utils/product_listing_flags.dart';
+import '../../../../core/utils/user_account_flags.dart';
+
 /// Spring bazen [year, month, day, hour, minute, second, nano] dizisi döndürür.
 DateTime? parseFlexibleDateTime(dynamic value) {
   if (value == null) return null;
@@ -38,11 +43,14 @@ class NotificationActorDto {
   final int id;
   final String? userName;
   final String profileImageUrl;
+  /// [isUserAccountInactiveInMap] — yok/ pasif actor; listede gizle.
+  final bool isAccountInactive;
 
   const NotificationActorDto({
     required this.id,
     this.userName,
     required this.profileImageUrl,
+    this.isAccountInactive = false,
   });
 
   factory NotificationActorDto.fromJson(Map<String, dynamic> json) {
@@ -54,6 +62,8 @@ class NotificationActorDto {
       id: id,
       userName: json['userName']?.toString(),
       profileImageUrl: json['profileImageUrl']?.toString() ?? '',
+      isAccountInactive: json['isAccountInactive'] == true ||
+          isUserAccountInactiveInMap(json),
     );
   }
 }
@@ -63,11 +73,14 @@ class NotificationProductDto {
   final int id;
   final String name;
   final String? imageURL;
+  /// [isProductDataNotListedInMap] — vitrin dışı / pasif; listede gizle.
+  final bool isProductNotListed;
 
   const NotificationProductDto({
     required this.id,
     required this.name,
     this.imageURL,
+    this.isProductNotListed = false,
   });
 
   factory NotificationProductDto.fromJson(Map<String, dynamic> json) {
@@ -76,10 +89,15 @@ class NotificationProductDto {
         ? rawId.toInt()
         : int.tryParse(rawId?.toString() ?? '') ?? 0;
     final rawImage = json['imageURL']?.toString().trim();
+    var notListed = isProductDataNotListedInMap(json);
+    if (!notListed && (rawImage == null || rawImage.isEmpty)) {
+      notListed = isNotListedImpliedByEmptyProductImage(rawImage);
+    }
     return NotificationProductDto(
       id: id,
       name: json['name']?.toString() ?? '',
       imageURL: (rawImage == null || rawImage.isEmpty) ? null : rawImage,
+      isProductNotListed: notListed,
     );
   }
 }
@@ -111,6 +129,38 @@ class NotificationDto {
 
   bool get isUnread => readAt == null;
 
+  /// [getUserById] ile “profilde açılamıyor” kontrolü; [actor] yoksa [payloadJson]’dan id okur.
+  int? get resolvedUserIdForVisibilityCheck {
+    final a = actor;
+    if (a != null && a.id > 0) return a.id;
+    final raw = payloadJson;
+    if (raw == null || raw.trim().isEmpty) return null;
+    try {
+      final d = jsonDecode(raw);
+      if (d is! Map<String, dynamic>) return null;
+      // [userId] çoğunlukla bildirimi **alan** kullanıcıdır; takip eden/aktör değil — dahil etme.
+      for (final k in [
+        'actorUserId',
+        'followerUserId',
+        'initiatorId',
+        'performerId',
+        'sourceUserId',
+        'fromUserId',
+      ]) {
+        final v = d[k];
+        if (v is num) {
+          final n = v.toInt();
+          if (n > 0) return n;
+        }
+        if (v is String) {
+          final n = int.tryParse(v.trim());
+          if (n != null && n > 0) return n;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
   NotificationDto copyWith({
     String? id,
     String? type,
@@ -139,14 +189,49 @@ class NotificationDto {
 
   factory NotificationDto.fromJson(Map<String, dynamic> json) {
     NotificationActorDto? actor;
-    final rawActor = json['actor'];
+    final rawActor = json['actor'] ?? json['user'] ?? json['fromUser'];
     if (rawActor is Map<String, dynamic>) {
-      actor = NotificationActorDto.fromJson(rawActor);
+      // Kök seviyedeki [isActive] / [read] vb. asla [actor] ile birleştirilmez: çoğunlukla
+      // **bildirim satırının** durumudur; tüm satırları “pasif kullanıcı” zannedip eler.
+      final merged = Map<String, dynamic>.from(rawActor);
+      for (final k in ['actorIsActive', 'initiatorIsActive', 'performerIsActive']) {
+        if (json[k] != null) {
+          merged.putIfAbsent('isActive', () => json[k]);
+          break;
+        }
+      }
+      if (json['actorAccountInactive'] != null) {
+        merged.putIfAbsent('isAccountInactive', () => json['actorAccountInactive']);
+      }
+      actor = NotificationActorDto.fromJson(merged);
     }
     NotificationProductDto? product;
     final rawProduct = json['product'];
     if (rawProduct is Map<String, dynamic>) {
       product = NotificationProductDto.fromJson(rawProduct);
+    }
+    if (product == null) {
+      final pPayload = json['payload'];
+      if (pPayload is Map<String, dynamic>) {
+        final sub = pPayload['product'];
+        if (sub is Map<String, dynamic>) {
+          product = NotificationProductDto.fromJson(sub);
+        }
+      }
+    }
+    if (product == null) {
+      final rawPj = json['payloadJson'];
+      if (rawPj != null) {
+        try {
+          final decoded = jsonDecode(rawPj.toString());
+          if (decoded is Map<String, dynamic>) {
+            final sub = decoded['product'];
+            if (sub is Map<String, dynamic>) {
+              product = NotificationProductDto.fromJson(sub);
+            }
+          }
+        } catch (_) {}
+      }
     }
 
     return NotificationDto(

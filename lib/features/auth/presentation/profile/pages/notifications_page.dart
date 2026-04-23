@@ -12,6 +12,8 @@ import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../../data/models/notification_dto.dart';
+import '../../../data/services/auth_service.dart';
+import '../../../data/utils/notification_remote_user_filter.dart';
 import '../../../data/models/notification_section.dart';
 import '../../../data/repositories/notification_repository.dart';
 import '../../review/pages/review_page.dart';
@@ -36,6 +38,7 @@ class NotificationsPage extends StatefulWidget {
 
 class _NotificationsPageState extends State<NotificationsPage> {
   final NotificationRepository _repository = NotificationRepository();
+  final AuthService _auth = AuthService();
   final ScrollController _scrollController = ScrollController();
 
   final List<NotificationDto> _items = [];
@@ -49,6 +52,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
   int _page = 0;
   int _totalPages = 1;
   bool _markingAll = false;
+  Timer? _pollTimer;
+  bool _backgroundSyncInFlight = false;
+  static const _pollInterval = Duration(seconds: 5);
+  static const int _maxPollListSize = 100;
 
   @override
   void initState() {
@@ -57,15 +64,20 @@ class _NotificationsPageState extends State<NotificationsPage> {
       for (final s in NotificationSection.values) s: true,
     };
     NotificationRealtimeService.instance.attach();
-    _pushSub =
-        NotificationRealtimeService.instance.pushStream.listen(_onRealtimePush);
+    _pushSub = NotificationRealtimeService.instance.pushStream.listen((e) {
+      unawaited(_onRealtimePush(e));
+    });
     _scrollController.addListener(_onScroll);
     unawaited(_loadFirstPage());
     unawaited(NotificationRealtimeService.instance.refreshUnread());
+    _pollTimer = Timer.periodic(_pollInterval, (_) {
+      unawaited(_syncNotificationsInBackground());
+    });
   }
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _pushSub?.cancel();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
@@ -73,12 +85,15 @@ class _NotificationsPageState extends State<NotificationsPage> {
     super.dispose();
   }
 
-  void _onRealtimePush(NotificationPushEvent e) {
+  Future<void> _onRealtimePush(NotificationPushEvent e) async {
     final n = e.notification;
     if (n == null || !mounted) return;
-    if (_items.any((x) => x.id == n.id)) return;
+    final visible = await filterNotificationsHidingUnlistedUsers([n], _auth);
+    if (visible.isEmpty || !mounted) return;
+    final n2 = visible.first;
+    if (_items.any((x) => x.id == n2.id)) return;
     setState(() {
-      _items.insert(0, n);
+      _items.insert(0, n2);
     });
   }
 
@@ -100,10 +115,15 @@ class _NotificationsPageState extends State<NotificationsPage> {
     try {
       final page = await _repository.getNotifications(page: 0, size: 20);
       if (!mounted) return;
+      final list = await filterNotificationsHidingUnlistedUsers(
+        page.content,
+        _auth,
+      );
+      if (!mounted) return;
       setState(() {
         _items
           ..clear()
-          ..addAll(page.content);
+          ..addAll(list);
         _page = page.number;
         _totalPages = page.totalPages;
         _loadingFirst = false;
@@ -117,6 +137,36 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
   }
 
+  /// Periyodik: sunucu deaktif ürün / silinen kullanıcı satırlarını kaldırdıysa listeyi hizala.
+  Future<void> _syncNotificationsInBackground() async {
+    if (!mounted || _backgroundSyncInFlight || _loadingFirst) return;
+    _backgroundSyncInFlight = true;
+    try {
+      final want = _items.isEmpty
+          ? 20
+          : _items.length.clamp(20, _maxPollListSize);
+      final page = await _repository.getNotifications(page: 0, size: want);
+      if (!mounted) return;
+      final list = await filterNotificationsHidingUnlistedUsers(
+        page.content,
+        _auth,
+      );
+      if (!mounted) return;
+      setState(() {
+        _items
+          ..clear()
+          ..addAll(list);
+        _page = page.number;
+        _totalPages = page.totalPages;
+      });
+      await NotificationRealtimeService.instance.refreshUnread();
+    } catch (_) {
+      // Sessiz; açık listeyi koru.
+    } finally {
+      _backgroundSyncInFlight = false;
+    }
+  }
+
   Future<void> _loadMore() async {
     if (_loadingMore || _page + 1 >= _totalPages) return;
     setState(() => _loadingMore = true);
@@ -124,8 +174,13 @@ class _NotificationsPageState extends State<NotificationsPage> {
       final next =
           await _repository.getNotifications(page: _page + 1, size: 20);
       if (!mounted) return;
+      final more = await filterNotificationsHidingUnlistedUsers(
+        next.content,
+        _auth,
+      );
+      if (!mounted) return;
       setState(() {
-        _items.addAll(next.content);
+        _items.addAll(more);
         _page = next.number;
         _totalPages = next.totalPages;
         _loadingMore = false;

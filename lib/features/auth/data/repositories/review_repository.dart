@@ -124,6 +124,10 @@ class ReviewRepository {
       return ReviewDto.fromJson(response.data as Map<String, dynamic>);
     } on DioException catch (e) {
       if (e.response != null) {
+        final code = e.response?.statusCode;
+        if (code == 404 || code == 401) {
+          throw ReviewNotAvailableException(reviewId, statusCode: code);
+        }
         final errorData = e.response?.data;
         final errorMessage = errorData is Map
             ? (errorData['message'] ?? errorData['error'] ?? 'Failed to fetch review')

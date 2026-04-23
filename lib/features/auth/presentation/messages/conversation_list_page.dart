@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_spacing.dart';
+import '../../../../core/utils/entity_active.dart';
 import '../../../../core/utils/error_handler.dart';
 import '../../../../core/utils/session_helper.dart';
 import '../../../../core/utils/resolve_media_url.dart';
@@ -100,7 +101,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
     final warm = ConversationListCache.instance.peek();
     if (warm != null && warm.isNotEmpty) {
       setState(() {
-        _conversations = warm;
+        _conversations = filterVisibleConversations(warm);
         _isLoading = false;
       });
       unawaited(_refreshConversationsInBackground());

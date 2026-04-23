@@ -70,7 +70,7 @@ class DeactivatedAccountException implements Exception {
   String toString() => 'DeactivatedAccountException';
 }
 
-/// GET /api/products/{id} ürünü döndürmüyor (silindi, askıda, 403/404/410).
+/// GET /api/products/{id} ürünü döndürmüyor (404 / 401).
 class ProductNotAvailableException implements Exception {
   final String productId;
   final int? statusCode;
@@ -79,6 +79,26 @@ class ProductNotAvailableException implements Exception {
 
   @override
   String toString() => 'ProductNotAvailableException';
+}
+
+/// GET /api/reviews/{id} yorum döndürmüyor (404 / 401).
+class ReviewNotAvailableException implements Exception {
+  final String reviewId;
+  final int? statusCode;
+
+  const ReviewNotAvailableException(this.reviewId, {this.statusCode});
+
+  @override
+  String toString() => 'ReviewNotAvailableException';
+}
+
+/// Görüntülenen başka kullanıcı kaldırıldı / erişilebilir değil (tüm uçlar 404 veya 401).
+class TargetUserNotAvailableException implements Exception {
+  final String userId;
+  const TargetUserNotAvailableException(this.userId);
+
+  @override
+  String toString() => 'TargetUserNotAvailableException';
 }
 
 bool looksLikeDeactivatedAccountMessage(String value) {

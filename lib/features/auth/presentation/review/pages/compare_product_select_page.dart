@@ -111,6 +111,7 @@ class _CompareProductSelectPageState extends State<CompareProductSelectPage> {
       final product2WithRating = await _productRepository.getProductById(
         product2.id,
         firebaseIdToken: token,
+        bypassCache: true,
       );
       if (!mounted) return;
       await Navigator.push(

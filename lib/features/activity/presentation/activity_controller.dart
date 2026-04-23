@@ -12,6 +12,7 @@ import '../../auth/data/models/notification_dto.dart';
 import '../../auth/data/repositories/interaction_repository.dart';
 import '../../auth/data/repositories/notification_repository.dart';
 import '../../auth/data/services/auth_service.dart';
+import '../../auth/data/utils/notification_remote_user_filter.dart';
 import '../data/notification_activity_mapper.dart';
 import '../domain/activity_models.dart';
 
@@ -39,6 +40,8 @@ class ActivityController extends ChangeNotifier {
   bool _loadingFirst = true;
   bool _loadingMore = false;
   String? _errorMessage;
+  bool _listPollInFlight = false;
+  static const int _listPollMaxSize = 100;
 
   List<ActivityItem> get items => List.unmodifiable(_items);
   /// Sunucudaki toplam bildirim sayısı (sayfalama üst bilgisi).
@@ -129,8 +132,12 @@ class ActivityController extends ChangeNotifier {
     _page = 0;
     try {
       final page = await _notifications.getNotifications(page: 0, size: 20);
+      final visible = await filterNotificationsHidingUnlistedUsers(
+        page.content,
+        _auth,
+      );
       _items = _deduplicateItems(
-        page.content.map(activityItemFromNotification).toList(),
+        visible.map(activityItemFromNotification).toList(),
       );
       _page = page.number;
       _totalPages = page.totalPages;
@@ -145,6 +152,34 @@ class ActivityController extends ChangeNotifier {
     }
   }
 
+  /// 5s periyodik: sunucu silinen ürün / kullanıcı satırlarını yansıt.
+  Future<void> pollResyncList() async {
+    if (_listPollInFlight || _loadingMore) return;
+    if (_loadingFirst && _items.isEmpty) return;
+    _listPollInFlight = true;
+    try {
+      final want = _items.isEmpty ? 20 : _items.length.clamp(20, _listPollMaxSize);
+      final page = await _notifications.getNotifications(page: 0, size: want);
+      final visible = await filterNotificationsHidingUnlistedUsers(
+        page.content,
+        _auth,
+      );
+      _items = _deduplicateItems(
+        visible.map(activityItemFromNotification).toList(),
+      );
+      _page = page.number;
+      _totalPages = page.totalPages;
+      _totalElements = page.totalElements;
+      _prefetchAvatarsForItems(_items);
+      await _syncFollowStatesForCurrentItems();
+      notifyListeners();
+    } catch (_) {
+      // Sessiz; mevcut listeyi tut.
+    } finally {
+      _listPollInFlight = false;
+    }
+  }
+
   Future<void> loadMore() async {
     if (_loadingMore || _loadingFirst || !hasMore) return;
     _loadingMore = true;
@@ -152,7 +187,12 @@ class ActivityController extends ChangeNotifier {
     try {
       final next =
           await _notifications.getNotifications(page: _page + 1, size: 20);
-      final appended = next.content.map(activityItemFromNotification).toList();
+      final visible = await filterNotificationsHidingUnlistedUsers(
+        next.content,
+        _auth,
+      );
+      final appended =
+          visible.map(activityItemFromNotification).toList();
       _items = _deduplicateItems([..._items, ...appended]);
       _page = next.number;
       _totalPages = next.totalPages;
@@ -285,8 +325,11 @@ class ActivityController extends ChangeNotifier {
     }
   }
 
-  void prependFromPush(NotificationDto n) {
-    final mapped = activityItemFromNotification(n);
+  Future<void> prependFromPush(NotificationDto n) async {
+    final visible = await filterNotificationsHidingUnlistedUsers([n], _auth);
+    if (visible.isEmpty) return;
+    final m = visible.first;
+    final mapped = activityItemFromNotification(m);
     if (_items.any((e) => e.id == mapped.id)) return;
 
     // Same actor + type + target already exists: move to top (dedup like/unlike spam)

@@ -49,6 +49,9 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
   bool _loadingFirst = true;
   bool _loadingMore = false;
   String? _error;
+  Timer? _feedPollTimer;
+  bool _loadFirstInFlight = false;
+  static const _feedPollInterval = Duration(seconds: 5);
 
   Route<T> _instantRoute<T>(Widget page) {
     return PageRouteBuilder<T>(
@@ -83,10 +86,16 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
       );
       unawaited(_loadFirst());
     }
+    _feedPollTimer = Timer.periodic(_feedPollInterval, (_) {
+      unawaited(_loadFirst(background: true));
+    });
   }
 
   @override
-  void dispose() => super.dispose();
+  void dispose() {
+    _feedPollTimer?.cancel();
+    super.dispose();
+  }
 
   void _mergeFollowFromGlobalCache() {
     if (!FollowingIdSetCache.instance.isReady) return;
@@ -155,6 +164,8 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
   }
 
   Future<void> _loadFirst({bool background = false}) async {
+    if (_loadFirstInFlight) return;
+    _loadFirstInFlight = true;
     if (!background) {
       setState(() {
         _loadingFirst = true;
@@ -164,7 +175,12 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
       _error = null;
     }
     try {
-      final res = await _repository.getFriendsFeed(page: 0, size: 20);
+      final pageSize = background
+          ? (_items.isEmpty
+              ? 20
+              : _items.length.clamp(20, 50))
+          : 20;
+      final res = await _repository.getFriendsFeed(page: 0, size: pageSize);
       final mapped = res.content.map(activityItemFromFriendsFeed).toList();
       if (!mounted) return;
       setState(() {
@@ -183,10 +199,14 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
       _prefetchItemVisuals(_items);
       await _syncFollowingForCurrentItems();
     } catch (e) {
-      if (background && _items.isNotEmpty) return;
-      if (!mounted) return;
-      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      if (background && _items.isNotEmpty) {
+        // keep stale list
+      } else {
+        if (!mounted) return;
+        setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      }
     } finally {
+      _loadFirstInFlight = false;
       if (!background && mounted) setState(() => _loadingFirst = false);
     }
   }

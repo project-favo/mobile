@@ -1,3 +1,5 @@
+import '../../../../core/utils/user_account_flags.dart';
+
 class UserResponseDto {
   final String id;
   final String email;
@@ -10,6 +12,8 @@ class UserResponseDto {
   final String? profilePhotoMimeType;
   // null → legacy (treat as verified), false → not verified, true → verified
   final bool? emailVerified;
+  /// Backend askı/hesap kapatma — [UserProfilePage] dışa atar.
+  final bool isAccountInactive;
 
   UserResponseDto({
     required this.id,
@@ -22,6 +26,7 @@ class UserResponseDto {
     this.profilePhotoData,
     this.profilePhotoMimeType,
     this.emailVerified,
+    this.isAccountInactive = false,
   });
 
   /// Backend: null → legacy (verified), false → not verified, true → verified
@@ -48,6 +53,7 @@ class UserResponseDto {
       profilePhotoData: null,
       profilePhotoMimeType: null,
       emailVerified: emailVerified,
+      isAccountInactive: isAccountInactive,
     );
   }
 
@@ -64,6 +70,7 @@ class UserResponseDto {
       profilePhotoData: profilePhotoData,
       profilePhotoMimeType: profilePhotoMimeType,
       emailVerified: emailVerified,
+      isAccountInactive: isAccountInactive,
     );
   }
 
@@ -83,6 +90,7 @@ class UserResponseDto {
       profilePhotoData: other.profilePhotoData,
       profilePhotoMimeType: other.profilePhotoMimeType ?? profilePhotoMimeType,
       emailVerified: emailVerified,
+      isAccountInactive: isAccountInactive,
     );
   }
 
@@ -141,6 +149,7 @@ class UserResponseDto {
 
   factory UserResponseDto.fromJson(Map<String, dynamic> json) {
     final m = _asUserMap(json);
+    final inactive = isUserAccountInactiveInMap(m);
 
     String? imageUrl = _firstString(m, [
       'profileImageUrl',
@@ -178,6 +187,7 @@ class UserResponseDto {
       profilePhotoData: photoData,
       profilePhotoMimeType: mime,
       emailVerified: m['emailVerified'] as bool?,
+      isAccountInactive: inactive,
     );
   }
 
@@ -193,6 +203,7 @@ class UserResponseDto {
       'profilePhotoData': profilePhotoData,
       'profilePhotoMimeType': profilePhotoMimeType,
       'emailVerified': emailVerified,
+      'isAccountInactive': isAccountInactive,
     };
   }
 }

@@ -90,7 +90,8 @@ class AuthRepository {
     }
   }
 
-  /// Başka kullanıcının profili (avatar için). Backend path’i yoksa null döner.
+  /// Başka kullanıcının profili. Tüm uçlar 404 veya 401 ise [TargetUserNotAvailableException].
+  /// Ağ hatası / path yoksa null.
   Future<UserResponseDto?> getUserById(
     String firebaseIdToken,
     String userId,
@@ -100,6 +101,7 @@ class AuthRepository {
       '/api/auth/user/$userId',
       '/api/auth/users/$userId',
     ];
+    var notFoundHits = 0;
     try {
       _apiClient.setAuthToken(firebaseIdToken);
       for (final path in paths) {
@@ -111,14 +113,20 @@ class AuthRepository {
               Map<String, dynamic>.from(data),
             );
           }
-        } on DioException {
-          // Bir uç 403/404 dönerse diğer path'leri dene (policy farkı sık görülür).
+        } on DioException catch (e) {
+          final c = e.response?.statusCode;
+          if (c == 404 || c == 401) {
+            notFoundHits++;
+          }
           continue;
         } catch (_) {
           continue;
         }
       }
     } catch (_) {}
+    if (notFoundHits >= paths.length) {
+      throw TargetUserNotAvailableException(userId);
+    }
     return null;
   }
 

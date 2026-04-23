@@ -9,6 +9,7 @@ import '../models/user_response_dto.dart';
 import '../models/user_update_request_dto.dart';
 import '../models/register_request_dto.dart';
 import '../repositories/auth_repository.dart';
+import '../utils/notification_remote_user_filter.dart';
 
 bool _dioLooksLikeNoBackendUser(DioException e) {
   final code = e.response?.statusCode;
@@ -210,6 +211,8 @@ class AuthService {
     try {
       final idToken = await _getFreshIdToken(user);
       return _authRepository.getUserById(idToken, userId);
+    } on TargetUserNotAvailableException {
+      rethrow;
     } catch (_) {
       return null;
     }
@@ -369,6 +372,7 @@ class AuthService {
 
       _sessionHelper.clearSession();
       clearAllAppCachesOnLogout();
+      RemoteNotificationUserListabilityCache.instance.clear();
       // Firebase oturumunu kapat
       await _firebaseAuth.signOut();
     } on FirebaseAuthException catch (e) {
@@ -382,6 +386,7 @@ class AuthService {
   Future<void> signOut() async {
     _sessionHelper.clearSession();
     clearAllAppCachesOnLogout();
+    RemoteNotificationUserListabilityCache.instance.clear();
     await _firebaseAuth.signOut();
   }
 

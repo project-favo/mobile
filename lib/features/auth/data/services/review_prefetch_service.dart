@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../../../../core/cache/review_memory_cache.dart';
+import '../../../../core/utils/entity_active.dart';
 import '../../../../core/utils/session_helper.dart';
 import '../models/product_dto.dart';
 import '../repositories/review_repository.dart';
@@ -62,7 +63,10 @@ class ReviewPrefetchService {
         productId,
         firebaseIdToken: firebaseIdToken,
       );
-      ReviewMemoryCache.instance.remember(productId, reviews);
+      ReviewMemoryCache.instance.remember(
+        productId,
+        filterVisibleReviews(reviews),
+      );
       _lastPrefetchedAt[productId] = DateTime.now();
     } catch (_) {
       // Prefetch is best effort; intentionally swallow errors.

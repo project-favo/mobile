@@ -14,6 +14,11 @@ class ProductDto {
   /// GET /api/products JSON'unda askı / vitrinden kalkmış bilgisi.
   final bool isProductNotListed;
 
+  /// [isActive: false] vb. tüm [isProductDataNotListedInMap] sinyalleri [isProductNotListed] içine işlenir.
+  /// Ayrıca boş [imageURL] vitrin dışı kabul edilir.
+  bool get isUnavailableForStorefront =>
+      isProductNotListed || isNotListedImpliedByEmptyProductImage(imageURL);
+
   ProductDto({
     required this.id,
     required this.name,

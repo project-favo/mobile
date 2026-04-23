@@ -1,15 +1,20 @@
+import '../../../../core/utils/user_account_flags.dart';
+
 class ConversationUserDto {
   final int id;
   final String username;
   final String? profilePhotoUrl;
   /// Bazı API’ler base64 döner (UserResponseDto ile uyumlu).
   final String? profilePhotoData;
+  /// Liste / sohbet özetinde [isActive] vb. sinyaller varsa vitrin dışı kabul edilir.
+  final bool isAccountInactive;
 
   ConversationUserDto({
     required this.id,
     required this.username,
     this.profilePhotoUrl,
     this.profilePhotoData,
+    this.isAccountInactive = false,
   });
 
   bool get hasAvatarVisual {
@@ -40,6 +45,8 @@ class ConversationUserDto {
       username: username,
       profilePhotoUrl: photo,
       profilePhotoData: data,
+      isAccountInactive: json['isAccountInactive'] == true ||
+          isUserAccountInactiveInMap(json),
     );
   }
 
@@ -50,6 +57,7 @@ class ConversationUserDto {
       'username': username,
       'profilePhotoUrl': profilePhotoUrl,
       'profilePhotoData': profilePhotoData,
+      'isAccountInactive': isAccountInactive,
     };
   }
 }

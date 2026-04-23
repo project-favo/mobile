@@ -9,15 +9,19 @@ import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/config/api_config.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/cache/current_user_cache.dart';
+import '../../../../../core/cache/product_memory_cache.dart';
 import '../../../../../core/cache/review_memory_cache.dart';
 import '../../../../../core/utils/exceptions.dart';
+import '../../../../../core/utils/content_availability_messages.dart';
+import '../../../../../core/utils/content_unavailable_dialog.dart';
+import '../../../../../core/utils/entity_active.dart';
 import '../../../../../core/utils/in_flight_id_lock.dart';
-import '../../../../../core/utils/product_listing_flags.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/network/api_client.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
 import 'review_page.dart';
+import '../../home_page.dart';
 import '../../profile/pages/user_profile_page.dart';
 import '../../../data/models/review_dto.dart';
 import '../../../data/models/product_dto.dart';
@@ -33,6 +37,10 @@ class ReviewDetailPage extends StatefulWidget {
   final ReviewDto review;
   final ProductDto product;
 
+  /// [Navigator.pop] ile dönülür — ürün askı / kaldırma sonrası otomatik çıkış.
+  static const String popResultProductSuspended =
+      'review_detail_product_suspended';
+
   const ReviewDetailPage({
     super.key,
     required this.review,
@@ -43,13 +51,16 @@ class ReviewDetailPage extends StatefulWidget {
   State<ReviewDetailPage> createState() => _ReviewDetailPageState();
 }
 
-class _ReviewDetailPageState extends State<ReviewDetailPage> {
+class _ReviewDetailPageState extends State<ReviewDetailPage>
+    with WidgetsBindingObserver {
   final InteractionRepository _interactionRepository = InteractionRepository();
   final ProductRepository _productRepository = ProductRepository();
   final ReviewRepository _reviewRepository = ReviewRepository();
   final SessionHelper _sessionHelper = SessionHelper();
   final ApiClient _apiClient = ApiClient();
   late ReviewDto _currentReview;
+  /// Açıldığında [widget.product], poll ile GET’te tazelenebilir.
+  late ProductDto _currentProduct;
   final MessageRepository _messageRepository = MessageRepository();
 
   /// Şikayet butonunu gizlemek için (kendi yorumu).
@@ -60,9 +71,16 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
   final InFlightFlag _reviewDetailLikeLock = InFlightFlag();
   final InFlightFlag _reviewDeleteLock = InFlightFlag();
 
-  /// Ürün askı / vitrin dışı: detay metnini ve ürün bilgisini göstermeyiz.
+  /// Ürün askı / vitrin dışı; [canPop] yokken tam ekran yedek.
   bool _productListingBlocked = false;
   bool _productListingCheckDone = false;
+  static const Duration _listingPollInterval = Duration(seconds: 5);
+  Timer? _listingPollTimer;
+  bool _poppedForListingGone = false;
+  /// Son bildiğimiz home ilk sayfa (50) içindeyiz bilgisi — true→false askı/çıkarma ile uyumlu.
+  bool? _lastProductOnHomeFirstPage;
+  /// In [initState], inactive review/product: show [showContentUnavailableDialog] before the first frame.
+  bool _invalidInitialRoute = false;
 
   bool get _isOwnReview {
     if (CurrentUserCache.instance.isMyReview(_currentReview)) return true;
@@ -73,7 +91,26 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _currentReview = widget.review;
+    _currentProduct = widget.product;
+    if (!isReviewEntityVisible(_currentReview) ||
+        !isProductEntityActive(_currentProduct)) {
+      _invalidInitialRoute = true;
+      _productListingCheckDone = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          unawaited(
+            _navigateBackWithNotice(
+              detail: !isProductEntityActive(_currentProduct)
+                  ? kMessageProductNoLongerAvailable
+                  : kMessageReviewNoLongerAvailable,
+            ),
+          );
+        }
+      });
+      return;
+    }
     _initMediaFutures();
     final w = CurrentUserCache.instance;
     if (w.isMyReview(_currentReview)) {
@@ -89,43 +126,349 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
     });
   }
 
-  /// Profil dışı rotalarda eski [ProductDto] ile gelinebilir; GET ile teyit.
-  Future<void> _revalidateProductListing() async {
-    if (widget.review.isProductNotListed || widget.product.isProductNotListed) {
-      if (mounted) {
-        setState(() {
-          _productListingBlocked = true;
-          _productListingCheckDone = true;
-        });
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _listingPollTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_pollProductAndReviewStillPresent());
+    }
+  }
+
+  void _startListingPoll() {
+    _listingPollTimer?.cancel();
+    // İlk tetik: [Timer.periodic] Dart'ta ilk callback'i 5 sn sonra atar; vitrin tespitini geciktirmesin.
+    unawaited(_pollProductAndReviewStillPresent());
+    _listingPollTimer = Timer.periodic(_listingPollInterval, (_) {
+      if (!mounted) return;
+      unawaited(_pollProductAndReviewStillPresent());
+    });
+  }
+
+  /// GET /api/products/home `page=0&size=50` — hata: yanlış geri sarma riskine karşı 'vitrinde' kabul.
+  Future<bool> _isProductIdOnHomeFirst50(
+    String productId,
+    String? token,
+  ) async {
+    final id = productId.trim();
+    if (id.isEmpty) return true;
+    try {
+      final feed = await _productRepository.getHomeFeed(
+        page: 0,
+        size: 50,
+        firebaseIdToken: token,
+      );
+      final on = feed.content.map((e) => e.id.trim()).toSet();
+      return on.contains(id);
+    } catch (_) {
+      return true;
+    }
+  }
+
+  Future<void> _seedLastHomeSnapshot(ProductDto p, String? token) async {
+    if (!mounted) return;
+    final on = await _isProductIdOnHomeFirst50(p.id, token);
+    if (!mounted) return;
+    _lastProductOnHomeFirstPage = on;
+  }
+
+  static bool _reviewSnapshotChanged(ReviewDto a, ReviewDto b) {
+    if (a.id != b.id) return true;
+    return a.rating != b.rating ||
+        a.likeCount != b.likeCount ||
+        a.isLikedByCurrentUser != b.isLikedByCurrentUser ||
+        a.isProductNotListed != b.isProductNotListed ||
+        a.isReviewInactive != b.isReviewInactive ||
+        a.title != b.title ||
+        (a.description ?? '') != (b.description ?? '') ||
+        a.mediaList.length != b.mediaList.length;
+  }
+
+  static bool _productSnapshotChangedForDetail(ProductDto a, ProductDto b) {
+    return a.name != b.name ||
+        a.imageURL != b.imageURL ||
+        (a.description ?? '') != (b.description ?? '') ||
+        a.isProductNotListed != b.isProductNotListed ||
+        (a.averageRating ?? 0) != (b.averageRating ?? 0) ||
+        a.isLiked != b.isLiked;
+  }
+
+  void _applyMergedReviewToMemoryCache(ReviewDto r) {
+    final list = ReviewMemoryCache.instance.peek(r.productId) ?? <ReviewDto>[];
+    final next = List<ReviewDto>.from(list);
+    final i = next.indexWhere((e) => e.id == r.id);
+    if (i >= 0) {
+      next[i] = r;
+    } else {
+      next.add(r);
+    }
+    ReviewMemoryCache.instance.remember(r.productId, next);
+  }
+
+  /// 5 sn: GET yorum + ürün; yalnızca veri farkı varsa [setState] (titreme yok). Askı/404’te çık.
+  /// Token yok: yine de [bypassCache] GET ürün (cache’de kalmış “aktif” [ProductDto] dönmesin).
+  Future<void> _pollProductAndReviewStillPresent() async {
+    if (!mounted || _poppedForListingGone) return;
+    final token = await _sessionHelper.getTokenAndSetHeader();
+    if (token != null) {
+      ReviewDto? r;
+      try {
+        r = await _reviewRepository.getReviewById(
+          _currentReview.id,
+          firebaseIdToken: token,
+        );
+      } on ReviewNotAvailableException {
+        if (mounted) {
+          await _navigateBackWithNotice(
+            detail: kMessageGenericContentNoLongerAvailable,
+          );
+        }
+        return;
+      } on DioException catch (e) {
+        final c = e.response?.statusCode;
+        if (c == 404 || c == 401) {
+          if (mounted) {
+            await _navigateBackWithNotice(
+              detail: kMessageGenericContentNoLongerAvailable,
+            );
+          }
+          return;
+        }
+      } catch (_) {}
+      if (r != null) {
+        final freshReview = r;
+        if (!mounted) return;
+        if (!isReviewEntityVisible(freshReview)) {
+          await _navigateBackWithNotice(detail: kMessageReviewNoLongerAvailable);
+          return;
+        }
+        if (_reviewSnapshotChanged(freshReview, _currentReview)) {
+          if (mounted) {
+            setState(() => _currentReview = freshReview);
+            _initMediaFutures();
+          }
+          if (isReviewEntityVisible(freshReview)) {
+            _applyMergedReviewToMemoryCache(freshReview);
+          }
+        }
       }
-      return;
     }
     try {
-      final token = await _sessionHelper.getTokenAndSetHeader();
       final p = await _productRepository.getProductById(
-        widget.product.id,
+        _currentProduct.id,
         firebaseIdToken: token,
         bypassCache: true,
       );
       if (!mounted) return;
-      final blocked =
-          p.isProductNotListed ||
-          isNotListedImpliedByEmptyProductImage(p.imageURL);
-      setState(() {
-        _productListingBlocked = blocked;
-        _productListingCheckDone = true;
-      });
+      if (p.isUnavailableForStorefront) {
+        await _navigateBackWithNotice();
+        return;
+      }
+      if (_productSnapshotChangedForDetail(p, _currentProduct)) {
+        if (mounted) {
+          setState(() => _currentProduct = p);
+        }
+        ProductMemoryCache.instance.remember(p);
+      }
+      final onHome = await _isProductIdOnHomeFirst50(p.id, token);
+      if (!mounted) return;
+      if (_lastProductOnHomeFirstPage == true && onHome == false) {
+        await _navigateBackWithNotice();
+        return;
+      }
+      _lastProductOnHomeFirstPage = onHome;
     } on ProductNotAvailableException {
+      if (!mounted) return;
+      await _navigateBackWithNotice();
+    } catch (_) {}
+  }
+
+  /// [detail] defaults to the product copy. Always returns to [HomePage] (not the previous page).
+  Future<void> _navigateBackWithNotice({String? detail}) async {
+    if (!mounted || _poppedForListingGone) return;
+    _poppedForListingGone = true;
+    _listingPollTimer?.cancel();
+    _listingPollTimer = null;
+    final nav = Navigator.of(context);
+    final body = detail ?? kMessageProductNoLongerAvailable;
+    final String title;
+    if (body == kMessageReviewNoLongerAvailable) {
+      title = kTitleReviewUnavailable;
+    } else if (body == kMessageGenericContentNoLongerAvailable) {
+      title = kTitleContentUnavailable;
+    } else {
+      title = kTitleProductUnavailable;
+    }
+    ProductMemoryCache.instance.remove(_currentProduct.id);
+    ReviewMemoryCache.instance.removeReviewFromProduct(
+      _currentProduct.id,
+      _currentReview.id,
+    );
+    await showContentUnavailableDialog(
+      context,
+      title: title,
+      message: body,
+      onContinue: () async {
+        if (!mounted) return;
+        await nav.pushAndRemoveUntil<void>(
+          MaterialPageRoute<void>(builder: (_) => const HomePage()),
+          (route) => false,
+        );
+      },
+    );
+  }
+
+  /// Token yok / giriş yok: yorum API’si yok; sadece taze [getProductById] ile askı/404 tespit et.
+  Future<void> _revalidateProductListingProductOnly() async {
+    if (!isReviewEntityVisible(widget.review) ||
+        !isProductEntityActive(widget.product)) {
+      if (mounted) {
+        await _navigateBackWithNotice();
+      }
+      return;
+    }
+    try {
+      final p = await _productRepository.getProductById(
+        _currentProduct.id,
+        firebaseIdToken: null,
+        bypassCache: true,
+      );
+      if (!mounted) return;
+      if (p.isUnavailableForStorefront) {
+        if (mounted) {
+          await _navigateBackWithNotice();
+        }
+        return;
+      }
+      await _seedLastHomeSnapshot(p, null);
+      if (!mounted) return;
       if (mounted) {
         setState(() {
-          _productListingBlocked = true;
+          _currentProduct = p;
+          _productListingBlocked = false;
           _productListingCheckDone = true;
         });
+        ProductMemoryCache.instance.remember(p);
+        _startListingPoll();
+      }
+    } on ProductNotAvailableException {
+      if (mounted) {
+        await _navigateBackWithNotice();
       }
     } catch (_) {
       if (mounted) {
         setState(() => _productListingCheckDone = true);
       }
+    }
+  }
+
+  /// Profil dışı rotalarda eski [ProductDto] ile gelinebilir; GET ile teyit.
+  Future<void> _revalidateProductListing() async {
+    if (!isReviewEntityVisible(widget.review) ||
+        !isProductEntityActive(widget.product)) {
+      if (mounted) {
+        await _navigateBackWithNotice();
+      }
+      return;
+    }
+    final token = await _sessionHelper.getTokenAndSetHeader();
+    if (token == null) {
+      await _revalidateProductListingProductOnly();
+      return;
+    }
+    ReviewDto? refreshedReview;
+    try {
+      final r = await _reviewRepository.getReviewById(
+        _currentReview.id,
+        firebaseIdToken: token,
+      );
+      if (!mounted) return;
+      if (!isReviewEntityVisible(r)) {
+        if (mounted) {
+          await _navigateBackWithNotice(
+            detail: kMessageReviewNoLongerAvailable,
+          );
+        }
+        return;
+      }
+      refreshedReview = r;
+    } on ReviewNotAvailableException {
+      if (mounted) {
+        await _navigateBackWithNotice(
+          detail: kMessageGenericContentNoLongerAvailable,
+        );
+      }
+      return;
+    } on DioException catch (e) {
+      final c = e.response?.statusCode;
+      if (c == 404 || c == 401) {
+        if (mounted) {
+          await _navigateBackWithNotice(
+            detail: kMessageGenericContentNoLongerAvailable,
+          );
+        }
+        return;
+      }
+    } catch (_) {
+      // Yorum ucu geçici hata: ürün teyidini dene
+    }
+    if (!mounted) return;
+    try {
+      final p = await _productRepository.getProductById(
+        _currentProduct.id,
+        firebaseIdToken: token,
+        bypassCache: true,
+      );
+      if (!mounted) return;
+      if (p.isUnavailableForStorefront) {
+        if (mounted) {
+          await _navigateBackWithNotice();
+        }
+        return;
+      }
+      await _seedLastHomeSnapshot(p, token);
+      if (!mounted) return;
+      if (mounted) {
+        setState(() {
+          if (refreshedReview != null) {
+            _currentReview = refreshedReview;
+          }
+          _currentProduct = p;
+          _productListingBlocked = false;
+          _productListingCheckDone = true;
+        });
+        if (refreshedReview != null) {
+          _initMediaFutures();
+        }
+        ProductMemoryCache.instance.remember(p);
+        _startListingPoll();
+      }
+    } on ProductNotAvailableException {
+      if (mounted) {
+        await _navigateBackWithNotice();
+      }
+      return;
+    } catch (_) {
+      // Ürün GET’i başarısız: eski [_currentProduct] ile home anı tohumlamak yanlış vitrin/askı sinyali üretir.
+      if (mounted) {
+        setState(() {
+          if (refreshedReview != null) {
+            _currentReview = refreshedReview;
+          }
+          _productListingBlocked = false;
+          _productListingCheckDone = true;
+        });
+        if (refreshedReview != null) {
+          _initMediaFutures();
+        }
+        _startListingPoll();
+      }
+      return;
     }
   }
 
@@ -164,6 +507,11 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
         _currentReview.id,
         firebaseIdToken: firebaseIdToken,
       );
+      if (!mounted) return;
+      if (!isReviewEntityVisible(updatedReview)) {
+        await _navigateBackWithNotice(detail: kMessageReviewNoLongerAvailable);
+        return;
+      }
 
       String? viewerId = CurrentUserCache.instance.userId;
       try {
@@ -177,6 +525,12 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
           _viewerUserId = viewerId;
         }
       });
+    } on ReviewNotAvailableException {
+      if (mounted) {
+        await _navigateBackWithNotice(
+          detail: kMessageGenericContentNoLongerAvailable,
+        );
+      }
     } catch (_) {}
   }
 
@@ -371,6 +725,34 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
     );
   }
 
+  /// Aktif vitrin ürünü: anında product detail. Sinyal kötüyse bekleme yok, dialog + pop (5 sn poll taze veriyi getirir).
+  void _onProductCardTap() {
+    if (!mounted) return;
+    if (_currentProduct.isUnavailableForStorefront) {
+      unawaited(_navigateBackWithNotice());
+      return;
+    }
+    final pid = _currentProduct.id.trim().isNotEmpty
+        ? _currentProduct.id
+        : _currentReview.productId.trim();
+    if (pid.isEmpty) return;
+    final name = _currentProduct.name.trim().isNotEmpty
+        ? _currentProduct.name
+        : _currentReview.productName;
+    Navigator.push<void>(
+      context,
+      SlideRightRoute(
+        page: ReviewPage(
+          product: _currentProduct.id.trim().isNotEmpty
+              ? _currentProduct
+              : null,
+          productId: pid,
+          productName: name,
+        ),
+      ),
+    );
+  }
+
   void _openOwnerProfile() {
     if (_isOwnReview) {
       return;
@@ -492,11 +874,14 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
         productName: _currentReview.productName,
         ownerId: _currentReview.ownerId,
         ownerUserName: _currentReview.ownerUserName,
+        ownerProfilePhotoUrl: _currentReview.ownerProfilePhotoUrl,
         mediaList: _currentReview.mediaList,
         likeCount: previousLikeStatus 
             ? (previousLikeCount > 0 ? previousLikeCount - 1 : 0)
             : previousLikeCount + 1,
         isLikedByCurrentUser: !previousLikeStatus,
+        isProductNotListed: _currentReview.isProductNotListed,
+        isReviewInactive: _currentReview.isReviewInactive,
       );
     });
 
@@ -525,11 +910,14 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
           productName: _currentReview.productName,
           ownerId: _currentReview.ownerId,
           ownerUserName: _currentReview.ownerUserName,
+          ownerProfilePhotoUrl: _currentReview.ownerProfilePhotoUrl,
           mediaList: _currentReview.mediaList,
           likeCount: newLikeStatus
               ? (previousLikeCount + 1)
               : (previousLikeCount > 0 ? previousLikeCount - 1 : 0),
           isLikedByCurrentUser: newLikeStatus,
+          isProductNotListed: _currentReview.isProductNotListed,
+          isReviewInactive: _currentReview.isReviewInactive,
         );
       });
     } catch (e) {
@@ -546,9 +934,12 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
           productName: _currentReview.productName,
           ownerId: _currentReview.ownerId,
           ownerUserName: _currentReview.ownerUserName,
+          ownerProfilePhotoUrl: _currentReview.ownerProfilePhotoUrl,
           mediaList: _currentReview.mediaList,
           likeCount: previousLikeCount,
           isLikedByCurrentUser: previousLikeStatus,
+          isProductNotListed: _currentReview.isProductNotListed,
+          isReviewInactive: _currentReview.isReviewInactive,
         );
       });
       
@@ -609,6 +1000,11 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_invalidInitialRoute || _poppedForListingGone) {
+      return const Scaffold(
+        body: SizedBox.shrink(),
+      );
+    }
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -752,30 +1148,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                 color: Colors.transparent,
                 child: InkWell(
                   borderRadius: BorderRadius.circular(12),
-                  onTap: () {
-                    final pid =
-                        widget.product.id.trim().isNotEmpty
-                            ? widget.product.id
-                            : _currentReview.productId.trim();
-                    if (pid.isEmpty) return;
-                    final name =
-                        widget.product.name.trim().isNotEmpty
-                            ? widget.product.name
-                            : _currentReview.productName;
-                    Navigator.push(
-                      context,
-                      SlideRightRoute(
-                        page: ReviewPage(
-                          product:
-                              widget.product.id.trim().isNotEmpty
-                                  ? widget.product
-                                  : null,
-                          productId: pid,
-                          productName: name,
-                        ),
-                      ),
-                    );
-                  },
+                  onTap: _onProductCardTap,
                   child: Container(
                     padding: const EdgeInsets.all(AppSpacing.large),
                     decoration: BoxDecoration(
@@ -788,7 +1161,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                         ClipRRect(
                           borderRadius: BorderRadius.circular(8),
                           child: Image.network(
-                            widget.product.imageURL,
+                            _currentProduct.imageURL,
                             width: 100,
                             height: 100,
                             fit: BoxFit.contain,
@@ -813,14 +1186,14 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                widget.product.name,
+                                _currentProduct.name,
                                 style: AppTextStyles.bodyBold,
                               ),
-                              if (widget.product.description != null &&
-                                  widget.product.description!.isNotEmpty) ...[
+                              if (_currentProduct.description != null &&
+                                  _currentProduct.description!.isNotEmpty) ...[
                                 const SizedBox(height: 4),
                                 Text(
-                                  widget.product.description!,
+                                  _currentProduct.description!,
                                   style: AppTextStyles.bodySmall.copyWith(
                                     color: AppColors.textSecondary,
                                   ),

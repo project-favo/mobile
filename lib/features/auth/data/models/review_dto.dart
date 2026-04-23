@@ -1,4 +1,5 @@
 import '../../../../core/utils/product_listing_flags.dart';
+import '../../../../core/utils/review_visibility_flags.dart';
 
 class ReviewDto {
   final String id;
@@ -16,8 +17,11 @@ class ReviewDto {
   final int likeCount;
   final bool isLikedByCurrentUser;
 
-  /// true: ürün artık vitrinde yok (askı, kaldırıldı) — [ProfileReviewRowCard] bant
+  /// true: ürün artık vitrinde yok (askı, kaldırıldı) — My Reviews gibi listelerde satır gösterilmez
   final bool isProductNotListed;
+
+  /// true: yorum pasif, moderasyonda veya silinmiş — listeler ve detayda gösterilmez
+  final bool isReviewInactive;
 
   ReviewDto({
     required this.id,
@@ -35,6 +39,7 @@ class ReviewDto {
     required this.likeCount,
     required this.isLikedByCurrentUser,
     this.isProductNotListed = false,
+    this.isReviewInactive = false,
   });
 
   static String? _ownerPhotoFromJson(Map<String, dynamic> json) {
@@ -79,6 +84,7 @@ class ReviewDto {
       likeCount: (json['likeCount'] as num?)?.toInt() ?? 0,
       isLikedByCurrentUser: json['isLikedByCurrentUser'] as bool? ?? false,
       isProductNotListed: _productNotListedFromJson(json),
+      isReviewInactive: isReviewDataInactiveOrHiddenInMap(json),
     );
   }
 
@@ -98,6 +104,7 @@ class ReviewDto {
       'likeCount': likeCount,
       'isLikedByCurrentUser': isLikedByCurrentUser,
       'isProductNotListed': isProductNotListed,
+      'isReviewInactive': isReviewInactive,
     };
   }
 }
