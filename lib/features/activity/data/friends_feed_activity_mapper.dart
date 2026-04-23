@@ -9,6 +9,16 @@ ActivityType activityTypeFromFriendsFeed(String rawType) {
   return ActivityType.review;
 }
 
+/// Kapatılmış hesapların hareketlerini listeden çıkarır.
+List<ActivityItem> activityItemsFromFriendsFeedDtos(
+  Iterable<FriendsFeedItemDto> content,
+) {
+  return content
+      .where((e) => !e.isActorAccountDeactivated)
+      .map(activityItemFromFriendsFeed)
+      .toList();
+}
+
 ActivityItem activityItemFromFriendsFeed(FriendsFeedItemDto e) {
   final type = activityTypeFromFriendsFeed(e.type);
   final username =

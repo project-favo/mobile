@@ -6,6 +6,9 @@ import 'exceptions.dart';
 /// Centralized error handling utility
 /// Converts technical errors to user-friendly messages
 class ErrorHandler {
+  /// Login: shown under email/password ([LoginPage]) when the account is disabled.
+  static const String deactivatedAccountLoginMessage =
+      'Account deactivated. Contact support.';
   /// Backend 503 “mail gönderilemedi” JSON: [code], isteğe bağlı [smtpDetail].
   /// Tanınmazsa null (genel 503 metni kullanılır).
   static String? messageForMailDelivery503Body(dynamic errorData) {
@@ -55,7 +58,7 @@ class ErrorHandler {
   /// Converts any exception to a user-friendly error message
   static String getUserFriendlyMessage(dynamic error) {
     if (error is DeactivatedAccountException) {
-      return 'This account is deactivated. Please contact support.';
+      return deactivatedAccountLoginMessage;
     }
 
     if (error is IncompleteBackendRegistrationException) {
@@ -65,7 +68,7 @@ class ErrorHandler {
 
     final raw = error.toString().toUpperCase();
     if (looksLikeDeactivatedAccountMessage(raw)) {
-      return 'This account is deactivated. Please contact support.';
+      return deactivatedAccountLoginMessage;
     }
     if (raw.contains('EMAIL_NOT_VERIFIED')) {
       return 'Your email is not verified on the server yet. Enter the 5-digit code '
@@ -134,7 +137,7 @@ class ErrorHandler {
       case 'invalid-email':
         return 'Please enter a valid email address.';
       case 'user-disabled':
-        return 'This account has been disabled.';
+        return deactivatedAccountLoginMessage;
       case 'too-many-requests':
         return 'Too many attempts. Please try again later.';
       case 'network-request-failed':

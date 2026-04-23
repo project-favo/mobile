@@ -234,7 +234,10 @@ class _ProductCardState extends State<ProductCard> {
                 alignment: Alignment.topLeft,
                 child: Text(
                   widget.title,
-                  style: AppTextStyles.productTitle,
+                  style: AppTextStyles.productTitle.copyWith(
+                    fontSize: 14.5,
+                    height: 1.2,
+                  ),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -293,15 +296,19 @@ class _ProductCardState extends State<ProductCard> {
                       color: AppColors.textSecondary,
                     ),
                     const SizedBox(width: 4),
-                    Text(
-                      '${_reviewCount ?? 0} review${(_reviewCount ?? 0) > 1 ? 's' : ''}',
-                      style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.textSecondary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+                    Expanded(
+                      child: Text(
+                        '${_reviewCount ?? 0} ${(_reviewCount ?? 0) == 1 ? 'review' : 'reviews'}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodySmall.copyWith(
+                          color: AppColors.textSecondary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
-                    const Spacer(),
+                    const SizedBox(width: 6),
                     Text(
                       '${_likeCount ?? 0}',
                       style: AppTextStyles.bodySmall.copyWith(

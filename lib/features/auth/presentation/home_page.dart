@@ -103,6 +103,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   /// Tüm kategori ana sayfasında: yeni ürünler için arka planda periyodik kontrol.
   Timer? _homeFeedPollTimer;
   bool _homeFeedPollInFlight = false;
+  /// Her N ana sayfa poll’unda arkadaş feed’i yenile (like → avatar haritası güncellensin).
+  int _friendFeedRefreshPollTick = 0;
   int _searchReqSeq = 0;
   bool _isSearchLoading = false;
 
@@ -225,7 +227,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     });
     _homeFeedPollTimer = Timer.periodic(
       const Duration(seconds: 10),
-      (_) => unawaited(_pollHomeFeedForUpdates()),
+      (_) {
+        unawaited(_pollHomeFeedForUpdates());
+        _friendFeedRefreshPollTick++;
+        if (_friendFeedRefreshPollTick % 3 == 0) {
+          unawaited(_loadFriendLikers());
+        }
+      },
     );
   }
 
@@ -263,8 +271,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       );
       if (!mounted) return;
 
-      final items =
-          page.content.map(activityItemFromFriendsFeed).toList();
+      final items = activityItemsFromFriendsFeedDtos(page.content);
 
       // Merge with existing cache: prepend fresh items, deduplicate by id.
       final existing = FriendFeedMemoryCache.instance.peek();
@@ -300,7 +307,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     if (snapshot == null) return {};
     final map = <String, List<String>>{};
     for (final item in snapshot.items) {
-      if (item.type != ActivityType.review) {
+      if (item.type != ActivityType.review && item.type != ActivityType.like) {
         continue;
       }
       final productId = item.targetContent?.productId;
@@ -669,7 +676,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             crossAxisCount: 2,
             crossAxisSpacing: AppSpacing.xLarge,
             mainAxisSpacing: AppSpacing.xLarge,
-            childAspectRatio: 0.60,
+            childAspectRatio: 0.57,
           ),
           itemCount: 4,
           itemBuilder: (_, __) => const ProductCardSkeleton(),
@@ -690,7 +697,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           crossAxisCount: 2,
           crossAxisSpacing: AppSpacing.xLarge,
           mainAxisSpacing: AppSpacing.xLarge,
-          childAspectRatio: 0.60,
+          childAspectRatio: 0.57,
         ),
         itemCount: products.length,
         itemBuilder: (context, index) {
@@ -831,7 +838,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           crossAxisCount: 2,
           crossAxisSpacing: AppSpacing.xLarge,
           mainAxisSpacing: AppSpacing.xLarge,
-          childAspectRatio: 0.60,
+          childAspectRatio: 0.57,
         ),
         itemCount: _searchResults.length,
         itemBuilder: (context, index) {
@@ -874,7 +881,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           crossAxisCount: 2,
           crossAxisSpacing: AppSpacing.xLarge,
           mainAxisSpacing: AppSpacing.xLarge,
-          childAspectRatio: 0.60,
+          childAspectRatio: 0.57,
         ),
         itemCount: 4,
         itemBuilder: (context, index) => const ProductCardSkeleton(),
@@ -898,7 +905,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             crossAxisCount: 2,
             crossAxisSpacing: AppSpacing.xLarge,
             mainAxisSpacing: AppSpacing.xLarge,
-            childAspectRatio: 0.60,
+            childAspectRatio: 0.57,
           ),
           itemCount: _filteredProducts.length,
           itemBuilder: (context, index) {
@@ -1676,7 +1683,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                           crossAxisCount: 2,
                           crossAxisSpacing: AppSpacing.xLarge,
                           mainAxisSpacing: AppSpacing.xLarge,
-                          childAspectRatio: 0.60,
+                          childAspectRatio: 0.57,
                         ),
                     itemCount: 4,
                     itemBuilder: (_, __) => const ProductCardSkeleton(),

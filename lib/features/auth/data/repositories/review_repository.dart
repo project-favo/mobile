@@ -134,6 +134,39 @@ class ReviewRepository {
     }
   }
 
+  /// En çok review yazan aktif kullanıcılar (token zorunlu)
+  /// GET /api/reviews/top-reviewers?limit=… (varsayılan 5, en fazla 50)
+  Future<List<TopReviewerDto>> getTopReviewers(
+    String firebaseIdToken, {
+    int limit = 5,
+  }) async {
+    final safe = limit.clamp(1, 50);
+    try {
+      _apiClient.setAuthToken(firebaseIdToken);
+      final response = await _apiClient.dio.get(
+        '/api/reviews/top-reviewers',
+        queryParameters: <String, dynamic>{'limit': safe},
+      );
+      if (response.data is List) {
+        return (response.data as List)
+            .map(
+              (e) => TopReviewerDto.fromJson(e as Map<String, dynamic>),
+            )
+            .toList();
+      }
+      return [];
+    } on DioException catch (e) {
+      if (e.response != null) {
+        final errorData = e.response?.data;
+        final errorMessage = errorData is Map
+            ? (errorData['message'] ?? errorData['error'] ?? 'Failed to load top reviewers')
+            : errorData?.toString() ?? 'Failed to load top reviewers';
+        throw Exception(errorMessage);
+      }
+      throw Exception('Network error: ${e.message}');
+    }
+  }
+
   /// Yeni review oluşturur
   /// POST /api/reviews
   Future<ReviewDto> createReview(

@@ -70,6 +70,8 @@ class _UserProfilePageState extends State<UserProfilePage>
   List<ReviewDto> _reviews = [];
   bool _isLoadingReviews = true;
   bool _isLoadingCounts = true;
+  /// Backend hesabı kapatılmış; içerik ve etkileşim gösterme.
+  bool _profileUnavailable = false;
   /// Görünen profil fotoğrafı (parametre veya yorum listesinden)
   String? _avatarImageUrl;
   Uint8List? _avatarMemoryBytes;
@@ -94,10 +96,40 @@ class _UserProfilePageState extends State<UserProfilePage>
         Navigator.of(context).pop();
         return;
       }
+    } on DeactivatedAccountException {
+      return;
     } catch (_) {}
     if (!mounted) return;
+
+    final target = await _authService.getUserById(widget.userId);
+    if (!mounted) return;
+    if (target != null && target.isAccountDeactivated) {
+      setState(() {
+        _profileUnavailable = true;
+        _isLoadingCounts = false;
+        _isLoadingReviews = false;
+        _reviews = [];
+        _isFollowing = false;
+        _followerCount = 0;
+        _followingCount = 0;
+      });
+      return;
+    }
+
     await _loadAll();
     if (mounted) await _enrichProfileFromApi();
+  }
+
+  Future<void> _refreshProfile() async {
+    if (!mounted) return;
+    if (_profileUnavailable) {
+      setState(() {
+        _profileUnavailable = false;
+        _isLoadingCounts = true;
+        _isLoadingReviews = true;
+      });
+    }
+    await _start();
   }
 
   Future<void> _enrichProfileFromApi() async {
@@ -497,18 +529,42 @@ class _UserProfilePageState extends State<UserProfilePage>
         ),
         centerTitle: true,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.chat_bubble_outline),
-            color: AppColors.primary,
-            tooltip: 'Message',
-            onPressed: _openChat,
-          ),
+          if (!_profileUnavailable)
+            IconButton(
+              icon: const Icon(Icons.chat_bubble_outline),
+              color: AppColors.primary,
+              tooltip: 'Message',
+              onPressed: _openChat,
+            ),
         ],
       ),
       body: RefreshIndicator(
         color: AppColors.primary,
-        onRefresh: _loadAll,
-        child: SingleChildScrollView(
+        onRefresh: _refreshProfile,
+        child: _profileUnavailable
+            ? ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: [
+                  const SizedBox(height: 80),
+                  const Icon(
+                    Icons.person_off_outlined,
+                    size: 56,
+                    color: AppColors.textSecondary,
+                  ),
+                  const SizedBox(height: AppSpacing.large),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.xLarge,
+                    ),
+                    child: Text(
+                      'This profile is not available.',
+                      textAlign: TextAlign.center,
+                      style: AppTextStyles.bodyMedium,
+                    ),
+                  ),
+                ],
+              )
+            : SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           child: Column(
             children: [

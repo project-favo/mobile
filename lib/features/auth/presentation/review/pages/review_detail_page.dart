@@ -14,6 +14,7 @@ import '../../../../../core/utils/exceptions.dart';
 import '../../../../../core/utils/in_flight_id_lock.dart';
 import '../../../../../core/utils/product_listing_flags.dart';
 import '../../../../../core/utils/session_helper.dart';
+import '../../../../../core/utils/review_report_storage.dart';
 import '../../../../../core/network/api_client.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
@@ -28,6 +29,7 @@ import '../../../data/repositories/message_repository.dart';
 import '../../../data/services/auth_service.dart';
 import '../widgets/report_review_sheet.dart';
 import '../widgets/review_delete_flow.dart';
+import 'add_review_page.dart';
 
 class ReviewDetailPage extends StatefulWidget {
   final ReviewDto review;
@@ -80,6 +82,11 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
       _viewerUserId = w.userId;
     }
     unawaited(_loadViewerId());
+    unawaited(
+      ReviewReportStorage.hydrateForCurrentUser().then((_) {
+        if (mounted) setState(() {});
+      }),
+    );
     // Defer the refresh so the first frame renders fully before making an API call.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -194,6 +201,22 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
     } catch (_) {}
   }
 
+  Future<void> _openEditReview() async {
+    final ok = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute<bool>(
+        builder:
+            (_) => AddReviewPage(
+              product: widget.product,
+              reviewToEdit: _currentReview,
+            ),
+      ),
+    );
+    if (ok == true && mounted) {
+      await _refreshReview();
+    }
+  }
+
   Future<void> _onDeleteReview() async {
     if (!_reviewDeleteLock.tryEnter()) return;
     try {
@@ -221,7 +244,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
     try {
       // Token'ı al - ensureSession kullanarak güncel token'ı garanti et
       final firebaseIdToken = await _sessionHelper.ensureSession();
-      
+
       if (firebaseIdToken == null) return null;
 
       _apiClient.setAuthToken(firebaseIdToken);
@@ -234,17 +257,15 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
       }
 
       // Dio ile binary response al
-      final response = await _apiClient.dio.get(
-        path,
-        options: Options(
-          responseType: ResponseType.bytes,
-          headers: {
-            'Accept': 'image/*',
-          },
-        ),
-      ).timeout(
-        const Duration(seconds: 10),
-      );
+      final response = await _apiClient.dio
+          .get(
+            path,
+            options: Options(
+              responseType: ResponseType.bytes,
+              headers: {'Accept': 'image/*'},
+            ),
+          )
+          .timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200 && response.data != null) {
         final bytes = response.data as List<int>;
@@ -308,8 +329,9 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                     Navigator.of(context).pop();
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content:
-                            Text('Message sent to @${_currentReview.ownerUserName}'),
+                        content: Text(
+                          'Message sent to @${_currentReview.ownerUserName}',
+                        ),
                       ),
                     );
                   }
@@ -350,16 +372,17 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                     alignment: Alignment.centerRight,
                     child: ElevatedButton(
                       onPressed: isSending ? null : send,
-                      child: isSending
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Text('Send'),
+                      child:
+                          isSending
+                              ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                              : const Text('Send'),
                     ),
                   ),
                 ],
@@ -403,7 +426,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
         'September',
         'October',
         'November',
-        'December'
+        'December',
       ];
       return '${months[date.month - 1]} ${date.day}, ${date.year}';
     } catch (e) {
@@ -479,7 +502,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
     // Optimistic update - UI'ı hemen güncelle (loading indicator yok)
     final previousLikeStatus = _currentReview.isLikedByCurrentUser;
     final previousLikeCount = _currentReview.likeCount;
-    
+
     setState(() {
       _currentReview = ReviewDto(
         id: _currentReview.id,
@@ -493,9 +516,10 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
         ownerId: _currentReview.ownerId,
         ownerUserName: _currentReview.ownerUserName,
         mediaList: _currentReview.mediaList,
-        likeCount: previousLikeStatus 
-            ? (previousLikeCount > 0 ? previousLikeCount - 1 : 0)
-            : previousLikeCount + 1,
+        likeCount:
+            previousLikeStatus
+                ? (previousLikeCount > 0 ? previousLikeCount - 1 : 0)
+                : previousLikeCount + 1,
         isLikedByCurrentUser: !previousLikeStatus,
       );
     });
@@ -526,9 +550,10 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
           ownerId: _currentReview.ownerId,
           ownerUserName: _currentReview.ownerUserName,
           mediaList: _currentReview.mediaList,
-          likeCount: newLikeStatus
-              ? (previousLikeCount + 1)
-              : (previousLikeCount > 0 ? previousLikeCount - 1 : 0),
+          likeCount:
+              newLikeStatus
+                  ? (previousLikeCount + 1)
+                  : (previousLikeCount > 0 ? previousLikeCount - 1 : 0),
           isLikedByCurrentUser: newLikeStatus,
         );
       });
@@ -551,7 +576,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
           isLikedByCurrentUser: previousLikeStatus,
         );
       });
-      
+
       if (mounted) {
         final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -621,10 +646,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
             Navigator.pop(context, true);
           },
         ),
-        title: const Text(
-          'Review Details',
-          style: AppTextStyles.heading2,
-        ),
+        title: const Text('Review Details', style: AppTextStyles.heading2),
         centerTitle: false,
         actions: [
           if (_canShowChatIcon)
@@ -635,569 +657,736 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
             ),
         ],
       ),
-      body: Builder(
-        builder: (context) {
-          if (!_productListingCheckDone) {
-            return const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24.0),
-                child: CircularProgressIndicator(),
-              ),
-            );
-          }
-          if (_productListingBlocked) {
-            return _buildProductSuspendedBody(context);
-          }
-          return Column(
-        children: [
-          Expanded(
-            child: SingleChildScrollView(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.xLarge,
-                  AppSpacing.xLarge,
-                  AppSpacing.xLarge,
-                  AppSpacing.xxLarge,
+      body:
+          !_productListingCheckDone
+              ? const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(24.0),
+                  child: CircularProgressIndicator(),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-              /// REVIEWER INFO
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(14),
-                  onTap: _openOwnerProfile,
-                  child: Container(
-                    padding: const EdgeInsets.all(AppSpacing.large),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: AppColors.border.withValues(alpha: 0.7)),
-                    ),
-                    child: Row(
-                      children: [
-                        ProfileAvatarImage(
-                          size: 48,
-                          imageUrl: _currentReview.ownerProfilePhotoUrl,
-                          fallbackInitial: _currentReview.ownerUserName,
+              )
+              : _productListingBlocked
+              ? _buildProductSuspendedBody(context)
+              : Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          AppSpacing.xLarge,
+                          AppSpacing.xLarge,
+                          AppSpacing.xLarge,
+                          AppSpacing.xxLarge,
                         ),
-                        const SizedBox(width: AppSpacing.medium),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Text(
-                                    '@${_currentReview.ownerUserName}',
-                                    style: AppTextStyles.bodyBold.copyWith(fontSize: 17),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            /// REVIEWER INFO
+                            Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(14),
+                                onTap: _openOwnerProfile,
+                                child: Container(
+                                  padding: const EdgeInsets.all(
+                                    AppSpacing.large,
                                   ),
-                                  if (_currentReview.isCollaborative) ...[
-                                    const SizedBox(width: AppSpacing.small),
-                                    Text(
-                                      'Sponsored',
-                                      style: AppTextStyles.chip.copyWith(
-                                        color: AppColors.primary,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.surface,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: AppColors.border.withValues(
+                                        alpha: 0.7,
                                       ),
                                     ),
-                                  ],
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                _currentReview.isCollaborative
-                                    ? 'Sponsored review · ${_formatDate(_currentReview.createdAt)}'
-                                    : 'Verified review · ${_formatDate(_currentReview.createdAt)}',
-                                style: AppTextStyles.bodySmall.copyWith(
-                                  color: AppColors.textSecondary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: AppSpacing.xLarge),
-
-              /// RATING
-              Row(
-                children: [
-                  ...List.generate(
-                    5,
-                    (index) => Icon(
-                      Icons.star,
-                      size: 24,
-                      color: index < _currentReview.rating
-                          ? AppColors.primary
-                          : AppColors.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.small),
-                  Text(
-                    '${_currentReview.rating}.0',
-                    style: AppTextStyles.bodySmall.copyWith(
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.xLarge),
-
-              /// PRODUCT INFO (tam karta basınca ürün sayfası)
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () {
-                    final pid =
-                        widget.product.id.trim().isNotEmpty
-                            ? widget.product.id
-                            : _currentReview.productId.trim();
-                    if (pid.isEmpty) return;
-                    final name =
-                        widget.product.name.trim().isNotEmpty
-                            ? widget.product.name
-                            : _currentReview.productName;
-                    Navigator.push(
-                      context,
-                      SlideRightRoute(
-                        page: ReviewPage(
-                          product:
-                              widget.product.id.trim().isNotEmpty
-                                  ? widget.product
-                                  : null,
-                          productId: pid,
-                          productName: name,
-                        ),
-                      ),
-                    );
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.all(AppSpacing.large),
-                    decoration: BoxDecoration(
-                      color: AppColors.textSecondary.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.network(
-                            widget.product.imageURL,
-                            width: 100,
-                            height: 100,
-                            fit: BoxFit.contain,
-                            alignment: Alignment.center,
-                            gaplessPlayback: true,
-                            errorBuilder: (context, error, stackTrace) {
-                              return Container(
-                                width: 100,
-                                height: 100,
-                                color: AppColors.textSecondary.withOpacity(0.1),
-                                child: const Icon(
-                                  Icons.image_not_supported,
-                                  color: AppColors.textSecondary,
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.medium),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                widget.product.name,
-                                style: AppTextStyles.bodyBold,
-                              ),
-                              if (widget.product.description != null &&
-                                  widget.product.description!.isNotEmpty) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  widget.product.description!,
-                                  style: AppTextStyles.bodySmall.copyWith(
-                                    color: AppColors.textSecondary,
                                   ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                        Icon(
-                          Icons.chevron_right_rounded,
-                          color: AppColors.textSecondary.withOpacity(0.6),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: AppSpacing.xLarge),
-
-              /// REVIEW IMAGES (yukarıda)
-              if (_currentReview.mediaList.isNotEmpty) ...[
-                Text(
-                  'Review Images',
-                  style: AppTextStyles.heading3,
-                ),
-                const SizedBox(height: AppSpacing.medium),
-                SizedBox(
-                  height: 120,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: _currentReview.mediaList.length,
-                    separatorBuilder: (_, __) =>
-                        const SizedBox(width: AppSpacing.medium),
-                    itemBuilder: (context, index) {
-                      final media = _currentReview.mediaList[index];
-                      // Backend'den direkt URL geliyorsa onu kullan, yoksa id'den oluştur
-                      final mediaUrl = media.getMediaUrl(ApiConfig.baseUrl);
-
-                      // Eğer backend'den direkt URL geliyorsa, Image.network kullan
-                      if (media.url != null && media.url!.isNotEmpty) {
-                        return GestureDetector(
-                          onTap: () => _openMediaPreview(media.url!),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.network(
-                              media.url!,
-                              width: 120,
-                              height: 120,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) {
-                                return Container(
-                                  width: 120,
-                                  height: 120,
-                                  decoration: BoxDecoration(
-                                    color: AppColors.textSecondary.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: const Icon(
-                                    Icons.image_not_supported,
-                                    color: AppColors.textSecondary,
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        );
-                      }
-                      
-                      if (media.imageUrl != null && media.imageUrl!.isNotEmpty) {
-                        return GestureDetector(
-                          onTap: () => _openMediaPreview(media.imageUrl!),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.network(
-                              media.imageUrl!,
-                              width: 120,
-                              height: 120,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) {
-                                return Container(
-                                  width: 120,
-                                  height: 120,
-                                  decoration: BoxDecoration(
-                                    color: AppColors.textSecondary.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: const Icon(
-                                    Icons.image_not_supported,
-                                    color: AppColors.textSecondary,
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        );
-                      }
-                      
-                      // Backend'den URL gelmiyorsa, authentication ile yükle
-                      return FutureBuilder<Uint8List?>(
-                        future: _mediaFutures[media.id] ??
-                            (_mediaFutures[media.id] = _loadMediaImage(mediaUrl)),
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState == ConnectionState.waiting) {
-                            return Container(
-                              width: 120,
-                              height: 120,
-                              decoration: BoxDecoration(
-                                color: AppColors.textSecondary.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Center(
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: AppColors.primary,
-                                ),
-                              ),
-                            );
-                          }
-                          
-                          if (snapshot.hasError || snapshot.data == null) {
-                            return Container(
-                              width: 120,
-                              height: 120,
-                              decoration: BoxDecoration(
-                                color: AppColors.textSecondary.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Icon(
-                                Icons.image_not_supported,
-                                color: AppColors.textSecondary,
-                              ),
-                            );
-                          }
-                          
-                          return GestureDetector(
-                            onTap:
-                                () => showDialog<void>(
-                                  context: context,
-                                  barrierColor: Colors.black87,
-                                  builder:
-                                      (ctx) => Scaffold(
-                                        backgroundColor: Colors.transparent,
-                                        body: SafeArea(
-                                          child: Stack(
-                                            children: [
-                                              Center(
-                                                child: InteractiveViewer(
-                                                  minScale: 1,
-                                                  maxScale: 5,
-                                                  child: Image.memory(
-                                                    snapshot.data!,
-                                                    fit: BoxFit.contain,
-                                                  ),
+                                  child: Row(
+                                    children: [
+                                      ProfileAvatarImage(
+                                        size: 48,
+                                        imageUrl:
+                                            _currentReview.ownerProfilePhotoUrl,
+                                        fallbackInitial:
+                                            _currentReview.ownerUserName,
+                                      ),
+                                      const SizedBox(width: AppSpacing.medium),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Text(
+                                                  '@${_currentReview.ownerUserName}',
+                                                  style: AppTextStyles.bodyBold
+                                                      .copyWith(fontSize: 17),
                                                 ),
-                                              ),
-                                              Positioned(
-                                                top: 8,
-                                                right: 8,
-                                                child: IconButton(
-                                                  onPressed:
-                                                      () => Navigator.of(ctx).pop(),
-                                                  icon: const Icon(
-                                                    Icons.close,
-                                                    color: Colors.white,
+                                                if (_currentReview
+                                                    .isCollaborative) ...[
+                                                  const SizedBox(
+                                                    width: AppSpacing.small,
                                                   ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
+                                                  Text(
+                                                    'Sponsored',
+                                                    style: AppTextStyles.chip
+                                                        .copyWith(
+                                                          color:
+                                                              AppColors.primary,
+                                                        ),
+                                                  ),
+                                                ],
+                                              ],
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              _currentReview.isCollaborative
+                                                  ? 'Sponsored review · ${_formatDate(_currentReview.createdAt)}'
+                                                  : 'Verified review · ${_formatDate(_currentReview.createdAt)}',
+                                              style: AppTextStyles.bodySmall
+                                                  .copyWith(
+                                                    color:
+                                                        AppColors.textSecondary,
+                                                  ),
+                                            ),
+                                          ],
                                         ),
                                       ),
+                                    ],
+                                  ),
                                 ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: Image.memory(
-                                snapshot.data!,
-                                width: 120,
-                                height: 120,
-                                fit: BoxFit.cover,
-                                errorBuilder: (context, error, stackTrace) {
-                                  return Container(
-                                    width: 120,
-                                    height: 120,
-                                    color: AppColors.textSecondary.withOpacity(0.1),
-                                    child: const Icon(
-                                      Icons.image_not_supported,
-                                      color: AppColors.textSecondary,
+                              ),
+                            ),
+                            const SizedBox(height: AppSpacing.xLarge),
+
+                            /// RATING
+                            Row(
+                              children: [
+                                ...List.generate(
+                                  5,
+                                  (index) => Icon(
+                                    Icons.star,
+                                    size: 24,
+                                    color:
+                                        index < _currentReview.rating
+                                            ? AppColors.primary
+                                            : AppColors.textSecondary,
+                                  ),
+                                ),
+                                const SizedBox(width: AppSpacing.small),
+                                Text(
+                                  '${_currentReview.rating}.0',
+                                  style: AppTextStyles.bodySmall.copyWith(
+                                    color: AppColors.textPrimary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: AppSpacing.xLarge),
+
+                            /// PRODUCT INFO (tam karta basınca ürün sayfası)
+                            Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(12),
+                                onTap: () {
+                                  final pid =
+                                      widget.product.id.trim().isNotEmpty
+                                          ? widget.product.id
+                                          : _currentReview.productId.trim();
+                                  if (pid.isEmpty) return;
+                                  final name =
+                                      widget.product.name.trim().isNotEmpty
+                                          ? widget.product.name
+                                          : _currentReview.productName;
+                                  Navigator.push(
+                                    context,
+                                    SlideRightRoute(
+                                      page: ReviewPage(
+                                        product:
+                                            widget.product.id.trim().isNotEmpty
+                                                ? widget.product
+                                                : null,
+                                        productId: pid,
+                                        productName: name,
+                                      ),
                                     ),
                                   );
                                 },
+                                child: Container(
+                                  padding: const EdgeInsets.all(
+                                    AppSpacing.large,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.textSecondary.withOpacity(
+                                      0.1,
+                                    ),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: Image.network(
+                                          widget.product.imageURL,
+                                          width: 100,
+                                          height: 100,
+                                          fit: BoxFit.contain,
+                                          alignment: Alignment.center,
+                                          gaplessPlayback: true,
+                                          errorBuilder: (
+                                            context,
+                                            error,
+                                            stackTrace,
+                                          ) {
+                                            return Container(
+                                              width: 100,
+                                              height: 100,
+                                              color: AppColors.textSecondary
+                                                  .withOpacity(0.1),
+                                              child: const Icon(
+                                                Icons.image_not_supported,
+                                                color: AppColors.textSecondary,
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                      const SizedBox(width: AppSpacing.medium),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              widget.product.name,
+                                              style: AppTextStyles.bodyBold,
+                                            ),
+                                            if (widget.product.description !=
+                                                    null &&
+                                                widget
+                                                    .product
+                                                    .description!
+                                                    .isNotEmpty) ...[
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                widget.product.description!,
+                                                style: AppTextStyles.bodySmall
+                                                    .copyWith(
+                                                      color:
+                                                          AppColors
+                                                              .textSecondary,
+                                                    ),
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                      ),
+                                      Icon(
+                                        Icons.chevron_right_rounded,
+                                        color: AppColors.textSecondary
+                                            .withOpacity(0.6),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ),
                             ),
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xLarge),
-              ] else ...[
-                Container(
-                  padding: const EdgeInsets.all(AppSpacing.large),
-                  decoration: BoxDecoration(
-                    color: AppColors.textSecondary.withOpacity(0.05),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: AppColors.textSecondary.withOpacity(0.2),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.image_outlined,
-                        color: AppColors.textSecondary,
-                        size: 24,
-                      ),
-                      const SizedBox(width: AppSpacing.medium),
-                      Text(
-                        'No images uploaded',
-                        style: AppTextStyles.bodySmall.copyWith(
-                          color: AppColors.textSecondary,
+                            const SizedBox(height: AppSpacing.xLarge),
+
+                            /// REVIEW IMAGES (yukarıda)
+                            if (_currentReview.mediaList.isNotEmpty) ...[
+                              Text(
+                                'Review Images',
+                                style: AppTextStyles.heading3,
+                              ),
+                              const SizedBox(height: AppSpacing.medium),
+                              SizedBox(
+                                height: 120,
+                                child: ListView.separated(
+                                  scrollDirection: Axis.horizontal,
+                                  itemCount: _currentReview.mediaList.length,
+                                  separatorBuilder:
+                                      (_, __) => const SizedBox(
+                                        width: AppSpacing.medium,
+                                      ),
+                                  itemBuilder: (context, index) {
+                                    final media =
+                                        _currentReview.mediaList[index];
+                                    // Backend'den direkt URL geliyorsa onu kullan, yoksa id'den oluştur
+                                    final mediaUrl = media.getMediaUrl(
+                                      ApiConfig.baseUrl,
+                                    );
+
+                                    // Eğer backend'den direkt URL geliyorsa, Image.network kullan
+                                    if (media.url != null &&
+                                        media.url!.isNotEmpty) {
+                                      return GestureDetector(
+                                        onTap:
+                                            () => _openMediaPreview(media.url!),
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          child: Image.network(
+                                            media.url!,
+                                            width: 120,
+                                            height: 120,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (
+                                              context,
+                                              error,
+                                              stackTrace,
+                                            ) {
+                                              return Container(
+                                                width: 120,
+                                                height: 120,
+                                                decoration: BoxDecoration(
+                                                  color: AppColors.textSecondary
+                                                      .withOpacity(0.1),
+                                                  borderRadius:
+                                                      BorderRadius.circular(8),
+                                                ),
+                                                child: const Icon(
+                                                  Icons.image_not_supported,
+                                                  color:
+                                                      AppColors.textSecondary,
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                      );
+                                    }
+
+                                    if (media.imageUrl != null &&
+                                        media.imageUrl!.isNotEmpty) {
+                                      return GestureDetector(
+                                        onTap:
+                                            () => _openMediaPreview(
+                                              media.imageUrl!,
+                                            ),
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          child: Image.network(
+                                            media.imageUrl!,
+                                            width: 120,
+                                            height: 120,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (
+                                              context,
+                                              error,
+                                              stackTrace,
+                                            ) {
+                                              return Container(
+                                                width: 120,
+                                                height: 120,
+                                                decoration: BoxDecoration(
+                                                  color: AppColors.textSecondary
+                                                      .withOpacity(0.1),
+                                                  borderRadius:
+                                                      BorderRadius.circular(8),
+                                                ),
+                                                child: const Icon(
+                                                  Icons.image_not_supported,
+                                                  color:
+                                                      AppColors.textSecondary,
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                      );
+                                    }
+
+                                    // Backend'den URL gelmiyorsa, authentication ile yükle
+                                    return FutureBuilder<Uint8List?>(
+                                      future:
+                                          _mediaFutures[media.id] ??
+                                          (_mediaFutures[media
+                                              .id] = _loadMediaImage(mediaUrl)),
+                                      builder: (context, snapshot) {
+                                        if (snapshot.connectionState ==
+                                            ConnectionState.waiting) {
+                                          return Container(
+                                            width: 120,
+                                            height: 120,
+                                            decoration: BoxDecoration(
+                                              color: AppColors.textSecondary
+                                                  .withOpacity(0.1),
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                            ),
+                                            child: const Center(
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: AppColors.primary,
+                                              ),
+                                            ),
+                                          );
+                                        }
+
+                                        if (snapshot.hasError ||
+                                            snapshot.data == null) {
+                                          return Container(
+                                            width: 120,
+                                            height: 120,
+                                            decoration: BoxDecoration(
+                                              color: AppColors.textSecondary
+                                                  .withOpacity(0.1),
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                            ),
+                                            child: const Icon(
+                                              Icons.image_not_supported,
+                                              color: AppColors.textSecondary,
+                                            ),
+                                          );
+                                        }
+
+                                        return GestureDetector(
+                                          onTap:
+                                              () => showDialog<void>(
+                                                context: context,
+                                                barrierColor: Colors.black87,
+                                                builder:
+                                                    (ctx) => Scaffold(
+                                                      backgroundColor:
+                                                          Colors.transparent,
+                                                      body: SafeArea(
+                                                        child: Stack(
+                                                          children: [
+                                                            Center(
+                                                              child: InteractiveViewer(
+                                                                minScale: 1,
+                                                                maxScale: 5,
+                                                                child: Image.memory(
+                                                                  snapshot
+                                                                      .data!,
+                                                                  fit:
+                                                                      BoxFit
+                                                                          .contain,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                            Positioned(
+                                                              top: 8,
+                                                              right: 8,
+                                                              child: IconButton(
+                                                                onPressed:
+                                                                    () =>
+                                                                        Navigator.of(
+                                                                          ctx,
+                                                                        ).pop(),
+                                                                icon: const Icon(
+                                                                  Icons.close,
+                                                                  color:
+                                                                      Colors
+                                                                          .white,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                    ),
+                                              ),
+                                          child: ClipRRect(
+                                            borderRadius: BorderRadius.circular(
+                                              8,
+                                            ),
+                                            child: Image.memory(
+                                              snapshot.data!,
+                                              width: 120,
+                                              height: 120,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (
+                                                context,
+                                                error,
+                                                stackTrace,
+                                              ) {
+                                                return Container(
+                                                  width: 120,
+                                                  height: 120,
+                                                  color: AppColors.textSecondary
+                                                      .withOpacity(0.1),
+                                                  child: const Icon(
+                                                    Icons.image_not_supported,
+                                                    color:
+                                                        AppColors.textSecondary,
+                                                  ),
+                                                );
+                                              },
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    );
+                                  },
+                                ),
+                              ),
+                              const SizedBox(height: AppSpacing.xLarge),
+                            ] else ...[
+                              Container(
+                                padding: const EdgeInsets.all(AppSpacing.large),
+                                decoration: BoxDecoration(
+                                  color: AppColors.textSecondary.withOpacity(
+                                    0.05,
+                                  ),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: AppColors.textSecondary.withOpacity(
+                                      0.2,
+                                    ),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.image_outlined,
+                                      color: AppColors.textSecondary,
+                                      size: 24,
+                                    ),
+                                    const SizedBox(width: AppSpacing.medium),
+                                    Text(
+                                      'No images uploaded',
+                                      style: AppTextStyles.bodySmall.copyWith(
+                                        color: AppColors.textSecondary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: AppSpacing.xLarge),
+                            ],
+
+                            /// REVIEW TEXT
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(AppSpacing.large),
+                              decoration: BoxDecoration(
+                                color: AppColors.surface,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: AppColors.border.withValues(
+                                    alpha: 0.7,
+                                  ),
+                                ),
+                              ),
+                              child: Text(
+                                _currentReview.description ??
+                                    _currentReview.title,
+                                style: AppTextStyles.body.copyWith(
+                                  fontSize: 16,
+                                  height: 1.45,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: AppSpacing.xLarge),
-              ],
-
-              /// REVIEW TEXT
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(AppSpacing.large),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.border.withValues(alpha: 0.7)),
-                ),
-                child: Text(
-                  _currentReview.description ?? _currentReview.title,
-                  style: AppTextStyles.body.copyWith(
-                    fontSize: 16,
-                    height: 1.45,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
+                  _buildBottomActionsBar(context),
+                ],
               ),
+    );
+  }
+
+  /// Alt: kendi yorumu — Like, Update, Delete; başkası — Like, Report.
+  Widget _buildBottomActionsBar(BuildContext context) {
+    const barH = 48.0;
+    final likeStyle = TextButton.styleFrom(
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+      minimumSize: const Size(0, barH),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      visualDensity: VisualDensity.compact,
+    );
+    final updateStyle = OutlinedButton.styleFrom(
+      foregroundColor: AppColors.primary,
+      side: BorderSide(color: AppColors.border.withValues(alpha: 0.9)),
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+      minimumSize: const Size(0, barH),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      visualDensity: VisualDensity.compact,
+    );
+    final deleteStyle = OutlinedButton.styleFrom(
+      foregroundColor: AppColors.textSecondary,
+      side: BorderSide(color: AppColors.border.withValues(alpha: 0.9)),
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+      minimumSize: const Size(0, barH),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      visualDensity: VisualDensity.compact,
+    );
+
+    return SafeArea(
+      minimum: const EdgeInsets.fromLTRB(
+        AppSpacing.xLarge,
+        AppSpacing.small,
+        AppSpacing.xLarge,
+        AppSpacing.small,
+      ),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.border.withValues(alpha: 0.8)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 10,
+              offset: const Offset(0, -2),
+            ),
+          ],
+        ),
+        child:
+            _isOwnReview
+                ? Row(
+                  children: [
+                    Expanded(
+                      child: TextButton.icon(
+                        onPressed: _toggleLike,
+                        style: likeStyle,
+                        icon: Icon(
+                          _currentReview.isLikedByCurrentUser
+                              ? Icons.thumb_up
+                              : Icons.thumb_up_alt_outlined,
+                          size: 18,
+                          color:
+                              _currentReview.isLikedByCurrentUser
+                                  ? AppColors.primary
+                                  : AppColors.textSecondary,
+                        ),
+                        label: Text(
+                          '${_currentReview.likeCount}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.bodySmall.copyWith(
+                            color:
+                                _currentReview.isLikedByCurrentUser
+                                    ? AppColors.primary
+                                    : AppColors.textSecondary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _openEditReview,
+                        style: updateStyle,
+                        icon: const Icon(
+                          Icons.edit_outlined,
+                          size: 16,
+                          color: AppColors.primary,
+                        ),
+                        label: Text(
+                          'Update',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.bodySmall.copyWith(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _onDeleteReview,
+                        style: deleteStyle,
+                        icon: const Icon(
+                          Icons.delete_outline_rounded,
+                          size: 16,
+                          color: AppColors.textSecondary,
+                        ),
+                        label: Text(
+                          'Delete',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.bodySmall.copyWith(
+                            color: AppColors.textSecondary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+                : Row(
+                  children: [
+                    Expanded(
+                      child: TextButton.icon(
+                        onPressed: _toggleLike,
+                        style: likeStyle,
+                        icon: Icon(
+                          _currentReview.isLikedByCurrentUser
+                              ? Icons.thumb_up
+                              : Icons.thumb_up_alt_outlined,
+                          size: 18,
+                          color:
+                              _currentReview.isLikedByCurrentUser
+                                  ? AppColors.primary
+                                  : AppColors.textSecondary,
+                        ),
+                        label: Text(
+                          '${_currentReview.likeCount}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.bodySmall.copyWith(
+                            color:
+                                _currentReview.isLikedByCurrentUser
+                                    ? AppColors.primary
+                                    : AppColors.textSecondary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: TextButton.icon(
+                        onPressed: () async {
+                          await openReviewReportFlow(
+                            context,
+                            reviewId: _currentReview.id,
+                          );
+                          if (mounted) setState(() {});
+                        },
+                        style: likeStyle,
+                        icon: Icon(
+                          ReviewReportStorage.hasReportedSync(_currentReview.id)
+                              ? Icons.flag
+                              : Icons.flag_outlined,
+                          size: 18,
+                          color: AppColors.primary,
+                        ),
+                        label: Text(
+                          'Report',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.bodySmall.copyWith(
+                            color: AppColors.textSecondary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
-              ),
-            ),
-          ),
-          /// BOTTOM ACTIONS
-          SafeArea(
-            minimum: const EdgeInsets.fromLTRB(
-              AppSpacing.xLarge,
-              AppSpacing.small,
-              AppSpacing.xLarge,
-              AppSpacing.medium,
-            ),
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.medium,
-                vertical: AppSpacing.small,
-              ),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.border.withValues(alpha: 0.8)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.04),
-                    blurRadius: 10,
-                    offset: const Offset(0, -2),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  TextButton.icon(
-                    onPressed: _toggleLike,
-                    icon: Icon(
-                      _currentReview.isLikedByCurrentUser
-                          ? Icons.thumb_up
-                          : Icons.thumb_up_alt_outlined,
-                      size: 20,
-                      color:
-                          _currentReview.isLikedByCurrentUser
-                              ? AppColors.primary
-                              : AppColors.textSecondary,
-                    ),
-                    label: Text(
-                      '${_currentReview.likeCount}',
-                      style: AppTextStyles.body.copyWith(
-                        color:
-                            _currentReview.isLikedByCurrentUser
-                                ? AppColors.primary
-                                : AppColors.textSecondary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  if (_canShowChatIcon)
-                    TextButton.icon(
-                      onPressed: _onChatIconTap,
-                      icon: const Icon(
-                        Icons.chat_bubble_outline,
-                        size: 20,
-                        color: AppColors.textSecondary,
-                      ),
-                      label: Text(
-                        'Message',
-                        style: AppTextStyles.body.copyWith(
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                    ),
-                  if (_isOwnReview)
-                    OutlinedButton.icon(
-                      onPressed: _onDeleteReview,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.textSecondary,
-                        side: BorderSide(
-                          color: AppColors.border.withValues(alpha: 0.9),
-                        ),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        minimumSize: const Size(0, 36),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      icon: const Icon(
-                        Icons.delete_outline_rounded,
-                        size: 18,
-                        color: AppColors.textSecondary,
-                      ),
-                      label: Text(
-                        'Delete',
-                        style: AppTextStyles.body.copyWith(
-                          color: AppColors.textSecondary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  const Spacer(),
-                  if (!_isOwnReview)
-                    TextButton.icon(
-                      onPressed: () async {
-                        await openReviewReportFlow(
-                          context,
-                          reviewId: _currentReview.id,
-                        );
-                      },
-                      icon: const Icon(
-                        Icons.flag_outlined,
-                        size: 20,
-                        color: AppColors.primary,
-                      ),
-                      label: const Text(
-                        'Report',
-                        style: AppTextStyles.body,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      );
-        },
       ),
     );
   }
 }
-
-

@@ -17,7 +17,7 @@ import '../../../../../core/cache/current_user_cache.dart';
 import '../../../../../core/cache/product_memory_cache.dart';
 import '../../../../../core/cache/review_memory_cache.dart';
 import '../../../../../core/utils/in_flight_id_lock.dart';
-import '../../../../../core/utils/product_report_storage.dart';
+import '../../../../../core/utils/review_report_storage.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/models/review_dto.dart';
@@ -221,6 +221,11 @@ class _ReviewPageState extends State<ReviewPage> {
   @override
   void initState() {
     super.initState();
+    unawaited(
+      ReviewReportStorage.hydrateForCurrentUser().then((_) {
+        if (mounted) setState(() {});
+      }),
+    );
     final cu = CurrentUserCache.instance;
     if (cu.hasUserId) {
       _currentUserId = cu.userId;
@@ -637,90 +642,6 @@ class _ReviewPageState extends State<ReviewPage> {
     }
   }
 
-  Future<void> _onReportProductPressed() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Please sign in to report a product'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-      }
-      return;
-    }
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder:
-          (ctx) => AlertDialog(
-            backgroundColor: AppColors.surface,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            title: Text(
-              'Report product',
-              style: AppTextStyles.heading3.copyWith(
-                color: AppColors.textPrimary,
-              ),
-            ),
-            content: Text(
-              'Report "${_currentProduct.name}" to our team?',
-              style: AppTextStyles.body.copyWith(color: AppColors.textPrimary),
-            ),
-            actions: [
-              TextButton(
-                style: TextButton.styleFrom(foregroundColor: AppColors.primary),
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                ),
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Report'),
-              ),
-            ],
-          ),
-    );
-    if (!mounted) return;
-    if (confirmed != true) return;
-
-    try {
-      final token = await _sessionHelper.ensureSession();
-      if (!mounted) return;
-      if (token == null) {
-        throw Exception('Please sign in to report a product');
-      }
-      final reported = await _interactionRepository.reportProduct(
-        token,
-        _currentProduct.id,
-      );
-      if (!mounted) return;
-      unawaited(ProductReportStorage.markReported(_currentProduct.id));
-      if (reported) {
-        await showBrandedOkDialog(context, title: 'Successfully reported');
-      } else {
-        await showBrandedOkDialog(
-          context,
-          title: 'Already reported',
-          message: 'You have already reported this product.',
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(ErrorHandler.getUserFriendlyMessage(e)),
-          backgroundColor: AppColors.error,
-        ),
-      );
-    }
-  }
-
   void _openImagePreview() {
     final imageUrl = _currentProduct.imageURL;
     if (imageUrl.trim().isEmpty) return;
@@ -1110,14 +1031,6 @@ class _ReviewPageState extends State<ReviewPage> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 _miniIconAction(
-                                  icon: Icons.flag_outlined,
-                                  onTap:
-                                      _isLoadingProduct
-                                          ? null
-                                          : _onReportProductPressed,
-                                ),
-                                const SizedBox(width: 8),
-                                _miniIconAction(
                                   icon: Icons.compare_arrows_outlined,
                                   onTap: () {
                                     Navigator.push(
@@ -1367,6 +1280,8 @@ class _ReviewPageState extends State<ReviewPage> {
                             _currentUsername != null &&
                             review.ownerUserName.toLowerCase() !=
                                 _currentUsername!.toLowerCase(),
+                        hasReportedReview:
+                            ReviewReportStorage.hasReportedSync(review.id),
                         onReportTap:
                             _isMyReview(review)
                                 ? null
@@ -1375,6 +1290,7 @@ class _ReviewPageState extends State<ReviewPage> {
                                     context,
                                     reviewId: review.id,
                                   );
+                                  if (mounted) setState(() {});
                                 },
                         onDeleteTap:
                             _isMyReview(review)
@@ -1561,6 +1477,7 @@ class _ReviewPageState extends State<ReviewPage> {
     IconData? icon,
     Widget? customIcon,
     required VoidCallback? onTap,
+    Color? iconColor,
   }) {
     return OutlinedButton(
       onPressed: onTap,
@@ -1570,8 +1487,12 @@ class _ReviewPageState extends State<ReviewPage> {
         side: BorderSide(color: AppColors.border.withValues(alpha: 0.9)),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
-      child:
-          customIcon ?? Icon(icon, size: 21, color: AppColors.textSecondary),
+      child: customIcon ??
+          Icon(
+            icon,
+            size: 21,
+            color: iconColor ?? AppColors.textSecondary,
+          ),
     );
   }
 }

@@ -21,6 +21,9 @@ class ReviewCard extends StatelessWidget {
   final bool isCurrentUser;
   final String? reviewDateLabel;
 
+  /// Bu review için kullanıcı rapor gönderdiyse bayrak dolu gösterilir
+  final bool hasReportedReview;
+
   const ReviewCard({
     super.key,
     required this.username,
@@ -38,6 +41,7 @@ class ReviewCard extends StatelessWidget {
     this.onDeleteTap,
     this.isCurrentUser = false,
     this.reviewDateLabel,
+    this.hasReportedReview = false,
   });
 
   @override
@@ -209,10 +213,14 @@ class ReviewCard extends StatelessWidget {
                           behavior: HitTestBehavior.opaque,
                           child: Row(
                             children: [
-                              const Icon(
-                                Icons.outlined_flag,
+                              Icon(
+                                hasReportedReview
+                                    ? Icons.flag
+                                    : Icons.outlined_flag,
                                 size: 18,
-                                color: AppColors.textSecondary,
+                                color: hasReportedReview
+                                    ? AppColors.primary
+                                    : AppColors.textSecondary,
                               ),
                             ],
                           ),

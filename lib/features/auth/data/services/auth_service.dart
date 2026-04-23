@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../../../core/notifications/push_notification_service.dart';
+import '../../../../core/notifications/push_token_logger.dart';
 import '../../../../core/cache/app_session_cache.dart';
 import '../../../../core/cache/current_user_cache.dart';
 import '../../../../core/utils/session_helper.dart';
@@ -64,7 +68,15 @@ class AuthService {
   }
 
   Future<UserResponseDto> _finalizeUserResponse(UserResponseDto u) async {
+    if (u.isAccountDeactivated) {
+      await _sessionHelper.handleDeactivatedAccount();
+      throw const DeactivatedAccountException();
+    }
     final merged = await UserDisplayNamePrefs.instance.mergeInto(u);
+    if (merged.isAccountDeactivated) {
+      await _sessionHelper.handleDeactivatedAccount();
+      throw const DeactivatedAccountException();
+    }
     if (merged.id.trim().isNotEmpty) {
       CurrentUserCache.instance.rememberFromDto(merged);
     }
@@ -78,7 +90,17 @@ class AuthService {
       throw Exception('Not signed in');
     }
     final token = await _getFreshIdToken(user);
-    return _finalizeUserResponse(await _backendLoginWithIdToken(token));
+    final out =
+        await _finalizeUserResponse(await _backendLoginWithIdToken(token));
+    unawaited(
+      PushNotificationService.instance.syncTokenAfterBackendSessionReady().catchError((
+        Object e,
+        StackTrace s,
+      ) {
+        pushTokenLog('syncTokenAfterBackendSessionReady failed (establishSession)', error: '$e | $s');
+      }),
+    );
+    return out;
   }
 
   /// Firebase + backend login. E-posta doğrulanmamış olsa da oturum açılır (profilde uyarı).
@@ -104,8 +126,17 @@ class AuthService {
       final idToken = await _getFreshIdToken(user);
       try {
         final login = await _backendLoginWithIdToken(idToken);
+        final out = await _finalizeUserResponse(login);
         _sessionHelper.markBackendLoginSucceeded();
-        return _finalizeUserResponse(login);
+        unawaited(
+          PushNotificationService.instance.syncTokenAfterBackendSessionReady().catchError((
+            Object e,
+            StackTrace s,
+          ) {
+            pushTokenLog('syncTokenAfterBackendSessionReady failed (login)', error: '$e | $s');
+          }),
+        );
+        return out;
       } on DioException catch (e) {
         if (looksLikeDeactivatedAccountMessage(
           dioResponseDataAsSearchString(e.response?.data),
@@ -237,6 +268,8 @@ class AuthService {
 
     try {
       return await _finalizeUserResponse(await _authRepository.getMe(idToken));
+    } on DeactivatedAccountException {
+      rethrow;
     } catch (e) {
       final buf = StringBuffer(e.toString());
       if (e is DioException) {

@@ -1,5 +1,7 @@
 import 'package:dio/dio.dart';
+import '../../../../core/config/api_config.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/notifications/push_token_logger.dart';
 import '../../../../core/utils/session_helper.dart';
 import '../models/notification_dto.dart';
 
@@ -125,6 +127,66 @@ class NotificationRepository {
         throw Exception(errorMessage);
       }
       throw Exception('Network error: ${e.message}');
+    }
+  }
+
+  /// POST /api/notifications/push-token — Cihaz FCM token (iOS’ta APNs üzerinden eşleşen FCM token).
+  /// Beklenen: 204 No Content, Authorization: Bearer (Firebase idToken)
+  Future<void> registerPushToken({
+    required String fcmToken,
+    required String platform,
+    String logSource = 'registerPushToken',
+  }) async {
+    if (platform != 'ios' && platform != 'android') {
+      pushTokenLog('push-token skip bad platform', error: 'source=$logSource platform=$platform');
+      return;
+    }
+    const path = '/api/notifications/push-token';
+    final fullUrl = '${ApiConfig.baseUrl}$path';
+    try {
+      pushTokenLog(
+        'push-token request (JWT = ensureSession sonrası Bearer)',
+        error: 'source=$logSource | POST $fullUrl | platform=$platform | token_len=${fcmToken.length}',
+        fcmTokenPrefix: fcmToken.length > 20
+            ? '${fcmToken.substring(0, 10)}…${fcmToken.substring(fcmToken.length - 8)}'
+            : fcmToken,
+      );
+      final session = await SessionHelper().ensureSession();
+      if (session == null) {
+        pushTokenLog('push-token skip (no session / JWT yok)', error: 'source=$logSource');
+        return;
+      }
+      _apiClient.setAuthToken(session);
+      final response = await _apiClient.dio.post(
+        path,
+        data: <String, String>{
+          'token': fcmToken,
+          'platform': platform,
+        },
+        options: Options(
+          headers: <String, String>{'Authorization': 'Bearer $session'},
+          validateStatus: (code) => code != null && code >= 200 && code < 300,
+        ),
+      );
+      pushTokenLog(
+        'push-token response OK',
+        statusCode: response.statusCode,
+        responseBody: response.data,
+        error: 'source=$logSource',
+        fcmTokenPrefix: 'ok',
+      );
+    } on DioException catch (e, st) {
+      pushTokenLog(
+        'push-token DioException',
+        error:
+            'source=$logSource | st=$st | type=${e.type} | msg=${e.message} | request=${e.requestOptions.uri} | req_data=${e.requestOptions.data}',
+        statusCode: e.response?.statusCode,
+        responseBody: e.response?.data,
+      );
+      rethrow;
+    } catch (e, st) {
+      pushTokenLog('push-token other error', error: 'source=$logSource | $e | $st');
+      rethrow;
     }
   }
 

@@ -11,6 +11,9 @@ class UserResponseDto {
   // null → legacy (treat as verified), false → not verified, true → verified
   final bool? emailVerified;
 
+  /// Backend hesabı kapatıldıysa true (feed/önbellekte hareket göstermemek için).
+  final bool isAccountDeactivated;
+
   UserResponseDto({
     required this.id,
     required this.email,
@@ -22,6 +25,7 @@ class UserResponseDto {
     this.profilePhotoData,
     this.profilePhotoMimeType,
     this.emailVerified,
+    this.isAccountDeactivated = false,
   });
 
   /// Backend: null → legacy (verified), false → not verified, true → verified
@@ -48,6 +52,7 @@ class UserResponseDto {
       profilePhotoData: null,
       profilePhotoMimeType: null,
       emailVerified: emailVerified,
+      isAccountDeactivated: isAccountDeactivated,
     );
   }
 
@@ -64,6 +69,7 @@ class UserResponseDto {
       profilePhotoData: profilePhotoData,
       profilePhotoMimeType: profilePhotoMimeType,
       emailVerified: emailVerified,
+      isAccountDeactivated: isAccountDeactivated,
     );
   }
 
@@ -83,6 +89,7 @@ class UserResponseDto {
       profilePhotoData: other.profilePhotoData,
       profilePhotoMimeType: other.profilePhotoMimeType ?? profilePhotoMimeType,
       emailVerified: emailVerified,
+      isAccountDeactivated: isAccountDeactivated,
     );
   }
 
@@ -112,6 +119,25 @@ class UserResponseDto {
       if (s.isNotEmpty) return s;
     }
     return '';
+  }
+
+  static bool _accountDeactivatedFromMap(Map<String, dynamic> m) {
+    final st = (m['status'] ?? m['accountStatus'] ?? '')
+        .toString()
+        .toLowerCase();
+    if (st == 'deactivated' || st == 'inactive' || st == 'suspended') {
+      return true;
+    }
+    if (m['active'] is bool && (m['active'] as bool) == false) {
+      return true;
+    }
+    if (m['isActive'] is bool && (m['isActive'] as bool) == false) {
+      return true;
+    }
+    if (m['enabled'] is bool && (m['enabled'] as bool) == false) {
+      return true;
+    }
+    return false;
   }
 
   static String? _firstString(Map<String, dynamic> m, List<String> keys) {
@@ -178,6 +204,7 @@ class UserResponseDto {
       profilePhotoData: photoData,
       profilePhotoMimeType: mime,
       emailVerified: m['emailVerified'] as bool?,
+      isAccountDeactivated: _accountDeactivatedFromMap(m),
     );
   }
 
@@ -193,6 +220,7 @@ class UserResponseDto {
       'profilePhotoData': profilePhotoData,
       'profilePhotoMimeType': profilePhotoMimeType,
       'emailVerified': emailVerified,
+      'isAccountDeactivated': isAccountDeactivated,
     };
   }
 }
