@@ -18,7 +18,10 @@ import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../backend_email_verification_page.dart';
 
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key});
+  /// Profilden gelirken geç — tam ekran skeleton yerine anında UI.
+  final UserResponseDto? initialUser;
+
+  const SettingsPage({super.key, this.initialUser});
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -34,14 +37,24 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void initState() {
     super.initState();
-    _loadUserData();
+    if (widget.initialUser != null) {
+      _user = widget.initialUser;
+      _isLoading = false;
+      unawaited(_loadUserData(silent: true));
+    } else {
+      _loadUserData();
+    }
   }
 
-  Future<void> _loadUserData() async {
-    setState(() {
-      _isLoading = true;
+  Future<void> _loadUserData({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    } else {
       _errorMessage = null;
-    });
+    }
 
     try {
       final u = FirebaseAuth.instance.currentUser;
@@ -49,11 +62,16 @@ class _SettingsPageState extends State<SettingsPage> {
         unawaited(u.reload().catchError((_) {}));
       }
       final user = await _authService.getMe();
+      if (!mounted) return;
       setState(() {
         _user = user;
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
+      if (silent && _user != null) {
+        return;
+      }
       setState(() {
         _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
         _isLoading = false;

@@ -82,6 +82,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   // --- Friend likers (from friend feed cache) ---
   Map<String, List<String>> _friendLikersMap = {};
 
+  /// [ProductCard] key parçası — ürün detayından dönünce like sayısı tazelensin.
+  final Map<String, int> _productCardResync = {};
+
   // --- Banner collapse state ---
   bool _isBannerCollapsed = false;
 
@@ -537,7 +540,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         itemBuilder: (context, index) {
           final product = products[index];
           return ProductCard(
-            key: ValueKey('banner_${product.id}'),
+            key: ValueKey('banner_${product.id}_${_productCardResync[product.id] ?? 0}'),
             productId: product.id,
             imageUrl: product.imageURL,
             title: product.name,
@@ -553,6 +556,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 context,
                 SlideRightRoute(page: ReviewPage(product: product)),
               );
+              if (mounted) {
+                unawaited(_refreshProductLikeStatus(product.id));
+              }
             },
             onFavoriteTap: () async {
               final messenger = ScaffoldMessenger.of(context);
@@ -644,7 +650,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         itemBuilder: (context, index) {
           final product = _searchResults[index];
           return ProductCard(
-            key: ValueKey('search_${product.id}'),
+            key: ValueKey('search_${product.id}_${_productCardResync[product.id] ?? 0}'),
             productId: product.id,
             imageUrl: product.imageURL,
             title: product.name,
@@ -660,6 +666,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 context,
                 SlideRightRoute(page: ReviewPage(product: product)),
               );
+              if (mounted) {
+                unawaited(_refreshProductLikeStatus(product.id));
+              }
             },
             onFavoriteTap: () {},
           );
@@ -705,7 +714,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           itemBuilder: (context, index) {
             final product = _filteredProducts[index];
             return ProductCard(
-              key: ValueKey('product_${product.id}_${product.averageRating}'),
+              key: ValueKey('pc_${product.id}_${_productCardResync[product.id] ?? 0}'),
               productId: product.id,
               imageUrl: product.imageURL,
               title: product.name,
@@ -717,19 +726,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               loadReviewCount: true,
               friendAvatarUrls: _friendLikersMap[product.id] ?? const [],
               onTap: () async {
-                final updatedProduct = await Navigator.push<ProductDto>(
+                await Navigator.push<ProductDto>(
                   context,
                   SlideRightRoute(page: ReviewPage(product: product)),
                 );
-                if (updatedProduct != null) {
-                  final filteredIndex =
-                      _filteredProducts.indexWhere((p) => p.id == updatedProduct.id);
-                  if (filteredIndex != -1) {
-                    setState(() {
-                      _filteredProducts[filteredIndex] = updatedProduct;
-                    });
-                  }
-                } else {
+                if (mounted) {
                   await _refreshProductLikeStatus(product.id);
                 }
               },
@@ -1232,27 +1233,43 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     );
   }
 
-  /// Product'ın like durumunu ve rating'ini backend'den yeniden çeker
+  /// Product'ın like durumunu ve rating'ini backend'den yeniden çeker; grid + top picks güncellenir.
   Future<void> _refreshProductLikeStatus(String productId) async {
     try {
       final token = await _sessionHelper.getTokenAndSetHeader();
       if (token == null) return;
 
-      // Product'ı tamamen yeniden yükle (rating ve like durumu ile)
       final updatedProduct = await _productRepository.getProductById(
         productId,
         firebaseIdToken: token,
         bypassCache: true,
       );
 
-      final filteredIndex = _filteredProducts.indexWhere(
-        (p) => p.id == productId,
-      );
-      if (filteredIndex != -1) {
-        setState(() {
-          _filteredProducts[filteredIndex] = updatedProduct;
-        });
-      }
+      if (!mounted) return;
+      invalidateProductCardSocialCaches(productId);
+      setState(() {
+        _productCardResync[productId] = (_productCardResync[productId] ?? 0) + 1;
+
+        final fi = _filteredProducts.indexWhere((p) => p.id == productId);
+        if (fi != -1) {
+          _filteredProducts[fi] = updatedProduct;
+        }
+
+        for (final tab in _TopPicksTab.values) {
+          final list = _topPicksByTab[tab]!;
+          final i = list.indexWhere((p) => p.id == productId);
+          if (i != -1) {
+            final next = List<ProductDto>.from(list);
+            next[i] = updatedProduct;
+            _topPicksByTab[tab] = next;
+          }
+        }
+
+        final si = _searchResults.indexWhere((p) => p.id == productId);
+        if (si != -1) {
+          _searchResults[si] = updatedProduct;
+        }
+      });
     } catch (_) {}
   }
 

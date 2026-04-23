@@ -14,6 +14,8 @@ import '../../../core/utils/load_profile_image_bytes.dart';
 import '../../../core/widgets/main_bottom_nav_items.dart';
 import '../../../features/activity/data/friends_feed_activity_mapper.dart';
 import '../../../features/activity/data/friends_feed_repository.dart';
+import '../data/repositories/interaction_repository.dart';
+import '../../../core/utils/session_helper.dart';
 import '../../../features/activity/domain/activity_models.dart';
 import '../../../features/activity/domain/activity_type.dart';
 import '../../../features/activity/presentation/widgets/activity_feed_row.dart';
@@ -32,6 +34,9 @@ class FriendFeedPage extends StatefulWidget {
 
 class _FriendFeedPageState extends State<FriendFeedPage> {
   final FriendsFeedRepository _repository = FriendsFeedRepository();
+  final InteractionRepository _interactions = InteractionRepository();
+  final SessionHelper _sessionHelper = SessionHelper();
+  final Set<String> _followingIds = {};
   final List<ActivityItem> _items = [];
 
   int _page = 0;
@@ -60,6 +65,7 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
       _totalPages = warm.totalPages;
       _loadingFirst = false;
       _prefetchItemVisuals(_items);
+      unawaited(_syncFollowingForCurrentItems());
       unawaited(_loadFirst(background: true));
     } else {
       unawaited(_loadFirst());
@@ -68,6 +74,24 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
 
   @override
   void dispose() => super.dispose();
+
+  Future<void> _syncFollowingForCurrentItems() async {
+    final token = await _sessionHelper.ensureSession();
+    if (token == null) return;
+    final ids = _items.map((e) => e.user.id).where((id) => id.isNotEmpty).toSet();
+    if (ids.isEmpty) return;
+    for (final id in ids) {
+      try {
+        final f = await _interactions.isFollowing(token, id);
+        if (f) {
+          _followingIds.add(id);
+        } else {
+          _followingIds.remove(id);
+        }
+      } catch (_) {}
+    }
+    if (mounted) setState(() {});
+  }
 
   void _prefetchItemVisuals(Iterable<ActivityItem> items) {
     for (final item in items) {
@@ -115,6 +139,7 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
         totalPages: _totalPages,
       );
       _prefetchItemVisuals(_items);
+      await _syncFollowingForCurrentItems();
     } catch (e) {
       if (background && _items.isNotEmpty) return;
       if (!mounted) return;
@@ -141,6 +166,7 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
         totalPages: _totalPages,
       );
       _prefetchItemVisuals(_items);
+      await _syncFollowingForCurrentItems();
     } catch (_) {
       // best effort pagination
     } finally {
@@ -178,6 +204,23 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
       },
       items: MainBottomNavItems.barItems,
     );
+  }
+
+  Future<void> _toggleFollow(String userId) async {
+    if (userId.isEmpty) return;
+    final token = await _sessionHelper.ensureSession();
+    if (token == null) return;
+    try {
+      final following = await _interactions.toggleFollow(token, userId);
+      if (!mounted) return;
+      setState(() {
+        if (following) {
+          _followingIds.add(userId);
+        } else {
+          _followingIds.remove(userId);
+        }
+      });
+    } catch (_) {}
   }
 
   Future<void> _openItem(ActivityItem item) async {
@@ -352,8 +395,8 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
               child: ActivityFeedRow(
                 key: ValueKey('row_${item.id}'),
                 item: item,
-                following: false,
-                onToggleFollow: () {},
+                following: _followingIds.contains(item.user.id),
+                onToggleFollow: () => _toggleFollow(item.user.id),
                 onOpen: () => _openItem(item),
                 onUserTap: () {
                   if (item.user.id.isEmpty) return;

@@ -788,12 +788,15 @@ class _ProfilePageState extends State<ProfilePage>
             icon: const Icon(Icons.settings),
             color: AppColors.primary,
             onPressed: () async {
-              final result = await Navigator.push(
+              final result = await Navigator.push<bool>(
                 context,
-                MaterialPageRoute(builder: (_) => const SettingsPage()),
+                MaterialPageRoute(
+                  builder: (_) => SettingsPage(initialUser: _user),
+                ),
               );
-              if (result == true || mounted) {
-                _loadUserData();
+              if (!mounted) return;
+              if (result == true) {
+                unawaited(_loadUserData(background: true));
               }
             },
           ),

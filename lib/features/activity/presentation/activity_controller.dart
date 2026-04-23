@@ -163,7 +163,7 @@ class ActivityController extends ChangeNotifier {
     if (token == null) return;
 
     final ids = _items
-        .where((e) => e.type == ActivityType.follow && e.user.id.isNotEmpty)
+        .where((e) => e.user.id.isNotEmpty)
         .map((e) => e.user.id)
         .toSet()
         .toList();

@@ -18,6 +18,10 @@ class _ReviewCountCache {
   static void set(String productId, int count) {
     _cache[productId] = count;
   }
+
+  static void remove(String productId) {
+    _cache.remove(productId);
+  }
 }
 
 class _LikeCountCache {
@@ -27,6 +31,10 @@ class _LikeCountCache {
 
   static void set(String productId, int count) {
     _cache[productId] = count;
+  }
+
+  static void remove(String productId) {
+    _cache.remove(productId);
   }
 }
 
@@ -398,4 +406,11 @@ class _FriendAvatarStack extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Call when like/review counts may have changed off-card (e.g. from [ReviewPage]).
+void invalidateProductCardSocialCaches(String productId) {
+  if (productId.isEmpty) return;
+  _ReviewCountCache.remove(productId);
+  _LikeCountCache.remove(productId);
 }

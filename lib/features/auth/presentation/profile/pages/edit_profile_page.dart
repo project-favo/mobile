@@ -8,6 +8,7 @@ import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/widgets/app_input.dart';
 import '../../../../../core/utils/error_handler.dart';
+import '../../../../../core/utils/resolve_media_url.dart';
 import '../../../../auth/data/services/auth_service.dart';
 import '../../../../auth/data/models/user_response_dto.dart';
 import '../../../../auth/data/models/user_update_request_dto.dart';
@@ -36,7 +37,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
   String? _updateError; // Backend'den gelen update error
   final ImagePicker _imagePicker = ImagePicker();
   XFile? _selectedProfilePhoto;
-  Uint8List? _currentProfilePhotoBytes; // Backend'den gelen profil fotoğrafı
+  Uint8List? _currentProfilePhotoBytes;
+  /// Kullanıcı "Remove Photo" dediğinde true; kayıtta sunucuya clear gider.
+  bool _wantsToRemovePhoto = false;
 
   @override
   void initState() {
@@ -58,15 +61,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
         }
       }
     }
-    // Backend'den gelen profil fotoğrafını decode et
-    if (widget.user.profilePhotoData != null && widget.user.profilePhotoData!.isNotEmpty) {
-      try {
-        _currentProfilePhotoBytes = base64Decode(widget.user.profilePhotoData!);
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint('Profile photo decode error: $e');
-        }
-      }
+    // Base64 data (data URI olabilir) — decodeProfilePhotoBytes ile
+    final fromData = decodeProfilePhotoBytes(widget.user.profilePhotoData);
+    if (fromData != null && fromData.isNotEmpty) {
+      _currentProfilePhotoBytes = fromData;
     }
   }
 
@@ -91,6 +89,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
       if (image != null) {
         setState(() {
           _selectedProfilePhoto = image;
+          _wantsToRemovePhoto = false;
         });
       }
     } catch (e) {
@@ -132,7 +131,12 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 _pickProfilePhoto(ImageSource.camera);
               },
             ),
-            if (_selectedProfilePhoto != null || _currentProfilePhotoBytes != null)
+            if (_selectedProfilePhoto != null ||
+                _currentProfilePhotoBytes != null ||
+                (widget.user.profileImageUrl != null &&
+                    widget.user.profileImageUrl!.trim().isNotEmpty) ||
+                (widget.user.profilePhotoData != null &&
+                    widget.user.profilePhotoData!.trim().isNotEmpty))
               ListTile(
                 leading: const Icon(Icons.delete, color: AppColors.error),
                 title: const Text('Remove Photo'),
@@ -141,6 +145,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   setState(() {
                     _selectedProfilePhoto = null;
                     _currentProfilePhotoBytes = null;
+                    _wantsToRemovePhoto = true;
                   });
                 },
               ),
@@ -219,19 +224,18 @@ class _EditProfilePageState extends State<EditProfilePage> {
       // Username değiştiyse kontrol et
       final newUsername = _userNameController.text.trim();
       
-      // Profil fotoğrafını base64'e çevir
       String? profilePhotoBase64;
       String? profilePhotoMimeType;
-      
-      if (_selectedProfilePhoto != null) {
+      final bool clearPhoto = _wantsToRemovePhoto;
+
+      if (clearPhoto) {
+        profilePhotoBase64 = null;
+        profilePhotoMimeType = null;
+      } else if (_selectedProfilePhoto != null) {
         profilePhotoBase64 = await _convertImageToBase64();
         profilePhotoMimeType = _selectedProfilePhoto!.mimeType ?? 'image/jpeg';
-      } else if (_currentProfilePhotoBytes == null && widget.user.profilePhotoData != null) {
-        // Fotoğraf silinmişse, boş string gönder (backend'e null göndermek için)
-        // Backend'e null göndermek için field'ı göndermeyiz
       }
 
-      // Update request - tüm alanları gönder (backend partial update destekliyor)
       final updateRequest = UserUpdateRequestDto(
         userName: newUsername,
         name: _nameController.text.trim(),
@@ -239,6 +243,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
         birthdate: _birthdateController.text.trim(),
         profilePhotoBase64: profilePhotoBase64,
         profilePhotoMimeType: profilePhotoMimeType,
+        clearProfilePhoto: clearPhoto,
       );
 
       await _authService.updateMe(updateRequest);
@@ -337,29 +342,52 @@ class _EditProfilePageState extends State<EditProfilePage> {
                         ),
                         color: AppColors.surface,
                       ),
-                      child: _selectedProfilePhoto != null
-                          ? ClipOval(
-                              child: Image.file(
-                                File(_selectedProfilePhoto!.path),
-                                width: 120,
-                                height: 120,
-                                fit: BoxFit.cover,
-                              ),
+                      child: _wantsToRemovePhoto
+                          ? const Icon(
+                              Icons.person_outline_rounded,
+                              size: 80,
+                              color: AppColors.primary,
                             )
-                          : _currentProfilePhotoBytes != null
+                          : _selectedProfilePhoto != null
                               ? ClipOval(
-                                  child: Image.memory(
-                                    _currentProfilePhotoBytes!,
+                                  child: Image.file(
+                                    File(_selectedProfilePhoto!.path),
                                     width: 120,
                                     height: 120,
                                     fit: BoxFit.cover,
                                   ),
                                 )
-                              : const Icon(
-                                  Icons.person_outline_rounded,
-                                  size: 80,
-                                  color: AppColors.primary,
-                                ),
+                              : _currentProfilePhotoBytes != null
+                                  ? ClipOval(
+                                      child: Image.memory(
+                                        _currentProfilePhotoBytes!,
+                                        width: 120,
+                                        height: 120,
+                                        fit: BoxFit.cover,
+                                      ),
+                                    )
+                                  : (resolveMediaUrl(widget.user.profileImageUrl) !=
+                                          null
+                                      ? ClipOval(
+                                          child: Image.network(
+                                            resolveMediaUrl(
+                                                    widget.user.profileImageUrl)!,
+                                            width: 120,
+                                            height: 120,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (_, __, ___) =>
+                                                const Icon(
+                                              Icons.person_outline_rounded,
+                                              size: 80,
+                                              color: AppColors.primary,
+                                            ),
+                                          ),
+                                        )
+                                      : const Icon(
+                                          Icons.person_outline_rounded,
+                                          size: 80,
+                                          color: AppColors.primary,
+                                        )),
                     ),
                     Positioned(
                       bottom: 0,

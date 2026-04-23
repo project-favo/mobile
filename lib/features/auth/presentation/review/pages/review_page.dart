@@ -699,10 +699,15 @@ class _ReviewPageState extends State<ReviewPage> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        automaticallyImplyLeading: false,
         iconTheme: const IconThemeData(color: AppColors.primary),
         centerTitle: false,
         toolbarHeight: 62,
         titleSpacing: 4,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: AppColors.primary),
+          onPressed: () => Navigator.of(context).pop(_currentProduct),
+        ),
         title: Text(
           _currentProduct.name,
           maxLines: 2,
