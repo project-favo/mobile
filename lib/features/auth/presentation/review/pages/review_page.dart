@@ -23,6 +23,7 @@ import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/utils/content_availability_messages.dart';
 import '../../../../../core/utils/content_unavailable_dialog.dart';
 import '../../../../../core/utils/entity_active.dart';
+import '../../../../../core/utils/user_profile_navigation.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/models/review_dto.dart';
 import '../../../data/models/tag_dto.dart';
@@ -35,7 +36,6 @@ import 'add_review_page.dart';
 import 'review_detail_page.dart';
 import 'compare_product_select_page.dart';
 import '../../messages/product_ai_chat_page.dart';
-import '../../profile/pages/user_profile_page.dart';
 import '../review_page_pop_result.dart';
 import '../widgets/review_delete_flow.dart';
 import '../../home_page.dart';
@@ -1548,15 +1548,11 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                           if (_isMyReview(review)) {
                             return;
                           }
-                          Navigator.push(
+                          openUserProfileIfActive(
                             context,
-                            SlideRightRoute(
-                              page: UserProfilePage(
-                                userId: review.ownerId,
-                                userName: review.ownerUserName,
-                                profileImageUrl: review.ownerProfilePhotoUrl,
-                              ),
-                            ),
+                            userId: review.ownerId,
+                            userName: review.ownerUserName,
+                            profileImageUrl: review.ownerProfilePhotoUrl,
                           );
                         },
                         onTap: () async {

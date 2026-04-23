@@ -64,7 +64,8 @@ class NotificationActorDto {
       userName: json['userName']?.toString(),
       profileImageUrl: json['profileImageUrl']?.toString() ?? '',
       isAccountInactive: json['isAccountInactive'] == true ||
-          isUserAccountInactiveInMap(json),
+          isUserAccountInactiveInMap(json) ||
+          isUserSuspendedSignalInMap(json),
     );
   }
 }

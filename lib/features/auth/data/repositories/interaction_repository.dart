@@ -352,37 +352,15 @@ class InteractionRepository {
     }
   }
 
-  static const int _visibleCountPageSize = 100;
-  static const int _visibleCountMaxPages = 100;
-
-  /// Sunucu [getFollowerCount] değil; listeyle aynı filtre (pasif kullanıcılar sayılmaz).
+  /// GET /api/interactions/user/{id}/followers/count — **sunucu** pasif/inactive takipçileri dışlar.
+  /// (Önbellek / eski cevaplar için listede ayrıca [filterVisibleConversationUsers] uygulanır.)
   Future<int> countVisibleFollowers(String userId) async {
-    var total = 0;
-    for (var page = 0; page < _visibleCountMaxPages; page++) {
-      final list = await getFollowers(
-        userId,
-        page: page,
-        size: _visibleCountPageSize,
-      );
-      total += list.length;
-      if (list.length < _visibleCountPageSize) break;
-    }
-    return total;
+    return getFollowerCount(userId);
   }
 
-  /// [countVisibleFollowers] ile aynı mantık (takip edilenler).
+  /// GET /api/interactions/user/{id}/following/count — sunucu filtreli sayım.
   Future<int> countVisibleFollowing(String userId) async {
-    var total = 0;
-    for (var page = 0; page < _visibleCountMaxPages; page++) {
-      final list = await getFollowing(
-        userId,
-        page: page,
-        size: _visibleCountPageSize,
-      );
-      total += list.length;
-      if (list.length < _visibleCountPageSize) break;
-    }
-    return total;
+    return getFollowingCount(userId);
   }
 
   /// Tüm sayfalarda takip edilen kullanıcı id’leri (string); bildirim satırlarında `isFollowing` yükünü N istek yerine 1+ akışa indirir.

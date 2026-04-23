@@ -94,14 +94,68 @@ class TagRepository {
     }
   }
 
-  /// Fetches tag children from GET /api/tags/{id}/children
-  /// Token optional: backend may allow public access
-  Future<TagChildrenResponse> getTagChildren(String tagId, [String? firebaseIdToken]) async {
+  /// GET /api/tags/{id} — yalnızca **aktif** etiket; pasif/ yok → hata
+  Future<TagDto> getTagById(String id, [String? firebaseIdToken]) async {
+    if (id.trim().isEmpty) {
+      throw Exception('Tag id is empty');
+    }
     try {
       if (firebaseIdToken != null) {
         _apiClient.setAuthToken(firebaseIdToken);
       }
-      final response = await _apiClient.dio.get('/api/tags/$tagId/children');
+      final response = await _apiClient.dio.get('/api/tags/${Uri.encodeComponent(id)}');
+      if (response.data is Map) {
+        return TagDto.fromJson(response.data as Map<String, dynamic>);
+      }
+      throw Exception('Invalid tag response');
+    } on DioException catch (e) {
+      if (e.response != null) {
+        final errorData = e.response?.data;
+        final errorMessage = errorData is Map
+            ? (errorData['message'] ?? errorData['error'] ?? 'Tag not found')
+            : errorData?.toString() ?? 'Tag not found';
+        throw Exception(errorMessage);
+      }
+      throw Exception('Network error: ${e.message}');
+    }
+  }
+
+  /// GET /api/tags/path?categoryPath=... — yalnızca **aktif** ağaç; pasif yol → 404 vb.
+  Future<TagDto?> getTagByCategoryPath(
+    String categoryPath, [
+    String? firebaseIdToken,
+  ]) async {
+    final q = categoryPath.trim();
+    if (q.isEmpty) return null;
+    try {
+      if (firebaseIdToken != null) {
+        _apiClient.setAuthToken(firebaseIdToken);
+      }
+      final response = await _apiClient.dio.get(
+        '/api/tags/path',
+        queryParameters: {'categoryPath': q},
+      );
+      if (response.data is Map) {
+        return TagDto.fromJson(response.data as Map<String, dynamic>);
+      }
+      return null;
+    } on DioException {
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// GET /api/tags/parent/{parentId}/children — parent **aktif** değilse sonuç yok; çocuklar aktif.
+  /// Token optional: backend may allow public access
+  Future<TagChildrenResponse> getTagChildren(String parentId, [String? firebaseIdToken]) async {
+    try {
+      if (firebaseIdToken != null) {
+        _apiClient.setAuthToken(firebaseIdToken);
+      }
+      final response = await _apiClient.dio.get(
+        '/api/tags/parent/${Uri.encodeComponent(parentId)}/children',
+      );
       
       if (response.data is Map) {
         return TagChildrenResponse.fromJson(response.data as Map<String, dynamic>);

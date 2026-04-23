@@ -9,13 +9,13 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/session_helper.dart';
+import '../../../core/utils/user_profile_navigation.dart';
 import '../../../core/widgets/main_bottom_nav_items.dart';
 import '../domain/activity_models.dart';
 import '../domain/activity_type.dart';
 import '../../auth/presentation/home_page.dart';
 import '../../auth/presentation/friend_feed_page.dart';
 import '../../auth/presentation/profile/pages/profile_page.dart';
-import '../../auth/presentation/profile/pages/user_profile_page.dart';
 import '../../auth/presentation/review/pages/review_page.dart';
 import '../../auth/data/repositories/interaction_repository.dart';
 import '../../auth/data/services/auth_service.dart';
@@ -214,15 +214,11 @@ class _ActivityPageState extends State<ActivityPage>
     switch (item.type) {
       case ActivityType.follow:
         if (item.user.id.isEmpty) return;
-        Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder:
-                (_) => UserProfilePage(
-                  userId: item.user.id,
-                  userName: item.user.username,
-                  profileImageUrl: item.user.avatarUrl,
-                ),
-          ),
+        openUserProfileIfActive(
+          context,
+          userId: item.user.id,
+          userName: item.user.username,
+          profileImageUrl: item.user.avatarUrl,
         );
         break;
       case ActivityType.like:
@@ -257,14 +253,11 @@ class _ActivityPageState extends State<ActivityPage>
 
   void _onUserTap(BuildContext context, ActivityItem item) {
     if (item.user.id.isEmpty) return;
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => UserProfilePage(
-          userId: item.user.id,
-          userName: item.user.username,
-          profileImageUrl: item.user.avatarUrl,
-        ),
-      ),
+    openUserProfileIfActive(
+      context,
+      userId: item.user.id,
+      userName: item.user.username,
+      profileImageUrl: item.user.avatarUrl,
     );
   }
 

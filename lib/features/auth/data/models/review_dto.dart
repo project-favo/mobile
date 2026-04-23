@@ -1,5 +1,6 @@
 import '../../../../core/utils/product_listing_flags.dart';
 import '../../../../core/utils/review_visibility_flags.dart';
+import '../../../../core/utils/user_account_flags.dart';
 
 class ReviewDto {
   final String id;
@@ -65,6 +66,11 @@ class ReviewDto {
   }
 
   factory ReviewDto.fromJson(Map<String, dynamic> json) {
+    var ownerInactive = false;
+    final o = json['owner'];
+    if (o is Map<String, dynamic>) {
+      ownerInactive = isUserAccountInactiveInMap(o) || isUserSuspendedSignalInMap(o);
+    }
     return ReviewDto(
       id: json['id']?.toString() ?? '',
       title: json['title']?.toString() ?? '',
@@ -84,7 +90,8 @@ class ReviewDto {
       likeCount: (json['likeCount'] as num?)?.toInt() ?? 0,
       isLikedByCurrentUser: json['isLikedByCurrentUser'] as bool? ?? false,
       isProductNotListed: _productNotListedFromJson(json),
-      isReviewInactive: isReviewDataInactiveOrHiddenInMap(json),
+      isReviewInactive:
+          isReviewDataInactiveOrHiddenInMap(json) || ownerInactive,
     );
   }
 

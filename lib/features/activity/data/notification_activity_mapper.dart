@@ -120,5 +120,6 @@ ActivityItem activityItemFromNotification(NotificationDto n) {
     timestamp: n.createdAt ?? DateTime.now(),
     isRead: !n.isUnread,
     lineText: lineText,
+    isActorInactive: n.actor != null && n.actor!.isAccountInactive,
   );
 }

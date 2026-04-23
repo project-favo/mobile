@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import '../../../../core/config/api_config.dart';
 import '../../../../core/network/api_client.dart';
@@ -7,8 +10,78 @@ import '../models/user_response_dto.dart';
 import '../models/user_update_request_dto.dart';
 import '../models/register_request_dto.dart';
 
+/// [GET /api/users/{userId}/profile-image] — pasif kullanıcı **404**; `/api/users` JSON’undaki
+/// URL sızıntısını baskılar (görüntü yalnız bu uçtan kabul edilir).
+class UserProfileImageFetch {
+  const UserProfileImageFetch._({
+    this.memoryBytes,
+    this.imageUrl,
+    this.isNotFound = false,
+  });
+
+  const UserProfileImageFetch.notFound() : this._(isNotFound: true);
+
+  /// Ham görüntü baytları (image/* 200 cevabı).
+  factory UserProfileImageFetch.fromBytes(Uint8List b) {
+    if (b.isEmpty) return const UserProfileImageFetch.notFound();
+    return UserProfileImageFetch._(memoryBytes: b);
+  }
+
+  final Uint8List? memoryBytes;
+  final String? imageUrl;
+  final bool isNotFound;
+
+  bool get hasImage =>
+      (memoryBytes != null && memoryBytes!.isNotEmpty) ||
+      (imageUrl != null && imageUrl!.trim().isNotEmpty);
+}
+
 class AuthRepository {
   final ApiClient _apiClient = ApiClient();
+
+  /// “Ben” endpoint’leri: backend bazen sadece `isActive: false` ile hesap kapatma gönderir.
+  /// [getUserById] için **kullanma** (yanıltıcı `isActive` diğer kullanıcılarda da gelebiliyor).
+  static UserResponseDto _withAccountDeactivated(UserResponseDto u) {
+    if (u.isAccountDeactivated) return u;
+    return UserResponseDto(
+      id: u.id,
+      email: u.email,
+      userName: u.userName,
+      name: u.name,
+      surname: u.surname,
+      birthdate: u.birthdate,
+      profileImageUrl: u.profileImageUrl,
+      profilePhotoData: u.profilePhotoData,
+      profilePhotoMimeType: u.profilePhotoMimeType,
+      emailVerified: u.emailVerified,
+      isAccountInactive: u.isAccountInactive,
+      isAccountDeactivated: true,
+      isSuspended: u.isSuspended,
+    );
+  }
+
+  static UserResponseDto _userFromJsonForSelfEndpoint(Object? raw) {
+    if (raw is! Map) {
+      return UserResponseDto(
+        id: '',
+        email: '',
+        userName: '',
+      );
+    }
+    final m = Map<String, dynamic>.from(raw);
+    final u = UserResponseDto.fromJson(m);
+    if (u.isAccountDeactivated) return u;
+    if (m['isAccountDeactivated'] == true) {
+      return _withAccountDeactivated(u);
+    }
+    if (m['isActive'] is bool && (m['isActive'] as bool) == false) {
+      return _withAccountDeactivated(u);
+    }
+    if (m['active'] is bool && (m['active'] as bool) == false) {
+      return _withAccountDeactivated(u);
+    }
+    return u;
+  }
 
   /// Backend'e login isteği gönderir
   /// Firebase idToken Authorization header'ında Bearer token olarak gönderilir
@@ -18,7 +91,7 @@ class AuthRepository {
       final response = await _apiClient.dio.post(
         ApiConfig.loginPath,
       );
-      return UserResponseDto.fromJson(response.data);
+      return _userFromJsonForSelfEndpoint(response.data);
     } on DioException {
       rethrow;
     }
@@ -46,7 +119,7 @@ class AuthRepository {
       final raw = response.data;
       try {
         if (raw is Map) {
-          return UserResponseDto.fromJson(Map<String, dynamic>.from(raw));
+          return _userFromJsonForSelfEndpoint(Map<String, dynamic>.from(raw));
         }
       } catch (_) {}
       return UserResponseDto(
@@ -90,8 +163,9 @@ class AuthRepository {
     }
   }
 
-  /// Başka kullanıcının profili. Tüm uçlar 404 veya 401 ise [TargetUserNotAvailableException].
-  /// Ağ hatası / path yoksa null.
+  /// Başka kullanıcının profili. Tüm uçlar **404** (yok) ise [TargetUserNotAvailableException].
+  /// 401 burada sayılmaz: çoğu backend’de yetki/yol farkı “kullanıcı yok” değildir; tüm profiller 401
+  /// alınca yanlışlıkla herkes [TargetUserNotAvailableException] oluyordu.
   Future<UserResponseDto?> getUserById(
     String firebaseIdToken,
     String userId,
@@ -109,13 +183,14 @@ class AuthRepository {
           final response = await _apiClient.dio.get(path);
           final data = response.data;
           if (data is Map) {
+            // Başka kullanıcı: [isActive] yorumlama yok; sadece [UserResponseDto.fromJson].
             return UserResponseDto.fromJson(
               Map<String, dynamic>.from(data),
             );
           }
         } on DioException catch (e) {
           final c = e.response?.statusCode;
-          if (c == 404 || c == 401) {
+          if (c == 404 || c == 410) {
             notFoundHits++;
           }
           continue;
@@ -130,19 +205,84 @@ class AuthRepository {
     return null;
   }
 
+  /// [GET /api/users/{userId}/profile-image] — inactive kullanıcı **404/410**; yalnızca public görünür.
+  Future<UserProfileImageFetch?> fetchUserProfileImage(
+    String firebaseIdToken,
+    String userId,
+  ) async {
+    final id = userId.trim();
+    if (id.isEmpty) return null;
+    try {
+      _apiClient.setAuthToken(firebaseIdToken);
+      final r = await _apiClient.dio.get<dynamic>(
+        '/api/users/${Uri.encodeComponent(id)}/profile-image',
+        options: Options(
+          responseType: ResponseType.bytes,
+          validateStatus: (c) => c == 200 || c == 404 || c == 410,
+        ),
+      );
+      final code = r.statusCode;
+      if (code == 404 || code == 410) {
+        return const UserProfileImageFetch.notFound();
+      }
+      if (code != 200) return null;
+      final data = r.data;
+      if (data == null) return null;
+      final raw = data is List<int> ? (data is Uint8List ? data : Uint8List.fromList(data)) : null;
+      if (raw == null || raw.isEmpty) return const UserProfileImageFetch.notFound();
+      final ct = r.headers.value('content-type')?.toLowerCase() ?? '';
+      if (ct.contains('json')) {
+        try {
+          final s = utf8.decode(raw);
+          final decoded = jsonDecode(s);
+          if (decoded is Map<String, dynamic>) {
+            final u = (decoded['url'] ?? decoded['imageUrl'] ?? decoded['profileImageUrl'])
+                ?.toString()
+                .trim();
+            if (u != null && u.isNotEmpty) {
+              return UserProfileImageFetch._(imageUrl: u);
+            }
+          }
+        } catch (_) {}
+        return const UserProfileImageFetch.notFound();
+      }
+      if (ct.contains('image/')) {
+        return UserProfileImageFetch.fromBytes(raw);
+      }
+      if (raw.length >= 2 && raw[0] == 0xFF && raw[1] == 0xD8) {
+        return UserProfileImageFetch.fromBytes(raw);
+      }
+      if (raw.length >= 3 &&
+          raw[0] == 0x89 &&
+          raw[1] == 0x50 &&
+          raw[2] == 0x4E) {
+        return UserProfileImageFetch.fromBytes(raw);
+      }
+      return const UserProfileImageFetch.notFound();
+    } on DioException catch (e) {
+      final c = e.response?.statusCode;
+      if (c == 404 || c == 410) {
+        return const UserProfileImageFetch.notFound();
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Me endpoint - Authenticated user bilgilerini getirir
   Future<UserResponseDto> getMe(String firebaseIdToken) async {
     try {
       _apiClient.setAuthToken(firebaseIdToken);
       final response = await _apiClient.dio.get(ApiConfig.mePath);
-      return UserResponseDto.fromJson(response.data);
+      return _userFromJsonForSelfEndpoint(response.data);
     } on DioException catch (e) {
       final data = e.response?.data;
       if (data is Map) {
         final m = Map<String, dynamic>.from(data);
         if (m['id'] != null || m['userName'] != null || m['email'] != null) {
           try {
-            return UserResponseDto.fromJson(m);
+            return _userFromJsonForSelfEndpoint(m);
           } catch (_) {}
         }
       }
@@ -173,7 +313,7 @@ class AuthRepository {
         ApiConfig.mePath,
         data: request.toJson(),
       );
-      return UserResponseDto.fromJson(response.data);
+      return _userFromJsonForSelfEndpoint(response.data);
     } on DioException {
       rethrow;
     }
@@ -191,7 +331,7 @@ class AuthRepository {
         ApiConfig.verifyEmailPath,
         data: {'code': normalized},
       );
-      return UserResponseDto.fromJson(response.data);
+      return _userFromJsonForSelfEndpoint(response.data);
     } on DioException catch (e) {
       final errorData = e.response?.data;
       final errorCode = errorData is Map

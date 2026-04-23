@@ -37,8 +37,9 @@ List<NotificationDto> filterVisibleNotifications(
 ) =>
     list.where(isNotificationListEntryVisible).toList();
 
-/// Arkadaş akışı: pasif actor veya vitrin dışı ürüne atıf taşıyan satırlar.
+/// Arkadaş akışı: deaktif/askı actor veya vitrin dışı ürüne atıf.
 bool isFriendsFeedItemForUi(FriendsFeedItemDto e) {
+  if (e.isActorAccountDeactivated) return false;
   if (e.isActorUserInactive) return false;
   final pid = e.productId?.trim() ?? '';
   if (pid.isEmpty) return true;

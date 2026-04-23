@@ -18,6 +18,13 @@ class UserResponseDto {
   /// Backend hesabı kapatıldıysa true (feed/önbellekte hareket göstermemek için).
   final bool isAccountDeactivated;
 
+  /// Askı sinyali — [isUserSuspendedSignalInMap]; `isSuspended` alanı ve status varyantları.
+  final bool isSuspended;
+
+  /// Başka kullanıcının profili: açık askı, deaktif, hesap dışı — `isActive` kullanılmaz; açık JSON bayrakları.
+  bool get isProfileViewBlocked =>
+      isSuspended || isAccountDeactivated || isAccountInactive;
+
   UserResponseDto({
     required this.id,
     required this.email,
@@ -31,6 +38,7 @@ class UserResponseDto {
     this.emailVerified,
     this.isAccountInactive = false,
     this.isAccountDeactivated = false,
+    this.isSuspended = false,
   });
 
   /// Backend: null → legacy (verified), false → not verified, true → verified
@@ -59,6 +67,7 @@ class UserResponseDto {
       emailVerified: emailVerified,
       isAccountInactive: isAccountInactive,
       isAccountDeactivated: isAccountDeactivated,
+      isSuspended: isSuspended,
     );
   }
 
@@ -77,6 +86,7 @@ class UserResponseDto {
       emailVerified: emailVerified,
       isAccountInactive: isAccountInactive,
       isAccountDeactivated: isAccountDeactivated,
+      isSuspended: isSuspended,
     );
   }
 
@@ -98,6 +108,7 @@ class UserResponseDto {
       emailVerified: emailVerified,
       isAccountInactive: isAccountInactive,
       isAccountDeactivated: isAccountDeactivated,
+      isSuspended: isSuspended,
     );
   }
 
@@ -129,20 +140,12 @@ class UserResponseDto {
     return '';
   }
 
+  /// Oturum kapat / profil: [isActive] hariç — [AuthRepository] getMe’de ayrıca eklenir.
   static bool _accountDeactivatedFromMap(Map<String, dynamic> m) {
     final st = (m['status'] ?? m['accountStatus'] ?? '')
         .toString()
         .toLowerCase();
-    if (st == 'deactivated' || st == 'inactive' || st == 'suspended') {
-      return true;
-    }
-    if (m['active'] is bool && (m['active'] as bool) == false) {
-      return true;
-    }
-    if (m['isActive'] is bool && (m['isActive'] as bool) == false) {
-      return true;
-    }
-    if (m['enabled'] is bool && (m['enabled'] as bool) == false) {
+    if (st == 'deactivated' || st == 'suspended' || st == 'closed') {
       return true;
     }
     return false;
@@ -216,6 +219,7 @@ class UserResponseDto {
       isAccountInactive: inactive,
       isAccountDeactivated:
           (m['isAccountDeactivated'] == true) || _accountDeactivatedFromMap(m),
+      isSuspended: isUserSuspendedSignalInMap(m),
     );
   }
 
@@ -233,6 +237,7 @@ class UserResponseDto {
       'emailVerified': emailVerified,
       'isAccountInactive': isAccountInactive,
       'isAccountDeactivated': isAccountDeactivated,
+      'isSuspended': isSuspended,
     };
   }
 }

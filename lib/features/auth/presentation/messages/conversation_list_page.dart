@@ -8,6 +8,7 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/utils/entity_active.dart';
 import '../../../../core/utils/app_datetime.dart';
 import '../../../../core/utils/error_handler.dart';
+import '../../../../core/utils/exceptions.dart';
 import '../../../../core/utils/session_helper.dart';
 import '../../../../core/utils/resolve_media_url.dart';
 import '../../../../core/widgets/skeleton_loader.dart';
@@ -44,9 +45,9 @@ class _ConversationListPageState extends State<ConversationListPage> {
     super.initState();
     _loadConversations();
     MessageUnreadService.instance.attach();
-    // Her 5 saniyede sessizce tazele — yeni mesaj gelince liste güncellenir
-    _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-      _silentRefresh();
+    // 5 sn: pasif/deaktif konuşmaları düşür + yeni mesaj
+    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      unawaited(_silentRefresh());
     });
   }
 
@@ -61,13 +62,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
     try {
       final page = await _messageRepository.getConversations(page: 0, size: 20);
       if (!mounted) return;
-      final sorted = [...page.content]..sort((a, b) {
-          final da = parseBackendDateTimeToLocal(a.lastMessageAt) ??
-              DateTime.fromMillisecondsSinceEpoch(0);
-          final db = parseBackendDateTimeToLocal(b.lastMessageAt) ??
-              DateTime.fromMillisecondsSinceEpoch(0);
-          return db.compareTo(da);
-        });
+      final sorted = _filterAndSort(page.content);
       // Sadece gerçek değişiklik varsa rebuild et
       bool changed = sorted.length != _conversations.length;
       if (!changed) {
@@ -120,7 +115,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
       }
       final page = await _messageRepository.getConversations(page: 0, size: 20);
       if (!mounted) return;
-      final sorted = _sortedConversations(page.content);
+      final sorted = _filterAndSort(page.content);
       ConversationListCache.instance.remember(sorted);
       setState(() {
         _conversations = sorted;
@@ -147,13 +142,17 @@ class _ConversationListPageState extends State<ConversationListPage> {
       });
   }
 
+  List<ConversationDto> _filterAndSort(List<ConversationDto> raw) {
+    return _sortedConversations(filterVisibleConversations(raw));
+  }
+
   Future<void> _refreshConversationsInBackground() async {
     try {
       final token = await _sessionHelper.ensureSession();
       if (token == null) return;
       final page = await _messageRepository.getConversations(page: 0, size: 20);
       if (!mounted) return;
-      final sorted = _sortedConversations(page.content);
+      final sorted = _filterAndSort(page.content);
       ConversationListCache.instance.remember(sorted);
       bool changed = sorted.length != _conversations.length;
       if (!changed) {
@@ -203,8 +202,20 @@ class _ConversationListPageState extends State<ConversationListPage> {
     final fetched = await Future.wait(
       pending.map((e) async {
         try {
-          final u = await _authService.getUserById(e.key.toString());
+          final idStr = e.key.toString();
+          final pix = await _authService.fetchUserProfileImage(idStr);
+          if (pix != null && pix.isNotFound) {
+            return null;
+          }
+          if (pix != null && pix.hasImage) {
+            return MapEntry(
+              e.key,
+              (url: pix.imageUrl, bytes: pix.memoryBytes),
+            );
+          }
+          final u = await _authService.getUserById(idStr);
           if (u == null) return null;
+          if (u.isProfileViewBlocked) return null;
           final bytes = decodeProfilePhotoBytes(u.profilePhotoData);
           final url = u.profileImageUrl?.trim();
           if ((url != null && url.isNotEmpty) ||
@@ -427,6 +438,24 @@ class _ConversationListPageState extends State<ConversationListPage> {
                                   ],
                                 ),
                                 onTap: () async {
+                                  if (!isConversationDtoVisible(c)) {
+                                    unawaited(_loadConversations());
+                                    return;
+                                  }
+                                  try {
+                                    final u = await _authService.getUserById(
+                                      c.otherParticipant.id.toString(),
+                                    );
+                                    if (!mounted) return;
+                                    if (u != null && u.isProfileViewBlocked) {
+                                      unawaited(_loadConversations());
+                                      return;
+                                    }
+                                  } on TargetUserNotAvailableException {
+                                    if (mounted) unawaited(_loadConversations());
+                                    return;
+                                  } catch (_) {}
+                                  if (!mounted) return;
                                   final result = await Navigator.push(
                                     context,
                                     MaterialPageRoute(

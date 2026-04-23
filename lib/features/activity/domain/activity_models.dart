@@ -36,6 +36,7 @@ class ActivityItem {
     required this.timestamp,
     this.isRead = false,
     required this.lineText,
+    this.isActorInactive = false,
   });
 
   final String id;
@@ -47,6 +48,9 @@ class ActivityItem {
 
   /// Notification [body] or [title] — shown as returned by the API.
   final String lineText;
+
+  /// Deaktif / askı; profil tıkı açılmaz (önbellekte eski satır kalsa bile).
+  final bool isActorInactive;
 
   ActivityItem copyWith({
     bool? isRead,
@@ -60,6 +64,7 @@ class ActivityItem {
       timestamp: timestamp,
       isRead: isRead ?? this.isRead,
       lineText: lineText ?? this.lineText,
+      isActorInactive: isActorInactive,
     );
   }
 }

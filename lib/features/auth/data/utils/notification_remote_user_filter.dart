@@ -42,7 +42,7 @@ final class RemoteNotificationUserListabilityCache {
     }
     try {
       final u = await auth.getUserById(id.toString());
-      if (u != null && u.isAccountInactive) {
+      if (u != null && u.isProfileViewBlocked) {
         _byUserId[id] = _CacheEntry(false, now.add(_ttlUnlisted));
         return false;
       }
@@ -53,8 +53,8 @@ final class RemoteNotificationUserListabilityCache {
       _byUserId[id] = _CacheEntry(true, now.add(_ttlUnknown));
       return true;
     } on TargetUserNotAvailableException {
-      _byUserId[id] = _CacheEntry(true, now.add(_ttlUnknown));
-      return true;
+      _byUserId[id] = _CacheEntry(false, now.add(_ttlUnlisted));
+      return false;
     } catch (_) {
       return true;
     }

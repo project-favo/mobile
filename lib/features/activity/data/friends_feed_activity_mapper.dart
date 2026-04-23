@@ -1,3 +1,5 @@
+import 'package:favo_mobile/core/utils/entity_active.dart';
+
 import '../domain/activity_models.dart';
 import '../domain/activity_type.dart';
 import 'friends_feed_dto.dart';
@@ -9,12 +11,12 @@ ActivityType activityTypeFromFriendsFeed(String rawType) {
   return ActivityType.review;
 }
 
-/// Kapatılmış hesapların hareketlerini listeden çıkarır.
+/// Deaktif / askı / vitrin dışı satırları listeden çıkarır (üst seviyede ayrıca [getUserById] ile de süzülür).
 List<ActivityItem> activityItemsFromFriendsFeedDtos(
   Iterable<FriendsFeedItemDto> content,
 ) {
   return content
-      .where((e) => !e.isActorAccountDeactivated)
+      .where(isFriendsFeedItemForUi)
       .map(activityItemFromFriendsFeed)
       .toList();
 }
@@ -55,5 +57,6 @@ ActivityItem activityItemFromFriendsFeed(FriendsFeedItemDto e) {
     timestamp: e.createdAt ?? DateTime.now(),
     isRead: true,
     lineText: lineText,
+    isActorInactive: e.isActorAccountDeactivated || e.isActorUserInactive,
   );
 }

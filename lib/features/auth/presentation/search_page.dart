@@ -8,6 +8,7 @@ import '../../../core/cache/following_id_set_cache.dart';
 import '../../../core/cache/search_warm_cache.dart';
 import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/session_helper.dart';
+import '../../../core/utils/user_profile_navigation.dart';
 import '../../../core/utils/entity_active.dart';
 import '../../../core/notifications/notification_realtime_service.dart';
 import '../../../core/widgets/main_bottom_nav_items.dart';
@@ -26,7 +27,6 @@ import '../widgets/product_card.dart';
 import '../../../core/widgets/skeleton_loader.dart';
 import '../../../core/widgets/profile_avatar.dart';
 import 'home_page.dart';
-import 'profile/pages/user_profile_page.dart';
 import 'friend_feed_page.dart';
 import 'profile/pages/profile_page.dart';
 import 'review/pages/review_page.dart';
@@ -522,15 +522,11 @@ class _SearchPageState extends State<SearchPage> {
                   entry: e,
                   onTap: () {
                     if (e.userId.isEmpty) return;
-                    Navigator.push<void>(
+                    openUserProfileIfActive(
                       context,
-                      MaterialPageRoute<void>(
-                        builder: (_) => UserProfilePage(
-                          userId: e.userId,
-                          userName: e.userName,
-                          profileImageUrl: e.profileImageUrl,
-                        ),
-                      ),
+                      userId: e.userId,
+                      userName: e.userName,
+                      profileImageUrl: e.profileImageUrl,
                     );
                   },
                 );
@@ -811,15 +807,11 @@ class _SearchPageState extends State<SearchPage> {
                                   data: t,
                                   onTap: () {
                                     if (t.userId.isEmpty) return;
-                                    Navigator.push<void>(
+                                    openUserProfileIfActive(
                                       context,
-                                      MaterialPageRoute<void>(
-                                        builder: (_) => UserProfilePage(
-                                          userId: t.userId,
-                                          userName: t.userName,
-                                          profileImageUrl: t.profileImageUrl,
-                                        ),
-                                      ),
+                                      userId: t.userId,
+                                      userName: t.userName,
+                                      profileImageUrl: t.profileImageUrl,
                                     );
                                   },
                                 );

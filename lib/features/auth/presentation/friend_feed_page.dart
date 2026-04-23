@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 
 import '../../../core/cache/following_id_set_cache.dart';
 import '../../../core/cache/friend_feed_memory_cache.dart';
-import 'profile/pages/user_profile_page.dart';
 import '../../../core/cache/product_memory_cache.dart';
 import '../data/models/product_dto.dart';
 import '../data/models/tag_dto.dart';
@@ -12,6 +11,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/utils/load_profile_image_bytes.dart';
+import '../../../core/utils/user_profile_navigation.dart';
 import '../../../core/widgets/main_bottom_nav_items.dart';
 import '../../../features/activity/data/friends_feed_activity_mapper.dart';
 import '../../../features/activity/data/friends_feed_repository.dart';
@@ -466,14 +466,11 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
                 onOpen: () => _openItem(item),
                 onUserTap: () {
                   if (item.user.id.isEmpty) return;
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => UserProfilePage(
-                        userId: item.user.id,
-                        userName: item.user.username,
-                        profileImageUrl: item.user.avatarUrl,
-                      ),
-                    ),
+                  openUserProfileIfActive(
+                    context,
+                    userId: item.user.id,
+                    userName: item.user.username,
+                    profileImageUrl: item.user.avatarUrl,
                   );
                 },
               ),

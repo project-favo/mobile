@@ -23,7 +23,7 @@ import '../../../../core/widgets/profile_avatar.dart';
 import '../../../../core/cache/chat_outgoing_user_cache.dart';
 import '../../../../core/cache/current_user_cache.dart';
 import '../../../../core/cache/message_list_cache.dart';
-import '../profile/pages/user_profile_page.dart';
+import '../../../../core/utils/user_profile_navigation.dart';
 
 class ChatDetailPage extends StatefulWidget {
   final ConversationDto conversation;
@@ -253,9 +253,32 @@ class _ChatDetailPageState extends State<ChatDetailPage>
       final u = await _authService.getUserById(op.id.toString());
       if (!mounted) return;
       if (u == null) return;
-      if (u.isAccountInactive) {
+      if (u.isProfileViewBlocked) {
         _exitChatUserUnavailable();
         return;
+      }
+      final pix = await _authService.fetchUserProfileImage(op.id.toString());
+      if (!mounted) return;
+      if (pix != null) {
+        if (pix.isNotFound) {
+          setState(() {
+            _resolvedOtherUrl = null;
+            _resolvedOtherBytes = null;
+          });
+          return;
+        }
+        if (pix.hasImage) {
+          setState(() {
+            if (pix.memoryBytes != null) {
+              _resolvedOtherBytes = pix.memoryBytes;
+              _resolvedOtherUrl = null;
+            } else {
+              _resolvedOtherUrl = pix.imageUrl;
+              _resolvedOtherBytes = null;
+            }
+          });
+          return;
+        }
       }
       if (_otherParticipantHasLoadableVisual(op)) return;
       final bytes = decodeProfilePhotoBytes(u.profilePhotoData);
@@ -542,13 +565,11 @@ class _ChatDetailPageState extends State<ChatDetailPage>
           onTap: () {
             final other = widget.conversation.otherParticipant;
             if (other.id <= 0) return;
-            Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => UserProfilePage(
-                  userId: other.id.toString(),
-                  userName: other.username,
-                ),
-              ),
+            openUserProfileIfActive(
+              context,
+              userId: other.id.toString(),
+              userName: other.username,
+              profileImageUrl: _effectiveOtherUrl,
             );
           },
           child: Row(

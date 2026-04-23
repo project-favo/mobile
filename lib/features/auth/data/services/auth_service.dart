@@ -249,6 +249,19 @@ class AuthService {
     }
   }
 
+  /// [GET /api/users/{userId}/profile-image] — pasif **404**; genel [getUserById] JSON’undaki
+  /// profil URL’si sızıntısını UI’da bununla baskıla.
+  Future<UserProfileImageFetch?> fetchUserProfileImage(String userId) async {
+    final user = _firebaseAuth.currentUser;
+    if (user == null) return null;
+    try {
+      final idToken = await _getFreshIdToken(user);
+      return _authRepository.fetchUserProfileImage(idToken, userId);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Me endpoint - Authenticated user bilgilerini getirir
   ///
   /// `EMAIL_NOT_VERIFIED` dönerse verify tamamlanana kadar [login] çağrılmaz; minimal profil döner.

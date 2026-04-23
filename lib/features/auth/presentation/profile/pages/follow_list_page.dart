@@ -1,15 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
-import '../../../../../core/routes/custom_page_transitions.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
+import '../../../../../core/utils/user_profile_navigation.dart';
 import '../../../data/models/conversation_dto.dart';
 import '../../../data/repositories/interaction_repository.dart';
 import '../../../data/services/auth_service.dart';
-import 'user_profile_page.dart';
-
 class FollowListPage extends StatefulWidget {
   final String userId;
   final String title;
@@ -29,6 +29,7 @@ class FollowListPage extends StatefulWidget {
 class _FollowListPageState extends State<FollowListPage> {
   final InteractionRepository _repo = InteractionRepository();
   final ScrollController _scrollController = ScrollController();
+  Timer? _pollTimer;
 
   List<ConversationUserDto> _users = [];
   bool _isLoading = true;
@@ -43,6 +44,25 @@ class _FollowListPageState extends State<FollowListPage> {
     _resolveMyUserId();
     _loadPage();
     _scrollController.addListener(_onScroll);
+    _pollTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => unawaited(_resyncListSilently()),
+    );
+  }
+
+  /// Poll: iskelet yok, pasif/takip düşer.
+  Future<void> _resyncListSilently() async {
+    if (!mounted) return;
+    if (_isLoading) return;
+    final result = await _fetch(0);
+    if (!mounted) return;
+    setState(() {
+      _users = result;
+      if (result.length < 20) {
+        _hasMore = false;
+        _page = 0;
+      }
+    });
   }
 
   Future<void> _resolveMyUserId() async {
@@ -55,6 +75,7 @@ class _FollowListPageState extends State<FollowListPage> {
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _scrollController.dispose();
     super.dispose();
   }
@@ -169,15 +190,11 @@ class _FollowListPageState extends State<FollowListPage> {
                               my.trim() == user.id.toString().trim()) {
                             return;
                           }
-                          Navigator.push(
+                          openUserProfileIfActive(
                             context,
-                            SlideRightRoute(
-                              page: UserProfilePage(
-                                userId: user.id.toString(),
-                                userName: user.username,
-                                profileImageUrl: user.profilePhotoUrl,
-                              ),
-                            ),
+                            userId: user.id.toString(),
+                            userName: user.username,
+                            profileImageUrl: user.profilePhotoUrl,
                           );
                         },
                       );

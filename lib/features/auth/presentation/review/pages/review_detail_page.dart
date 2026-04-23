@@ -16,6 +16,7 @@ import '../../../../../core/utils/content_availability_messages.dart';
 import '../../../../../core/utils/content_unavailable_dialog.dart';
 import '../../../../../core/utils/app_datetime.dart';
 import '../../../../../core/utils/entity_active.dart';
+import '../../../../../core/utils/user_profile_navigation.dart';
 import '../../../../../core/utils/in_flight_id_lock.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/utils/review_report_storage.dart';
@@ -24,7 +25,6 @@ import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
 import 'review_page.dart';
 import '../../home_page.dart';
-import '../../profile/pages/user_profile_page.dart';
 import '../../../data/models/review_dto.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/repositories/interaction_repository.dart';
@@ -781,15 +781,11 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
     if (_isOwnReview) {
       return;
     }
-    Navigator.push(
+    openUserProfileIfActive(
       context,
-      SlideRightRoute(
-        page: UserProfilePage(
-          userId: _currentReview.ownerId,
-          userName: _currentReview.ownerUserName,
-          profileImageUrl: _currentReview.ownerProfilePhotoUrl,
-        ),
-      ),
+      userId: _currentReview.ownerId,
+      userName: _currentReview.ownerUserName,
+      profileImageUrl: _currentReview.ownerProfilePhotoUrl,
     );
   }
 

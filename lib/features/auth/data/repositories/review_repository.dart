@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/utils/entity_active.dart';
 import '../../../../core/utils/exceptions.dart';
 import '../models/review_dto.dart';
 
@@ -30,9 +31,10 @@ class ReviewRepository {
       final response = await _apiClient.dio.get('/api/reviews/me');
 
       if (response.data is List) {
-        return (response.data as List)
+        final list = (response.data as List)
             .map((json) => ReviewDto.fromJson(json as Map<String, dynamic>))
             .toList();
+        return filterVisibleReviews(list);
       }
 
       return [];
@@ -61,9 +63,10 @@ class ReviewRepository {
       final response = await _apiClient.dio.get('/api/reviews/product/$productId');
       
       if (response.data is List) {
-        return (response.data as List)
+        final list = (response.data as List)
             .map((json) => ReviewDto.fromJson(json as Map<String, dynamic>))
             .toList();
+        return filterVisibleReviews(list);
       }
       
       return [];
@@ -92,9 +95,10 @@ class ReviewRepository {
       final response = await _apiClient.dio.get('/api/reviews/user/$userId');
       
       if (response.data is List) {
-        return (response.data as List)
+        final list = (response.data as List)
             .map((json) => ReviewDto.fromJson(json as Map<String, dynamic>))
             .toList();
+        return filterVisibleReviews(list);
       }
       
       return [];
@@ -121,7 +125,11 @@ class ReviewRepository {
         _apiClient.setAuthToken(firebaseIdToken);
       }
       final response = await _apiClient.dio.get('/api/reviews/$reviewId');
-      return ReviewDto.fromJson(response.data as Map<String, dynamic>);
+      final r = ReviewDto.fromJson(response.data as Map<String, dynamic>);
+      if (!isReviewEntityVisible(r)) {
+        throw ReviewNotAvailableException(reviewId, statusCode: 404);
+      }
+      return r;
     } on DioException catch (e) {
       if (e.response != null) {
         final code = e.response?.statusCode;

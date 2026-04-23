@@ -23,11 +23,13 @@ import '../../../../../core/routes/custom_page_transitions.dart';
 import '../../../../../routes/app_routes.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/models/review_dto.dart';
+import '../../../data/models/user_response_dto.dart';
 import '../../../data/models/tag_dto.dart';
 import '../../../data/models/conversation_dto.dart';
 import '../../../data/repositories/interaction_repository.dart';
 import '../../../data/repositories/product_repository.dart';
 import '../../../data/repositories/review_repository.dart';
+import '../../../data/repositories/auth_repository.dart';
 import '../../../data/services/auth_service.dart';
 import '../../messages/chat_detail_page.dart';
 import '../../review/pages/review_detail_page.dart';
@@ -39,12 +41,17 @@ class UserProfilePage extends StatefulWidget {
   final String userId;
   final String userName;
   final String? profileImageUrl;
+  /// [prefillUser] + [prefillProfileImage] ikisi birden doluysa tekrar kullanıcı/yüz API’si yok.
+  final UserResponseDto? prefillUser;
+  final UserProfileImageFetch? prefillProfileImage;
 
   const UserProfilePage({
     super.key,
     required this.userId,
     required this.userName,
     this.profileImageUrl,
+    this.prefillUser,
+    this.prefillProfileImage,
   });
 
   @override
@@ -70,7 +77,7 @@ class _UserProfilePageState extends State<UserProfilePage>
   bool _otherUserProfilePollInFlight = false;
   /// Hedef kullanıcı yok / deaktif; [HomePage]'e dönüldü.
   bool _exitedBecauseUserGone = false;
-  /// [getUserById] başarılı ve hesap deaktif değil; mesaj ikonu buna bağlı.
+  /// [getUserById] cevabı geldiyse; askı / deaktif / hesap dışı ile kapatılır.
   bool _canShowMessageToProfileUser = false;
 
   late TabController _tabController;
@@ -113,17 +120,111 @@ class _UserProfilePageState extends State<UserProfilePage>
       return;
     } catch (_) {}
     if (!mounted) return;
-    await _revalidateTargetUserOrExit();
+    UserResponseDto? preloaded = widget.prefillUser;
+    UserProfileImageFetch? prefillImg = widget.prefillProfileImage;
+    String? preSession;
+    final wid = widget.userId.trim();
+    if (wid.isEmpty) {
+      if (mounted) _exitToHomeBecauseUserUnavailable();
+      return;
+    }
+    Future<UserResponseDto?> uFuture() async {
+      try {
+        return await _authService.getUserById(wid);
+      } on TargetUserNotAvailableException {
+        rethrow;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    if (preloaded != null && prefillImg != null) {
+      preSession = await _sessionHelper.ensureSession();
+    } else if (preloaded != null) {
+      try {
+        preSession = await _sessionHelper.ensureSession();
+        if (!mounted) return;
+        prefillImg = await _authService.fetchUserProfileImage(wid);
+      } on TargetUserNotAvailableException {
+        if (mounted) _exitToHomeBecauseUserUnavailable();
+        return;
+      } catch (_) {
+        preSession = await _sessionHelper.ensureSession();
+        try {
+          prefillImg = await _authService.fetchUserProfileImage(wid);
+        } catch (_) {}
+      }
+    } else {
+      try {
+        final trip = await Future.wait<dynamic>([
+          _sessionHelper.ensureSession(),
+          uFuture(),
+          _authService.fetchUserProfileImage(wid),
+        ]);
+        preSession = trip[0] as String?;
+        preloaded = trip[1] as UserResponseDto?;
+        prefillImg = trip[2] as UserProfileImageFetch?;
+      } on TargetUserNotAvailableException {
+        if (mounted) _exitToHomeBecauseUserUnavailable();
+        return;
+      } catch (_) {
+        preSession = await _sessionHelper.ensureSession();
+        try {
+          preloaded = await _authService.getUserById(wid);
+        } on TargetUserNotAvailableException {
+          if (mounted) _exitToHomeBecauseUserUnavailable();
+          return;
+        } catch (_) {}
+        prefillImg = await _authService.fetchUserProfileImage(wid);
+      }
+    }
     if (!mounted || _exitedBecauseUserGone) return;
-    await _loadAll();
-    if (mounted) await _enrichProfileFromApi();
+    _applyTargetUserGate(preloaded, profileImage: prefillImg);
+    if (!mounted || _exitedBecauseUserGone) return;
+    if (prefillImg != null && prefillImg.hasImage) {
+      final px = prefillImg;
+      if (px.memoryBytes != null) {
+        setState(() {
+          _avatarMemoryBytes = px.memoryBytes;
+          _avatarImageUrl = null;
+          _avatarPhotoDataRaw = null;
+        });
+      } else if (px.imageUrl != null && px.imageUrl!.trim().isNotEmpty) {
+        setState(() {
+          _avatarImageUrl = px.imageUrl;
+          _avatarMemoryBytes = null;
+          _avatarPhotoDataRaw = null;
+        });
+      }
+    } else if (preloaded != null) {
+      final p = preloaded;
+      final bytes = decodeProfilePhotoBytes(p.profilePhotoData);
+      setState(() {
+        final url = p.profileImageUrl?.trim();
+        if (url != null && url.isNotEmpty) _avatarImageUrl = url;
+        if (bytes != null && bytes.isNotEmpty) _avatarMemoryBytes = bytes;
+        if (p.profilePhotoData != null && p.profilePhotoData!.trim().isNotEmpty) {
+          _avatarPhotoDataRaw = p.profilePhotoData;
+        }
+      });
+    }
+    if (!mounted || _exitedBecauseUserGone) return;
+    await _loadAll(sessionToken: preSession);
+    if (!mounted || _exitedBecauseUserGone) return;
+    if (mounted) {
+      await _enrichProfileFromApi(
+        preloaded,
+        prefillImage: prefillImg,
+        // [getUser] + [profile-image] yukarıda; tekrar istek yok, sadece yorum satırından avatar yedeği
+        skipHeavyFetches: true,
+      );
+    }
     if (!mounted) return;
     _otherUserProfilePollTimer?.cancel();
     _otherUserProfilePollTimer = Timer.periodic(
       _otherUserProfilePollInterval,
       (_) => unawaited(_pollOtherUserProfileData()),
     );
-    unawaited(_pollOtherUserProfileData());
   }
 
   /// 5 sn: takip sayıları + yorum listesi (askı/ silinen satırlar düşer) + zenginleştirme.
@@ -155,23 +256,49 @@ class _UserProfilePageState extends State<UserProfilePage>
     }
   }
 
-  /// GET kullanıcı: 404/401 veya isActive false → [HomePage].
+  /// 404: [TargetUserNotAvailableException]. Askı / deaktif; [profile-image] 404 = pasif → [HomePage].
+  void _applyTargetUserGate(
+    UserResponseDto? u, {
+    UserProfileImageFetch? profileImage,
+  }) {
+    if (!mounted || _exitedBecauseUserGone) return;
+    if (u != null && u.isProfileViewBlocked) {
+      _exitToHomeBecauseUserUnavailable();
+      return;
+    }
+    if (profileImage != null && profileImage.isNotFound) {
+      _exitToHomeBecauseUserUnavailable();
+      return;
+    }
+    if (u != null) {
+      setState(() => _canShowMessageToProfileUser = true);
+    }
+  }
+
   Future<void> _revalidateTargetUserOrExit() async {
     if (!mounted || _exitedBecauseUserGone) return;
-    if (widget.userId.trim().isEmpty) return;
+    final wid = widget.userId.trim();
+    if (wid.isEmpty) return;
+    Future<UserResponseDto?> uSafe() async {
+      try {
+        return await _authService.getUserById(wid);
+      } on TargetUserNotAvailableException {
+        rethrow;
+      } catch (_) {
+        return null;
+      }
+    }
+
     try {
-      final u = await _authService.getUserById(widget.userId);
+      final w = await Future.wait<dynamic>([
+        uSafe(),
+        _authService.fetchUserProfileImage(wid),
+      ]);
       if (!mounted) return;
-      if (u != null &&
-          (u.isAccountInactive || u.isAccountDeactivated)) {
-        _exitToHomeBecauseUserUnavailable();
-        return;
-      }
-      if (u != null &&
-          !u.isAccountInactive &&
-          !u.isAccountDeactivated) {
-        setState(() => _canShowMessageToProfileUser = true);
-      }
+      _applyTargetUserGate(
+        w[0] as UserResponseDto?,
+        profileImage: w[1] as UserProfileImageFetch?,
+      );
     } on TargetUserNotAvailableException {
       if (mounted) _exitToHomeBecauseUserUnavailable();
     } catch (_) {}
@@ -189,10 +316,14 @@ class _UserProfilePageState extends State<UserProfilePage>
         message: kMessageUserProfileNoLongerAvailable,
         onContinue: () async {
           if (!mounted) return;
-          await Navigator.of(context).pushAndRemoveUntil<void>(
-            MaterialPageRoute<void>(builder: (_) => const HomePage()),
-            (route) => false,
-          );
+          if (Navigator.of(context).canPop()) {
+            Navigator.of(context).pop();
+          } else {
+            await Navigator.of(context).pushAndRemoveUntil<void>(
+              MaterialPageRoute<void>(builder: (_) => const HomePage()),
+              (route) => false,
+            );
+          }
         },
       ),
     );
@@ -210,31 +341,47 @@ class _UserProfilePageState extends State<UserProfilePage>
     await _start();
   }
 
-  Future<void> _enrichProfileFromApi() async {
+  Future<void> _enrichProfileFromApi(
+    UserResponseDto? preloaded, {
+    UserProfileImageFetch? prefillImage,
+    bool skipHeavyFetches = false,
+  }) async {
     if (_exitedBecauseUserGone) return;
+    if (skipHeavyFetches) {
+      if (!mounted) return;
+      final noUrl = _avatarImageUrl == null || _avatarImageUrl!.trim().isEmpty;
+      final noMem = _avatarMemoryBytes == null || _avatarMemoryBytes!.isEmpty;
+      if (noUrl && noMem) {
+        for (final r in _reviews) {
+          final photo = r.ownerProfilePhotoUrl?.trim();
+          if (photo != null && photo.isNotEmpty) {
+            setState(() => _avatarImageUrl = photo);
+            break;
+          }
+        }
+      }
+      return;
+    }
+    UserResponseDto? u = preloaded;
     try {
-      final u = await _authService.getUserById(widget.userId);
-      if (u != null &&
-          (u.isAccountInactive || u.isAccountDeactivated) &&
-          mounted) {
+      u ??= await _authService.getUserById(widget.userId);
+      if (u != null && u.isProfileViewBlocked && mounted) {
         _exitToHomeBecauseUserUnavailable();
         return;
       }
-      if (u != null &&
-          !u.isAccountInactive &&
-          !u.isAccountDeactivated &&
-          mounted) {
+      if (u != null && mounted) {
         setState(() => _canShowMessageToProfileUser = true);
       }
       if (u != null && mounted) {
-        final bytes = decodeProfilePhotoBytes(u.profilePhotoData);
+        final profile = u;
+        final bytes = decodeProfilePhotoBytes(profile.profilePhotoData);
         setState(() {
-          final url = u.profileImageUrl?.trim();
+          final url = profile.profileImageUrl?.trim();
           if (url != null && url.isNotEmpty) _avatarImageUrl = url;
           if (bytes != null && bytes.isNotEmpty) _avatarMemoryBytes = bytes;
-          if (u.profilePhotoData != null &&
-              u.profilePhotoData!.trim().isNotEmpty) {
-            _avatarPhotoDataRaw = u.profilePhotoData;
+          if (profile.profilePhotoData != null &&
+              profile.profilePhotoData!.trim().isNotEmpty) {
+            _avatarPhotoDataRaw = profile.profilePhotoData;
           }
         });
       }
@@ -242,14 +389,76 @@ class _UserProfilePageState extends State<UserProfilePage>
       if (mounted) _exitToHomeBecauseUserUnavailable();
     } catch (_) {}
     if (!mounted) return;
+    if (_exitedBecauseUserGone) return;
+    // `/api/users/{id}/profile-image`: inactive → 404; [getUserById] URL sızıntısını baskıla
+    var hideReviewAvatarFallback = false;
+    if (prefillImage != null) {
+      if (prefillImage.isNotFound) {
+        if (mounted) {
+          setState(() {
+            _avatarImageUrl = null;
+            _avatarMemoryBytes = null;
+            _avatarPhotoDataRaw = null;
+          });
+        }
+        return;
+      }
+      if (prefillImage.hasImage) {
+        hideReviewAvatarFallback = true;
+        if (mounted) {
+          setState(() {
+            if (prefillImage.memoryBytes != null) {
+              _avatarMemoryBytes = prefillImage.memoryBytes;
+              _avatarImageUrl = null;
+              _avatarPhotoDataRaw = null;
+            } else {
+              _avatarImageUrl = prefillImage.imageUrl;
+              _avatarMemoryBytes = null;
+              _avatarPhotoDataRaw = null;
+            }
+          });
+        }
+        if (!mounted) return;
+        return;
+      }
+    }
+    if (widget.userId.trim().isNotEmpty) {
+      final pix = await _authService.fetchUserProfileImage(widget.userId);
+      if (!mounted) return;
+      if (pix != null) {
+        if (pix.isNotFound) {
+          hideReviewAvatarFallback = true;
+          setState(() {
+            _avatarImageUrl = null;
+            _avatarMemoryBytes = null;
+            _avatarPhotoDataRaw = null;
+          });
+        } else if (pix.hasImage) {
+          hideReviewAvatarFallback = true;
+          setState(() {
+            if (pix.memoryBytes != null) {
+              _avatarMemoryBytes = pix.memoryBytes;
+              _avatarImageUrl = null;
+              _avatarPhotoDataRaw = null;
+            } else {
+              _avatarImageUrl = pix.imageUrl;
+              _avatarMemoryBytes = null;
+              _avatarPhotoDataRaw = null;
+            }
+          });
+        }
+      }
+    }
+    if (!mounted) return;
+    if (hideReviewAvatarFallback) return;
     final noUrl = _avatarImageUrl == null || _avatarImageUrl!.trim().isEmpty;
     final noMem =
         _avatarMemoryBytes == null || _avatarMemoryBytes!.isEmpty;
     if (noUrl && noMem) {
       for (final r in _reviews) {
-        final u = r.ownerProfilePhotoUrl?.trim();
-        if (u != null && u.isNotEmpty) {
-          setState(() => _avatarImageUrl = u);
+        final photo = r.ownerProfilePhotoUrl?.trim();
+        if (photo != null && photo.isNotEmpty) {
+          setState(() => _avatarImageUrl = photo);
           break;
         }
       }
@@ -263,8 +472,8 @@ class _UserProfilePageState extends State<UserProfilePage>
     super.dispose();
   }
 
-  Future<void> _loadAll() async {
-    final token = await _sessionHelper.ensureSession();
+  Future<void> _loadAll({String? sessionToken}) async {
+    final token = sessionToken ?? await _sessionHelper.ensureSession();
     await Future.wait([
       _loadCounts(),
       _loadIsFollowing(token),
