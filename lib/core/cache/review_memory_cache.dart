@@ -28,5 +28,15 @@ class ReviewMemoryCache {
   void remove(String productId) {
     _map.remove(productId.trim());
   }
+
+  /// Ürün listesinden tek review kaldır (silindikten sonra).
+  void removeReviewFromProduct(String productId, String reviewId) {
+    final pid = productId.trim();
+    final rid = reviewId.trim();
+    if (pid.isEmpty || rid.isEmpty) return;
+    final list = _map[pid];
+    if (list == null) return;
+    _map[pid] = list.where((r) => r.id != rid).toList();
+  }
 }
 

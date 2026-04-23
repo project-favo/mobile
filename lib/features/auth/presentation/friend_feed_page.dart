@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../core/cache/following_id_set_cache.dart';
 import '../../../core/cache/friend_feed_memory_cache.dart';
 import 'profile/pages/user_profile_page.dart';
 import '../../../core/cache/product_memory_cache.dart';
@@ -15,9 +16,12 @@ import '../../../core/widgets/main_bottom_nav_items.dart';
 import '../../../features/activity/data/friends_feed_activity_mapper.dart';
 import '../../../features/activity/data/friends_feed_repository.dart';
 import '../data/repositories/interaction_repository.dart';
+import '../data/services/auth_service.dart';
+import '../../../core/utils/in_flight_id_lock.dart';
 import '../../../core/utils/session_helper.dart';
 import '../../../features/activity/domain/activity_models.dart';
 import '../../../features/activity/domain/activity_type.dart';
+import '../../../features/activity/presentation/widgets/activity_feed_list_skeleton.dart';
 import '../../../features/activity/presentation/widgets/activity_feed_row.dart';
 import '../../../features/activity/presentation/activity_page.dart';
 import 'home_page.dart';
@@ -37,6 +41,7 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
   final InteractionRepository _interactions = InteractionRepository();
   final SessionHelper _sessionHelper = SessionHelper();
   final Set<String> _followingIds = {};
+  final InFlightIdLock _friendFeedFollowLock = InFlightIdLock();
   final List<ActivityItem> _items = [];
 
   int _page = 0;
@@ -65,9 +70,17 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
       _totalPages = warm.totalPages;
       _loadingFirst = false;
       _prefetchItemVisuals(_items);
+      _mergeFollowFromGlobalCache();
       unawaited(_syncFollowingForCurrentItems());
       unawaited(_loadFirst(background: true));
     } else {
+      unawaited(
+        FollowingIdSetCache.instance.ensureLoaded(
+          _interactions,
+          AuthService(),
+          _sessionHelper,
+        ),
+      );
       unawaited(_loadFirst());
     }
   }
@@ -75,20 +88,49 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
   @override
   void dispose() => super.dispose();
 
+  void _mergeFollowFromGlobalCache() {
+    if (!FollowingIdSetCache.instance.isReady) return;
+    for (final item in _items) {
+      final id = item.user.id;
+      if (id.isEmpty) continue;
+      if (FollowingIdSetCache.instance.contains(id)) {
+        _followingIds.add(id);
+      } else {
+        _followingIds.remove(id);
+      }
+    }
+  }
+
   Future<void> _syncFollowingForCurrentItems() async {
     final token = await _sessionHelper.ensureSession();
     if (token == null) return;
     final ids = _items.map((e) => e.user.id).where((id) => id.isNotEmpty).toSet();
     if (ids.isEmpty) return;
-    for (final id in ids) {
-      try {
-        final f = await _interactions.isFollowing(token, id);
-        if (f) {
+    try {
+      await FollowingIdSetCache.instance.ensureLoaded(
+        _interactions,
+        AuthService(),
+        _sessionHelper,
+      );
+      final my = FollowingIdSetCache.instance.snapshot;
+      for (final id in ids) {
+        if (my.contains(id)) {
           _followingIds.add(id);
         } else {
           _followingIds.remove(id);
         }
-      } catch (_) {}
+      }
+    } catch (_) {
+      for (final id in ids) {
+        try {
+          final f = await _interactions.isFollowing(token, id);
+          if (f) {
+            _followingIds.add(id);
+          } else {
+            _followingIds.remove(id);
+          }
+        } catch (_) {}
+      }
     }
     if (mounted) setState(() {});
   }
@@ -208,8 +250,12 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
 
   Future<void> _toggleFollow(String userId) async {
     if (userId.isEmpty) return;
+    if (!_friendFeedFollowLock.tryEnter(userId)) return;
     final token = await _sessionHelper.ensureSession();
-    if (token == null) return;
+    if (token == null) {
+      _friendFeedFollowLock.leave(userId);
+      return;
+    }
     try {
       final following = await _interactions.toggleFollow(token, userId);
       if (!mounted) return;
@@ -220,7 +266,12 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
           _followingIds.remove(userId);
         }
       });
-    } catch (_) {}
+      FollowingIdSetCache.instance.applyToggle(userId, following);
+    } catch (_) {
+      // best effort; ignore race/dup tap errors
+    } finally {
+      _friendFeedFollowLock.leave(userId);
+    }
   }
 
   Future<void> _openItem(ActivityItem item) async {
@@ -313,7 +364,7 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
           ),
         ),
         body: _loadingFirst
-            ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+            ? const ActivityFeedListSkeleton()
             : _error != null
                 ? Center(
                     child: Padding(
@@ -337,7 +388,7 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
     if (list.isEmpty) {
       return RefreshIndicator(
         color: AppColors.primary,
-        onRefresh: _loadFirst,
+        onRefresh: () => _loadFirst(background: _items.isNotEmpty),
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(AppSpacing.xLarge),
@@ -360,7 +411,7 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
       },
       child: RefreshIndicator(
         color: AppColors.primary,
-        onRefresh: _loadFirst,
+        onRefresh: () => _loadFirst(background: _items.isNotEmpty),
         child: ListView.separated(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 20),
@@ -368,12 +419,7 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
           separatorBuilder: (_, __) => const SizedBox(height: 10),
           itemBuilder: (context, index) {
             if (index >= list.length) {
-              return const Padding(
-                padding: EdgeInsets.all(12),
-                child: Center(
-                  child: CircularProgressIndicator(color: AppColors.primary),
-                ),
-              );
+              return const ActivityFeedLoadMoreSkeleton();
             }
             final item = list[index];
             return Container(

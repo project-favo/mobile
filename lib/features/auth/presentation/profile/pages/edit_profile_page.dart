@@ -8,6 +8,8 @@ import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/widgets/app_input.dart';
 import '../../../../../core/utils/error_handler.dart';
+import '../../../../../core/utils/user_display_name_prefs.dart';
+import '../../../../../core/utils/username_input_rules.dart';
 import '../../../../../core/utils/resolve_media_url.dart';
 import '../../../../auth/data/services/auth_service.dart';
 import '../../../../auth/data/models/user_response_dto.dart';
@@ -221,9 +223,22 @@ class _EditProfilePageState extends State<EditProfilePage> {
     });
 
     try {
-      // Username değiştiyse kontrol et
       final newUsername = _userNameController.text.trim();
-      
+      final oldUsername = widget.user.userName.trim();
+      final usernameUnchanged = newUsername == oldUsername;
+      final onlyCaseChange =
+          !usernameUnchanged &&
+          newUsername.toLowerCase() == oldUsername.toLowerCase();
+      final String? userNameForApi =
+          (usernameUnchanged || onlyCaseChange) ? null : newUsername;
+
+      if (onlyCaseChange) {
+        await UserDisplayNamePrefs.instance.writePreferredDisplay(
+          widget.user.id,
+          newUsername,
+        );
+      }
+
       String? profilePhotoBase64;
       String? profilePhotoMimeType;
       final bool clearPhoto = _wantsToRemovePhoto;
@@ -237,7 +252,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
       }
 
       final updateRequest = UserUpdateRequestDto(
-        userName: newUsername,
+        userName: userNameForApi,
         name: _nameController.text.trim(),
         surname: _surnameController.text.trim(),
         birthdate: _birthdateController.text.trim(),
@@ -246,11 +261,16 @@ class _EditProfilePageState extends State<EditProfilePage> {
         clearProfilePhoto: clearPhoto,
       );
 
-      await _authService.updateMe(updateRequest);
+      var fresh = await _authService.updateMe(updateRequest);
+      // Girdi (İ, büyük/küçük harf) ile sunucunun döndürdüğü metin farklı olsa da kayıt başarılıysa
+      // ekranda kullanıcının yazdığını göster
+      if (userNameForApi != null || onlyCaseChange) {
+        fresh = fresh.withUserName(newUsername);
+      }
+      final toReturn = clearPhoto ? fresh.withProfileMediaCleared() : fresh;
 
-      // Başarılı - direkt geri dön (SnackBar yok)
       if (mounted) {
-        Navigator.pop(context, true);
+        Navigator.pop(context, toReturn);
       }
     } catch (e) {
       if (mounted) {
@@ -489,23 +509,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 controller: _userNameController,
                 hint: 'Enter your username',
                 validator: (value) {
-                  // Önce backend error'u kontrol et
                   if (_updateError != null) {
                     return _updateError;
                   }
-                  
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Username is required';
-                  }
-                  final trimmedValue = value.trim();
-                  if (trimmedValue.length < 3) {
-                    return 'Username must be at least 3 characters';
-                  }
-                  // Username sadece harf, rakam ve alt çizgi içerebilir
-                  if (!RegExp(r'^[a-zA-Z0-9_]+$').hasMatch(trimmedValue)) {
-                    return 'Username can only contain letters, numbers and underscore';
-                  }
-                  return null;
+                  return UsernameInputRules.validateForForm(value);
                 },
                 onChanged: () {
                   if (_updateError != null) {

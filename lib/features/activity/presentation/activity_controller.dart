@@ -1,18 +1,19 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import '../../../core/cache/activity_memory_cache.dart';
+import '../../../core/cache/following_id_set_cache.dart';
 import '../../../core/utils/error_handler.dart';
+import '../../../core/utils/in_flight_id_lock.dart';
 import '../../../core/utils/load_profile_image_bytes.dart';
 import '../../../core/utils/session_helper.dart';
 import '../../auth/data/models/notification_dto.dart';
 import '../../auth/data/repositories/interaction_repository.dart';
 import '../../auth/data/repositories/notification_repository.dart';
+import '../../auth/data/services/auth_service.dart';
 import '../data/notification_activity_mapper.dart';
 import '../domain/activity_models.dart';
-import '../domain/activity_type.dart';
 
 /// Activity feed via notification endpoints (`GET/PATCH /api/notifications/...`).
 class ActivityController extends ChangeNotifier {
@@ -27,6 +28,8 @@ class ActivityController extends ChangeNotifier {
   final NotificationRepository _notifications;
   final InteractionRepository _interactions;
   final SessionHelper _sessionHelper;
+  final AuthService _auth = AuthService();
+  final InFlightIdLock _followToggleLock = InFlightIdLock();
 
   List<ActivityItem> _items = [];
   final Set<String> _followingUserIds = {};
@@ -68,10 +71,27 @@ class ActivityController extends ChangeNotifier {
     _page = warm.page;
     _totalPages = warm.totalPages;
     _totalElements = warm.totalElements;
+    _followingUserIds
+      ..clear()
+      ..addAll(warm.followingUserIds);
+    _mergeFollowFromGlobalCache();
     _loadingFirst = false;
     _errorMessage = null;
     notifyListeners();
     return true;
+  }
+
+  void _mergeFollowFromGlobalCache() {
+    if (!FollowingIdSetCache.instance.isReady) return;
+    for (final item in _items) {
+      final id = item.user.id;
+      if (id.isEmpty) continue;
+      if (FollowingIdSetCache.instance.contains(id)) {
+        _followingUserIds.add(id);
+      } else {
+        _followingUserIds.remove(id);
+      }
+    }
   }
 
   void _prefetchAvatarsForItems(Iterable<ActivityItem> items) {
@@ -115,12 +135,6 @@ class ActivityController extends ChangeNotifier {
       _page = page.number;
       _totalPages = page.totalPages;
       _totalElements = page.totalElements;
-      ActivityMemoryCache.instance.remember(
-        items: _items,
-        page: _page,
-        totalPages: _totalPages,
-        totalElements: _totalElements,
-      );
       _prefetchAvatarsForItems(_items);
       await _syncFollowStatesForCurrentItems();
     } catch (e) {
@@ -142,12 +156,6 @@ class ActivityController extends ChangeNotifier {
       _items = _deduplicateItems([..._items, ...appended]);
       _page = next.number;
       _totalPages = next.totalPages;
-      ActivityMemoryCache.instance.remember(
-        items: _items,
-        page: _page,
-        totalPages: _totalPages,
-        totalElements: _totalElements,
-      );
       _prefetchAvatarsForItems(appended);
       await _syncFollowStatesForCurrentItems();
     } catch (_) {
@@ -158,9 +166,23 @@ class ActivityController extends ChangeNotifier {
     }
   }
 
+  void _writeActivitySnapshot() {
+    if (_items.isEmpty) return;
+    ActivityMemoryCache.instance.remember(
+      items: _items,
+      page: _page,
+      totalPages: _totalPages,
+      totalElements: _totalElements,
+      followingUserIds: _followingUserIds,
+    );
+  }
+
   Future<void> _syncFollowStatesForCurrentItems() async {
     final token = await _sessionHelper.ensureSession();
-    if (token == null) return;
+    if (token == null) {
+      _writeActivitySnapshot();
+      return;
+    }
 
     final ids = _items
         .where((e) => e.user.id.isNotEmpty)
@@ -168,8 +190,37 @@ class ActivityController extends ChangeNotifier {
         .toSet()
         .toList();
 
-    if (ids.isEmpty) return;
+    if (ids.isEmpty) {
+      _writeActivitySnapshot();
+      return;
+    }
 
+    try {
+      await FollowingIdSetCache.instance.ensureLoaded(
+        _interactions,
+        _auth,
+        _sessionHelper,
+      );
+      final myFollowing = FollowingIdSetCache.instance.snapshot;
+      for (final id in ids) {
+        if (myFollowing.contains(id)) {
+          _followingUserIds.add(id);
+        } else {
+          _followingUserIds.remove(id);
+        }
+      }
+    } catch (_) {
+      await _syncFollowStatesPerIdIsFollowing(token, ids);
+    } finally {
+      _writeActivitySnapshot();
+    }
+  }
+
+  /// Yedek: takip seti yüklenemezse satır başına `is-following` (N paralel).
+  Future<void> _syncFollowStatesPerIdIsFollowing(
+    String token,
+    List<String> ids,
+  ) async {
     await Future.wait(
       ids.map((id) async {
         try {
@@ -186,8 +237,12 @@ class ActivityController extends ChangeNotifier {
 
   Future<void> toggleFollow(String userId) async {
     if (userId.isEmpty) return;
+    if (!_followToggleLock.tryEnter(userId)) return;
     final token = await _sessionHelper.ensureSession();
-    if (token == null) return;
+    if (token == null) {
+      _followToggleLock.leave(userId);
+      return;
+    }
     try {
       final following = await _interactions.toggleFollow(token, userId);
       if (following) {
@@ -195,9 +250,13 @@ class ActivityController extends ChangeNotifier {
       } else {
         _followingUserIds.remove(userId);
       }
+      FollowingIdSetCache.instance.applyToggle(userId, following);
+      _writeActivitySnapshot();
       notifyListeners();
     } catch (_) {
       rethrow;
+    } finally {
+      _followToggleLock.leave(userId);
     }
   }
 

@@ -583,18 +583,24 @@ class _SettingsPageState extends State<SettingsPage> {
             ProfileMenuItem(
               title: 'Edit Profile',
               onTap: () async {
-                final result = await Navigator.push(
+                final result = await Navigator.push<dynamic>(
                   context,
                   MaterialPageRoute(
                     builder: (_) => EditProfilePage(user: _user!),
                   ),
                 );
-                // Eğer profil güncellendiyse, kullanıcı bilgilerini yeniden yükle
-                if (result == true) {
-                  await _loadUserData();
-                  // Profile sayfasını da güncellemek için true döndür (Settings'ten geri dönüldüğünde)
+                if (result is UserResponseDto) {
                   if (mounted) {
-                    // Settings sayfasından geri dönüldüğünde Profile sayfasına bilgi ver
+                    setState(() {
+                      _user = result;
+                    });
+                  }
+                  if (mounted) {
+                    Navigator.pop(context, result);
+                  }
+                } else if (result == true) {
+                  await _loadUserData();
+                  if (mounted) {
                     Navigator.pop(context, true);
                   }
                 }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
+import '../../../core/cache/following_id_set_cache.dart';
 import '../../../core/cache/search_warm_cache.dart';
 import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/session_helper.dart';
@@ -13,7 +14,10 @@ import '../../../features/activity/presentation/activity_page.dart';
 import '../data/models/product_dto.dart';
 import '../data/models/tag_dto.dart';
 import '../data/repositories/product_repository.dart';
+import '../data/repositories/review_repository.dart';
+import '../data/repositories/interaction_repository.dart';
 import '../data/repositories/tag_repository.dart';
+import '../data/services/auth_service.dart';
 import '../data/services/review_prefetch_service.dart';
 import '../widgets/product_card.dart';
 import '../../../core/widgets/skeleton_loader.dart';
@@ -21,6 +25,7 @@ import 'home_page.dart';
 import 'friend_feed_page.dart';
 import 'profile/pages/profile_page.dart';
 import 'review/pages/review_page.dart';
+import 'review/review_page_pop_result.dart';
 
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key});
@@ -32,7 +37,11 @@ class SearchPage extends StatefulWidget {
 class _SearchPageState extends State<SearchPage> {
   final ProductRepository _productRepository = ProductRepository();
   final TagRepository _tagRepository = TagRepository();
+  final ReviewRepository _reviewRepository = ReviewRepository();
+  final InteractionRepository _interactionRepository = InteractionRepository();
+  final AuthService _authService = AuthService();
   final SessionHelper _sessionHelper = SessionHelper();
+  final Map<String, int> _productCardResync = {};
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
 
@@ -63,6 +72,13 @@ class _SearchPageState extends State<SearchPage> {
   @override
   void initState() {
     super.initState();
+    unawaited(
+      FollowingIdSetCache.instance.ensureLoaded(
+        _interactionRepository,
+        _authService,
+        _sessionHelper,
+      ),
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_hookNotificationsIfSignedIn());
     });
@@ -70,6 +86,62 @@ class _SearchPageState extends State<SearchPage> {
       setState(() {});
     });
     _loadInitialData();
+  }
+
+  void _applyProductFromReviewExit(ReviewPagePopResult r) {
+    final id = r.product.id;
+    seedProductCardSocialCaches(
+      id,
+      likeCount: r.likeCount,
+      reviewCount: r.reviewCount,
+    );
+    if (!mounted) return;
+    setState(() {
+      _productCardResync[id] = (_productCardResync[id] ?? 0) + 1;
+      final si = _searchResults.indexWhere((p) => p.id == id);
+      if (si != -1) {
+        _searchResults[si] = r.product;
+      }
+      final ai = _allProducts.indexWhere((p) => p.id == id);
+      if (ai != -1) {
+        _allProducts[ai] = r.product;
+      }
+    });
+  }
+
+  Future<void> _refreshProductAfterReview(String productId) async {
+    try {
+      final token = await _sessionHelper.getTokenAndSetHeader();
+      if (token == null) return;
+      final updated = await _productRepository.getProductById(
+        productId,
+        firebaseIdToken: token,
+        bypassCache: true,
+      );
+      final like = await _interactionRepository.getProductLikeCount(productId);
+      final reviews = await _reviewRepository.getReviewsByProductId(
+        productId,
+        firebaseIdToken: token,
+      );
+      if (!mounted) return;
+      setProductCardSocialCaches(
+        productId,
+        likeCount: like,
+        reviewCount: reviews.length,
+      );
+      if (!mounted) return;
+      setState(() {
+        _productCardResync[productId] = (_productCardResync[productId] ?? 0) + 1;
+        final si = _searchResults.indexWhere((p) => p.id == productId);
+        if (si != -1) {
+          _searchResults[si] = updated;
+        }
+        final ai = _allProducts.indexWhere((p) => p.id == productId);
+        if (ai != -1) {
+          _allProducts[ai] = updated;
+        }
+      });
+    } catch (_) {}
   }
 
   Future<void> _hookNotificationsIfSignedIn() async {
@@ -433,6 +505,7 @@ class _SearchPageState extends State<SearchPage> {
                                         itemBuilder: (context, index) {
                                           final product = _searchResults[index];
                                           return ProductCard(
+                                            key: ValueKey('spq_${product.id}_${_productCardResync[product.id] ?? 0}'),
                                             productId: product.id,
                                             imageUrl: product.imageURL,
                                             title: product.name,
@@ -441,13 +514,20 @@ class _SearchPageState extends State<SearchPage> {
                                             rating: product.averageRating ?? 0.0,
                                             desc: product.description ?? '',
                                             isFavorite: product.isLiked ?? false,
-                                            onTap: () {
-                                              Navigator.push(
+                                            loadReviewCount: true,
+                                            onTap: () async {
+                                              final r = await Navigator.push<ReviewPagePopResult?>(
                                                 context,
                                                 MaterialPageRoute(
                                                   builder: (_) => ReviewPage(product: product),
                                                 ),
                                               );
+                                              if (!mounted) return;
+                                              if (r != null) {
+                                                _applyProductFromReviewExit(r);
+                                              } else {
+                                                unawaited(_refreshProductAfterReview(product.id));
+                                              }
                                             },
                                           );
                                         },
@@ -497,6 +577,7 @@ class _SearchPageState extends State<SearchPage> {
                                                     itemBuilder: (context, index) {
                                                       final product = _searchResults[index];
                                                       return ProductCard(
+                                                        key: ValueKey('spc_${product.id}_${_productCardResync[product.id] ?? 0}'),
                                                         productId: product.id,
                                                         imageUrl: product.imageURL,
                                                         title: product.name,
@@ -505,13 +586,20 @@ class _SearchPageState extends State<SearchPage> {
                                                         rating: product.averageRating ?? 0.0,
                                                         desc: product.description ?? '',
                                                         isFavorite: product.isLiked ?? false,
-                                                        onTap: () {
-                                                          Navigator.push(
+                                                        loadReviewCount: true,
+                                                        onTap: () async {
+                                                          final r = await Navigator.push<ReviewPagePopResult?>(
                                                             context,
                                                             MaterialPageRoute(
                                                               builder: (_) => ReviewPage(product: product),
                                                             ),
                                                           );
+                                                          if (!mounted) return;
+                                                          if (r != null) {
+                                                            _applyProductFromReviewExit(r);
+                                                          } else {
+                                                            unawaited(_refreshProductAfterReview(product.id));
+                                                          }
                                                         },
                                                       );
                                                     },

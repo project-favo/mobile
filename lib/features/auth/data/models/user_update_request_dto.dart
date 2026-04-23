@@ -27,6 +27,7 @@ class UserUpdateRequestDto {
     if (birthdate != null) json['birthdate'] = birthdate;
     if (clearProfilePhoto) {
       json['removeProfilePhoto'] = true;
+      json['clearProfilePhoto'] = true;
     } else if (profilePhotoBase64 != null) {
       json['profilePhotoBase64'] = profilePhotoBase64;
       if (profilePhotoMimeType != null) {

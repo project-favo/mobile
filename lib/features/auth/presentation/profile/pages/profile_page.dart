@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../../../../core/cache/product_memory_cache.dart';
+import '../../../../../core/cache/review_memory_cache.dart';
 import '../../../../../core/cache/profile_warm_cache.dart';
 import '../../../../../core/widgets/main_bottom_nav_items.dart';
 import '../../../../../features/activity/presentation/activity_page.dart';
@@ -21,7 +22,6 @@ import '../../../data/repositories/interaction_repository.dart';
 import '../../../data/repositories/product_repository.dart';
 import '../../../data/repositories/review_repository.dart';
 import '../../../data/services/review_prefetch_service.dart';
-import '../../../widgets/product_card.dart';
 import '../../home_page.dart';
 import '../../friend_feed_page.dart';
 import '../../search_page.dart';
@@ -31,12 +31,14 @@ import '../../../../../core/routes/custom_page_transitions.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../../../../core/widgets/app_button.dart';
+import '../../../../../core/utils/in_flight_id_lock.dart';
 import '../../../../../core/utils/resolve_media_url.dart';
 import '../../../../../routes/app_routes.dart';
 import '../../complete_app_profile_page.dart';
 import 'settings_page.dart';
 import 'follow_list_page.dart';
 import '../widgets/profile_review_row_card.dart';
+import '../../review/widgets/review_delete_flow.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -70,6 +72,8 @@ class _ProfilePageState extends State<ProfilePage>
   String _selectedDateSort = 'Newest';
   int _followerCount = 0;
   int _followingCount = 0;
+  final InFlightIdLock _wishlistProductLikeLock = InFlightIdLock();
+  final InFlightIdLock _myReviewDeleteLock = InFlightIdLock();
 
   void _rememberWarmProfile() {
     if (_user == null) return;
@@ -275,6 +279,29 @@ class _ProfilePageState extends State<ProfilePage>
     );
   }
 
+  Future<void> _onDeleteMyReview(ReviewDto review) async {
+    if (!_myReviewDeleteLock.tryEnter(review.id)) return;
+    try {
+      final ok = await ReviewDeleteFlow.confirmAndDelete(
+        context,
+        repository: _reviewRepository,
+        sessionHelper: _sessionHelper,
+        reviewId: review.id,
+      );
+      if (!mounted || !ok) return;
+      setState(() {
+        _myReviews.removeWhere((r) => r.id == review.id);
+      });
+      ReviewMemoryCache.instance.removeReviewFromProduct(
+        review.productId,
+        review.id,
+      );
+      _rememberWarmProfile();
+    } finally {
+      _myReviewDeleteLock.leave(review.id);
+    }
+  }
+
   Widget _buildMyReviewsTab() {
     if (_isLoadingMyReviews) {
       return Column(
@@ -327,12 +354,13 @@ class _ProfilePageState extends State<ProfilePage>
           key: ValueKey(review.id),
           review: review,
           productImageUrl: hint?.imageURL,
-          onTap: () {
+          onDelete: () => _onDeleteMyReview(review),
+          onTap: () async {
             final cached =
                 ProductMemoryCache.instance.peek(review.productId) ??
                 _reviewProductHints[review.productId];
             final product = _productForReviewDetail(review, cached);
-            Navigator.push(
+            final result = await Navigator.push<dynamic>(
               context,
               SlideRightRoute(
                 page: ReviewDetailPage(
@@ -341,6 +369,17 @@ class _ProfilePageState extends State<ProfilePage>
                 ),
               ),
             );
+            if (!mounted) return;
+            if (result == ReviewDeleteFlow.popResultDeleted) {
+              setState(() {
+                _myReviews.removeWhere((r) => r.id == review.id);
+              });
+              ReviewMemoryCache.instance.removeReviewFromProduct(
+                review.productId,
+                review.id,
+              );
+              _rememberWarmProfile();
+            }
           },
         );
       },
@@ -533,8 +572,12 @@ class _ProfilePageState extends State<ProfilePage>
   }
 
   Future<void> _toggleWishlistLike(ProductDto product) async {
+    if (!_wishlistProductLikeLock.tryEnter(product.id)) return;
     final index = _wishlistProducts.indexWhere((p) => p.id == product.id);
-    if (index == -1) return;
+    if (index == -1) {
+      _wishlistProductLikeLock.leave(product.id);
+      return;
+    }
 
     final previous = _wishlistProducts[index];
 
@@ -586,6 +629,8 @@ class _ProfilePageState extends State<ProfilePage>
           backgroundColor: AppColors.error,
         ),
       );
+    } finally {
+      _wishlistProductLikeLock.leave(product.id);
     }
   }
 
@@ -788,14 +833,22 @@ class _ProfilePageState extends State<ProfilePage>
             icon: const Icon(Icons.settings),
             color: AppColors.primary,
             onPressed: () async {
-              final result = await Navigator.push<bool>(
+              final result = await Navigator.push<dynamic>(
                 context,
                 MaterialPageRoute(
                   builder: (_) => SettingsPage(initialUser: _user),
                 ),
               );
               if (!mounted) return;
-              if (result == true) {
+              if (result is UserResponseDto) {
+                setState(() {
+                  _user = result;
+                  _cachedProfilePhotoBytes = result.hasProfileAvatarVisual
+                      ? decodeProfilePhotoBytes(result.profilePhotoData)
+                      : null;
+                });
+                _rememberWarmProfile();
+              } else if (result == true) {
                 unawaited(_loadUserData(background: true));
               }
             },
@@ -820,14 +873,14 @@ class _ProfilePageState extends State<ProfilePage>
               ),
               const SizedBox(height: AppSpacing.small),
               Text(
-                '@${_user!.userName.toLowerCase().replaceAll(' ', '')}',
+                '@${_user!.userName.replaceAll(' ', '')}',
                 style: AppTextStyles.bodySmall.copyWith(
                   color: AppColors.textSecondary,
                 ),
               ),
             ] else ...[
               Text(
-                '@${_user!.userName.toLowerCase().replaceAll(' ', '')}',
+                '@${_user!.userName.replaceAll(' ', '')}',
                 style: AppTextStyles.titleMedium,
               ),
             ],

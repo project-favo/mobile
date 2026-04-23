@@ -8,6 +8,9 @@ import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/config/api_config.dart';
 import '../../../../../core/utils/error_handler.dart';
+import '../../../../../core/cache/current_user_cache.dart';
+import '../../../../../core/cache/review_memory_cache.dart';
+import '../../../../../core/utils/in_flight_id_lock.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/network/api_client.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
@@ -21,6 +24,7 @@ import '../../../data/repositories/review_repository.dart';
 import '../../../data/repositories/message_repository.dart';
 import '../../../data/services/auth_service.dart';
 import '../widgets/report_review_sheet.dart';
+import '../widgets/review_delete_flow.dart';
 
 class ReviewDetailPage extends StatefulWidget {
   final ReviewDto review;
@@ -49,12 +53,25 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
 
   /// Media futures cached by media ID — prevents FutureBuilder from restarting on every rebuild.
   final Map<String, Future<Uint8List?>> _mediaFutures = {};
+  final InFlightFlag _reviewDetailLikeLock = InFlightFlag();
+  final InFlightFlag _reviewDeleteLock = InFlightFlag();
+
+  bool get _isOwnReview {
+    if (CurrentUserCache.instance.isMyReview(_currentReview)) return true;
+    return _viewerUserId != null &&
+        _viewerUserId!.trim() == _currentReview.ownerId.trim();
+  }
 
   @override
   void initState() {
     super.initState();
     _currentReview = widget.review;
     _initMediaFutures();
+    final w = CurrentUserCache.instance;
+    if (w.isMyReview(_currentReview)) {
+      _viewerUserId = w.userId;
+    }
+    unawaited(_loadViewerId());
     // Defer the refresh so the first frame renders fully before making an API call.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _refreshReview();
@@ -97,7 +114,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
         firebaseIdToken: firebaseIdToken,
       );
 
-      String? viewerId;
+      String? viewerId = CurrentUserCache.instance.userId;
       try {
         viewerId = (await AuthService().getMe()).id;
       } catch (_) {}
@@ -105,9 +122,46 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
       _initMediaFutures();
       setState(() {
         _currentReview = updatedReview;
-        _viewerUserId = viewerId;
+        if (viewerId != null && viewerId.trim().isNotEmpty) {
+          _viewerUserId = viewerId;
+        }
       });
     } catch (_) {}
+  }
+
+  Future<void> _loadViewerId() async {
+    final c = CurrentUserCache.instance;
+    if (c.isMyReview(_currentReview) && c.hasUserId) {
+      if (!mounted) return;
+      setState(() => _viewerUserId = c.userId);
+      return;
+    }
+    try {
+      final me = await AuthService().getMe();
+      if (!mounted) return;
+      setState(() => _viewerUserId = me.id);
+    } catch (_) {}
+  }
+
+  Future<void> _onDeleteReview() async {
+    if (!_reviewDeleteLock.tryEnter()) return;
+    try {
+      final ok = await ReviewDeleteFlow.confirmAndDelete(
+        context,
+        repository: _reviewRepository,
+        sessionHelper: _sessionHelper,
+        reviewId: _currentReview.id,
+      );
+      if (ok && mounted) {
+        ReviewMemoryCache.instance.removeReviewFromProduct(
+          _currentReview.productId,
+          _currentReview.id,
+        );
+        Navigator.of(context).pop(ReviewDeleteFlow.popResultDeleted);
+      }
+    } finally {
+      _reviewDeleteLock.leave();
+    }
   }
 
   /// Media image'ı authentication header ile yükler ve Uint8List olarak döndürür
@@ -267,8 +321,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
   }
 
   void _openOwnerProfile() {
-    if (_viewerUserId != null &&
-        _viewerUserId!.trim() == _currentReview.ownerId.trim()) {
+    if (_isOwnReview) {
       return;
     }
     Navigator.push(
@@ -370,6 +423,8 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
       return;
     }
 
+    if (!_reviewDetailLikeLock.tryEnter()) return;
+
     // Optimistic update - UI'ı hemen güncelle (loading indicator yok)
     final previousLikeStatus = _currentReview.isLikedByCurrentUser;
     final previousLikeCount = _currentReview.likeCount;
@@ -455,6 +510,8 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
           ),
         );
       }
+    } finally {
+      _reviewDetailLikeLock.leave();
     }
   }
 
@@ -978,9 +1035,37 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
                         ),
                       ),
                     ),
+                  if (_isOwnReview)
+                    OutlinedButton.icon(
+                      onPressed: _onDeleteReview,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.textSecondary,
+                        side: BorderSide(
+                          color: AppColors.border.withValues(alpha: 0.9),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        minimumSize: const Size(0, 36),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      icon: const Icon(
+                        Icons.delete_outline_rounded,
+                        size: 18,
+                        color: AppColors.textSecondary,
+                      ),
+                      label: Text(
+                        'Delete',
+                        style: AppTextStyles.body.copyWith(
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
                   const Spacer(),
-                  if (_viewerUserId == null ||
-                      _viewerUserId!.trim() != _currentReview.ownerId.trim())
+                  if (!_isOwnReview)
                     TextButton.icon(
                       onPressed: () async {
                         await openReviewReportFlow(

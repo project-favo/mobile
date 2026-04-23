@@ -13,6 +13,8 @@ import '../../../features/activity/presentation/activity_page.dart';
 import '../../../core/widgets/custom_refresh_indicator.dart';
 import '../../../core/widgets/skeleton_loader.dart';
 import '../../../core/routes/custom_page_transitions.dart';
+import '../../../core/utils/in_flight_id_lock.dart';
+import '../../../core/cache/following_id_set_cache.dart';
 import '../../../core/cache/search_warm_cache.dart';
 import '../../../core/cache/friend_feed_memory_cache.dart';
 import '../../../features/activity/domain/activity_type.dart';
@@ -25,9 +27,12 @@ import 'search_page.dart';
 import 'friend_feed_page.dart';
 import 'profile/pages/profile_page.dart';
 import 'review/pages/review_page.dart';
+import 'review/review_page_pop_result.dart';
 import '../data/repositories/tag_repository.dart';
 import '../data/repositories/product_repository.dart';
+import '../data/repositories/review_repository.dart';
 import '../data/repositories/interaction_repository.dart';
+import '../data/services/auth_service.dart';
 import '../data/services/review_prefetch_service.dart';
 import '../data/models/tag_dto.dart';
 import '../data/models/product_dto.dart';
@@ -49,8 +54,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   int _selectedSubCategoryIndex = -1; // -1 means none
   final TagRepository _tagRepository = TagRepository();
   final ProductRepository _productRepository = ProductRepository();
+  final ReviewRepository _reviewRepository = ReviewRepository();
   final InteractionRepository _interactionRepository = InteractionRepository();
   final SessionHelper _sessionHelper = SessionHelper();
+  final AuthService _authService = AuthService();
   final FriendsFeedRepository _friendsFeedRepository = FriendsFeedRepository();
 
   List<TagDto> _tags = [];
@@ -84,16 +91,19 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   /// [ProductCard] key parçası — ürün detayından dönünce like sayısı tazelensin.
   final Map<String, int> _productCardResync = {};
+  final InFlightIdLock _homeProductLikeLock = InFlightIdLock();
 
   // --- Banner collapse state ---
   bool _isBannerCollapsed = false;
 
-  // --- Inline search ---
+  // --- Inline search (aynı katalog: Search ekranı gibi tüm ürünler) ---
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
   String _searchQuery = '';
   List<ProductDto> _searchResults = [];
   Timer? _searchDebounce;
+  int _searchReqSeq = 0;
+  bool _isSearchLoading = false;
 
   Route _noAnimationRoute(Widget page) {
     return PageRouteBuilder(
@@ -182,8 +192,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _loadData();
     }
     MessageUnreadService.instance.attach();
+    unawaited(
+      FollowingIdSetCache.instance.ensureLoaded(
+        _interactionRepository,
+        _authService,
+        _sessionHelper,
+      ),
+    );
     _scrollController.addListener(_onScroll);
     unawaited(_loadFriendLikers());
+    unawaited(_warmSearchCatalogInBackground());
     _searchController.addListener(() {
       _onSearchChanged(_searchController.text);
     });
@@ -277,6 +295,27 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     return map;
   }
 
+  /// Search sayfasıyla aynı: GET /api/products tüm ürün listesi (önbellek + arka planda ısıtma).
+  Future<void> _warmSearchCatalogInBackground() async {
+    if (SearchWarmCache.instance.peekSeedProducts().isNotEmpty) return;
+    try {
+      final products = await _productRepository.getAllProductsRaw();
+      if (products.isNotEmpty) {
+        SearchWarmCache.instance.rememberSeedProducts(products);
+      }
+    } catch (_) {}
+  }
+
+  Future<List<ProductDto>> _ensureSearchCatalog() async {
+    var pool = SearchWarmCache.instance.peekSeedProducts();
+    if (pool.isNotEmpty) return pool;
+    final products = await _productRepository.getAllProductsRaw();
+    if (products.isNotEmpty) {
+      SearchWarmCache.instance.rememberSeedProducts(products);
+    }
+    return products;
+  }
+
   void _onSearchChanged(String query) {
     final q = query.trim().toLowerCase();
     _searchDebounce?.cancel();
@@ -284,25 +323,53 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       setState(() {
         _searchQuery = '';
         _searchResults = [];
+        _isSearchLoading = false;
       });
       return;
     }
+    final req = ++_searchReqSeq;
     _searchDebounce = Timer(const Duration(milliseconds: 280), () {
-      if (!mounted) return;
-      final pool = SearchWarmCache.instance.peekSeedProducts().isNotEmpty
-          ? SearchWarmCache.instance.peekSeedProducts()
-          : _filteredProducts;
-      final results = pool.where((p) {
-        final name = p.name.toLowerCase();
-        final tag = p.tag.name.toLowerCase();
-        final path = (p.tag.categoryPath ?? '').toLowerCase();
-        return name.contains(q) || tag.contains(q) || path.contains(q);
-      }).toList();
-      setState(() {
-        _searchQuery = q;
-        _searchResults = results;
-      });
+      unawaited(_runHomeSearch(q, req));
     });
+  }
+
+  /// [SearchPage] ile aynı eşleme: ürün adı, etiket adı, kategori path parçaları.
+  Future<void> _runHomeSearch(String normalizedQuery, int req) async {
+    if (!mounted || req != _searchReqSeq) return;
+    setState(() {
+      _searchQuery = normalizedQuery;
+      _isSearchLoading = true;
+    });
+    try {
+      final pool = await _ensureSearchCatalog();
+      if (!mounted || req != _searchReqSeq) return;
+      final results = pool.where((product) {
+        final productName = product.name.toLowerCase();
+        final tagName = product.tag.name.toLowerCase();
+        final tagPathSegments = (product.tag.categoryPath ?? '')
+            .toLowerCase()
+            .split('.')
+            .where((segment) => segment.isNotEmpty)
+            .toList();
+        final nameMatch = productName.contains(normalizedQuery);
+        final ownTagMatch = tagName.contains(normalizedQuery) ||
+            tagPathSegments.any(
+              (segment) => segment.contains(normalizedQuery),
+            );
+        return nameMatch || ownTagMatch;
+      }).toList();
+      if (!mounted || req != _searchReqSeq) return;
+      setState(() {
+        _searchResults = results;
+        _isSearchLoading = false;
+      });
+    } catch (_) {
+      if (!mounted || req != _searchReqSeq) return;
+      setState(() {
+        _isSearchLoading = false;
+        _searchResults = [];
+      });
+    }
   }
 
   Future<void> _onBannerTap(_TopPicksTab tab) async {
@@ -435,9 +502,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _isFiltering = false;
       });
 
-      if (!append || page == 0) {
-        SearchWarmCache.instance.rememberSeedProducts(_filteredProducts);
-      }
+      // Ana sayfa feed'ini [SearchWarmCache] üzerine yazma — inline arama tüm katalogu kullansın.
 
       // Trendyol-style warmup: prefetch reviews for likely-to-open products.
       ReviewPrefetchService.instance.prefetchForProducts(
@@ -552,11 +617,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             loadReviewCount: true,
             friendAvatarUrls: _friendLikersMap[product.id] ?? const [],
             onTap: () async {
-              await Navigator.push<ProductDto>(
+              final r = await Navigator.push<ReviewPagePopResult?>(
                 context,
                 SlideRightRoute(page: ReviewPage(product: product)),
               );
-              if (mounted) {
+              if (!mounted) return;
+              if (r != null) {
+                _applyProductFromReviewExit(r);
+              } else {
                 unawaited(_refreshProductLikeStatus(product.id));
               }
             },
@@ -572,43 +640,66 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 );
                 return;
               }
-              final tabProducts = _topPicksByTab[tab]!;
-              final idx = tabProducts.indexWhere((p) => p.id == product.id);
-              if (idx != -1) {
-                final currentLikeStatus = tabProducts[idx].isLiked ?? false;
-                setState(() {
-                  _topPicksByTab[tab]![idx] =
-                      tabProducts[idx].copyWith(isLiked: !currentLikeStatus);
-                });
-              }
+              if (!_homeProductLikeLock.tryEnter(product.id)) return;
               try {
-                final token = await _sessionHelper.getTokenAndSetHeader();
-                if (token == null) {
-                  throw Exception('Failed to get Firebase ID token');
-                }
-                final newLikeStatus =
-                    await _interactionRepository.toggleProductLike(token, product.id);
+                final tabProducts = _topPicksByTab[tab]!;
+                final idx = tabProducts.indexWhere((p) => p.id == product.id);
+                final bool beforeLike =
+                    idx != -1 ? (tabProducts[idx].isLiked ?? false) : (product.isLiked ?? false);
                 if (idx != -1) {
-                  setState(() {
-                    _topPicksByTab[tab]![idx] =
-                        _topPicksByTab[tab]![idx].copyWith(isLiked: newLikeStatus);
-                  });
-                }
-              } catch (e) {
-                if (idx != -1) {
-                  setState(() {
-                    _topPicksByTab[tab]![idx] =
-                        _topPicksByTab[tab]![idx].copyWith(isLiked: product.isLiked);
-                  });
-                }
-                if (mounted) {
-                  messenger.showSnackBar(
-                    SnackBar(
-                      content: Text(ErrorHandler.getUserFriendlyMessage(e)),
-                      backgroundColor: AppColors.error,
-                    ),
+                  applyLocalLikeCountDeltaOnToggle(
+                    product.id,
+                    wasLiked: beforeLike,
+                    isNowLiked: !beforeLike,
                   );
+                  setState(() {
+                    _topPicksByTab[tab]![idx] =
+                        tabProducts[idx].copyWith(isLiked: !beforeLike);
+                  });
                 }
+                try {
+                  final token = await _sessionHelper.getTokenAndSetHeader();
+                  if (token == null) {
+                    throw Exception('Failed to get Firebase ID token');
+                  }
+                  final newLikeStatus =
+                      await _interactionRepository.toggleProductLike(token, product.id);
+                  if (newLikeStatus != !beforeLike) {
+                    applyLocalLikeCountDeltaOnToggle(
+                      product.id,
+                      wasLiked: !beforeLike,
+                      isNowLiked: newLikeStatus,
+                    );
+                  }
+                  if (idx != -1) {
+                    setState(() {
+                      _topPicksByTab[tab]![idx] =
+                          _topPicksByTab[tab]![idx].copyWith(isLiked: newLikeStatus);
+                    });
+                  }
+                } catch (e) {
+                  if (idx != -1) {
+                    applyLocalLikeCountDeltaOnToggle(
+                      product.id,
+                      wasLiked: !beforeLike,
+                      isNowLiked: beforeLike,
+                    );
+                    setState(() {
+                      _topPicksByTab[tab]![idx] =
+                          _topPicksByTab[tab]![idx].copyWith(isLiked: beforeLike);
+                    });
+                  }
+                  if (mounted) {
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text(ErrorHandler.getUserFriendlyMessage(e)),
+                        backgroundColor: AppColors.error,
+                      ),
+                    );
+                  }
+                }
+              } finally {
+                _homeProductLikeLock.leave(product.id);
               }
             },
           );
@@ -616,8 +707,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       );
     }
 
-    // ── Inline search results ──────────────────────────────────────────────
+    // ── Inline search results (Search ekranıyla aynı katalog + yüklenme) ──
     if (_searchQuery.isNotEmpty) {
+      if (_isSearchLoading) {
+        return const Center(
+          child: ListLoadMoreSkeleton(),
+        );
+      }
       if (_searchResults.isEmpty) {
         return Center(
           child: Padding(
@@ -662,11 +758,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             loadReviewCount: false,
             friendAvatarUrls: _friendLikersMap[product.id] ?? const [],
             onTap: () async {
-              await Navigator.push<ProductDto>(
+              final r = await Navigator.push<ReviewPagePopResult?>(
                 context,
                 SlideRightRoute(page: ReviewPage(product: product)),
               );
-              if (mounted) {
+              if (!mounted) return;
+              if (r != null) {
+                _applyProductFromReviewExit(r);
+              } else {
                 unawaited(_refreshProductLikeStatus(product.id));
               }
             },
@@ -726,11 +825,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               loadReviewCount: true,
               friendAvatarUrls: _friendLikersMap[product.id] ?? const [],
               onTap: () async {
-                await Navigator.push<ProductDto>(
+                final r = await Navigator.push<ReviewPagePopResult?>(
                   context,
                   SlideRightRoute(page: ReviewPage(product: product)),
                 );
-                if (mounted) {
+                if (!mounted) return;
+                if (r != null) {
+                  _applyProductFromReviewExit(r);
+                } else {
                   await _refreshProductLikeStatus(product.id);
                 }
               },
@@ -746,47 +848,70 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   );
                   return;
                 }
-                final filteredIndex =
-                    _filteredProducts.indexWhere((p) => p.id == product.id);
-                if (filteredIndex != -1) {
-                  final currentLikeStatus =
-                      _filteredProducts[filteredIndex].isLiked ?? false;
-                  setState(() {
-                    _filteredProducts[filteredIndex] =
-                        _filteredProducts[filteredIndex]
-                            .copyWith(isLiked: !currentLikeStatus);
-                  });
-                }
+                if (!_homeProductLikeLock.tryEnter(product.id)) return;
                 try {
-                  final token = await _sessionHelper.getTokenAndSetHeader();
-                  if (token == null) {
-                    throw Exception('Failed to get Firebase ID token');
-                  }
-                  final newLikeStatus = await _interactionRepository
-                      .toggleProductLike(token, product.id);
+                  final filteredIndex =
+                      _filteredProducts.indexWhere((p) => p.id == product.id);
+                  final bool beforeLike = filteredIndex != -1
+                      ? (_filteredProducts[filteredIndex].isLiked ?? false)
+                      : (product.isLiked ?? false);
                   if (filteredIndex != -1) {
-                    setState(() {
-                      _filteredProducts[filteredIndex] =
-                          _filteredProducts[filteredIndex]
-                              .copyWith(isLiked: newLikeStatus);
-                    });
-                  }
-                } catch (e) {
-                  if (filteredIndex != -1) {
-                    setState(() {
-                      _filteredProducts[filteredIndex] =
-                          _filteredProducts[filteredIndex]
-                              .copyWith(isLiked: product.isLiked);
-                    });
-                  }
-                  if (mounted) {
-                    messenger.showSnackBar(
-                      SnackBar(
-                        content: Text(ErrorHandler.getUserFriendlyMessage(e)),
-                        backgroundColor: AppColors.error,
-                      ),
+                    applyLocalLikeCountDeltaOnToggle(
+                      product.id,
+                      wasLiked: beforeLike,
+                      isNowLiked: !beforeLike,
                     );
+                    setState(() {
+                      _filteredProducts[filteredIndex] =
+                          _filteredProducts[filteredIndex]
+                              .copyWith(isLiked: !beforeLike);
+                    });
                   }
+                  try {
+                    final token = await _sessionHelper.getTokenAndSetHeader();
+                    if (token == null) {
+                      throw Exception('Failed to get Firebase ID token');
+                    }
+                    final newLikeStatus = await _interactionRepository
+                        .toggleProductLike(token, product.id);
+                    if (newLikeStatus != !beforeLike) {
+                      applyLocalLikeCountDeltaOnToggle(
+                        product.id,
+                        wasLiked: !beforeLike,
+                        isNowLiked: newLikeStatus,
+                      );
+                    }
+                    if (filteredIndex != -1) {
+                      setState(() {
+                        _filteredProducts[filteredIndex] =
+                            _filteredProducts[filteredIndex]
+                                .copyWith(isLiked: newLikeStatus);
+                      });
+                    }
+                  } catch (e) {
+                    if (filteredIndex != -1) {
+                      applyLocalLikeCountDeltaOnToggle(
+                        product.id,
+                        wasLiked: !beforeLike,
+                        isNowLiked: beforeLike,
+                      );
+                      setState(() {
+                        _filteredProducts[filteredIndex] =
+                            _filteredProducts[filteredIndex]
+                                .copyWith(isLiked: beforeLike);
+                      });
+                    }
+                    if (mounted) {
+                      messenger.showSnackBar(
+                        SnackBar(
+                          content: Text(ErrorHandler.getUserFriendlyMessage(e)),
+                          backgroundColor: AppColors.error,
+                        ),
+                      );
+                    }
+                  }
+                } finally {
+                  _homeProductLikeLock.leave(product.id);
                 }
               },
             );
@@ -1233,7 +1358,48 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     );
   }
 
-  /// Product'ın like durumunu ve rating'ini backend'den yeniden çeker; grid + top picks güncellenir.
+  /// [ReviewPage] dönüşünde grid, sayı ve favori durumu anında (flash’sız) güncellenir.
+  void _applyProductFromReviewExit(ReviewPagePopResult r) {
+    final id = r.product.id;
+    seedProductCardSocialCaches(
+      id,
+      likeCount: r.likeCount,
+      reviewCount: r.reviewCount,
+    );
+    if (!mounted) return;
+    setState(() {
+      _mergeProductFromDetail(id, r.product, bumpResync: true);
+    });
+  }
+
+  void _mergeProductFromDetail(
+    String productId,
+    ProductDto updated, {
+    bool bumpResync = false,
+  }) {
+    if (bumpResync) {
+      _productCardResync[productId] = (_productCardResync[productId] ?? 0) + 1;
+    }
+    final fi = _filteredProducts.indexWhere((p) => p.id == productId);
+    if (fi != -1) {
+      _filteredProducts[fi] = updated;
+    }
+    for (final tab in _TopPicksTab.values) {
+      final list = _topPicksByTab[tab]!;
+      final i = list.indexWhere((p) => p.id == productId);
+      if (i != -1) {
+        final next = List<ProductDto>.from(list);
+        next[i] = updated;
+        _topPicksByTab[tab] = next;
+      }
+    }
+    final si = _searchResults.indexWhere((p) => p.id == productId);
+    if (si != -1) {
+      _searchResults[si] = updated;
+    }
+  }
+
+  /// Sistem geri / gesture ile null dönüşte: sunucu gerçeği (cache revalidate, flash yok).
   Future<void> _refreshProductLikeStatus(String productId) async {
     try {
       final token = await _sessionHelper.getTokenAndSetHeader();
@@ -1244,31 +1410,20 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         firebaseIdToken: token,
         bypassCache: true,
       );
-
+      final likeCount = await _interactionRepository.getProductLikeCount(productId);
+      final reviews = await _reviewRepository.getReviewsByProductId(
+        productId,
+        firebaseIdToken: token,
+      );
       if (!mounted) return;
-      invalidateProductCardSocialCaches(productId);
+      setProductCardSocialCaches(
+        productId,
+        likeCount: likeCount,
+        reviewCount: reviews.length,
+      );
+      if (!mounted) return;
       setState(() {
-        _productCardResync[productId] = (_productCardResync[productId] ?? 0) + 1;
-
-        final fi = _filteredProducts.indexWhere((p) => p.id == productId);
-        if (fi != -1) {
-          _filteredProducts[fi] = updatedProduct;
-        }
-
-        for (final tab in _TopPicksTab.values) {
-          final list = _topPicksByTab[tab]!;
-          final i = list.indexWhere((p) => p.id == productId);
-          if (i != -1) {
-            final next = List<ProductDto>.from(list);
-            next[i] = updatedProduct;
-            _topPicksByTab[tab] = next;
-          }
-        }
-
-        final si = _searchResults.indexWhere((p) => p.id == productId);
-        if (si != -1) {
-          _searchResults[si] = updatedProduct;
-        }
+        _mergeProductFromDetail(productId, updatedProduct, bumpResync: true);
       });
     } catch (_) {}
   }

@@ -14,12 +14,14 @@ class ProfileReviewRowCard extends StatelessWidget {
   final ReviewDto review;
   final String? productImageUrl;
   final VoidCallback onTap;
+  final VoidCallback? onDelete;
 
   const ProfileReviewRowCard({
     super.key,
     required this.review,
     required this.productImageUrl,
     required this.onTap,
+    this.onDelete,
   });
 
   /// Tek parça metin: `title · description` birleştirmesi satır sonlarında bozuk
@@ -35,81 +37,116 @@ class ProfileReviewRowCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final preview = previewText(review);
 
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        height: cardHeight,
-        padding: const EdgeInsets.all(AppSpacing.large),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: AppColors.border.withValues(alpha: 0.45),
-          ),
+    return Container(
+      height: cardHeight,
+      padding: const EdgeInsets.all(AppSpacing.large),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: AppColors.border.withValues(alpha: 0.45),
         ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            UniformProductThumbnail(
-              imageUrl: productImageUrl,
-              size: thumbSize,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  UniformProductThumbnail(
+                    imageUrl: productImageUrl,
+                    size: thumbSize,
+                  ),
+                  const SizedBox(width: AppSpacing.large),
+                  Expanded(
+                    child: SizedBox(
+                      height: thumbSize,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            review.productName,
+                            style: AppTextStyles.body.copyWith(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              height: 1.2,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: AppSpacing.small),
+                          Expanded(
+                            child: Align(
+                              alignment: Alignment.topLeft,
+                              child: Text(
+                                preview,
+                                style: AppTextStyles.bodySmall.copyWith(
+                                  color: AppColors.textSecondary,
+                                  height: 1.35,
+                                ),
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.star_rounded,
+                                size: 15,
+                                color: AppColors.primary,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${review.rating} / 5',
+                                style: AppTextStyles.bodySmall.copyWith(
+                                  color: AppColors.textSecondary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(width: AppSpacing.large),
-            Expanded(
-              child: SizedBox(
-                height: thumbSize,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      review.productName,
-                      style: AppTextStyles.body.copyWith(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        height: 1.2,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+          ),
+          if (onDelete != null)
+            Padding(
+              padding: const EdgeInsets.only(left: AppSpacing.small),
+              child: Tooltip(
+                message: 'Delete review',
+                child: Material(
+                  color: AppColors.background,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    side: BorderSide(
+                      color: AppColors.border.withValues(alpha: 0.75),
                     ),
-                    const SizedBox(height: AppSpacing.small),
-                    Expanded(
-                      child: Align(
-                        alignment: Alignment.topLeft,
-                        child: Text(
-                          preview,
-                          style: AppTextStyles.bodySmall.copyWith(
-                            color: AppColors.textSecondary,
-                            height: 1.35,
-                          ),
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                  ),
+                  child: InkWell(
+                    onTap: onDelete,
+                    borderRadius: BorderRadius.circular(10),
+                    child: const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: Icon(
+                        Icons.delete_outline_rounded,
+                        size: 20,
+                        color: AppColors.textSecondary,
                       ),
                     ),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.star_rounded,
-                          size: 15,
-                          color: AppColors.primary,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${review.rating} / 5',
-                          style: AppTextStyles.bodySmall.copyWith(
-                            color: AppColors.textSecondary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
-          ],
-        ),
+        ],
       ),
     );
   }

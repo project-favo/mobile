@@ -35,6 +35,38 @@ class UserResponseDto {
     return d != null && d.isNotEmpty;
   }
 
+  /// Profil fotoğrafı kaldırıldığında backend bazen eski URL/base64 döndürebilir; UI’da anında placeholder için.
+  UserResponseDto withProfileMediaCleared() {
+    return UserResponseDto(
+      id: id,
+      email: email,
+      userName: userName,
+      name: name,
+      surname: surname,
+      birthdate: birthdate,
+      profileImageUrl: null,
+      profilePhotoData: null,
+      profilePhotoMimeType: null,
+      emailVerified: emailVerified,
+    );
+  }
+
+  /// Sadece görünen kullanıcı adı (büyük/küçük harf) yerel güncelleme — sunucu aynı kalırsa UI senkronu için.
+  UserResponseDto withUserName(String newUserName) {
+    return UserResponseDto(
+      id: id,
+      email: email,
+      userName: newUserName,
+      name: name,
+      surname: surname,
+      birthdate: birthdate,
+      profileImageUrl: profileImageUrl,
+      profilePhotoData: profilePhotoData,
+      profilePhotoMimeType: profilePhotoMimeType,
+      emailVerified: emailVerified,
+    );
+  }
+
   /// `/api/auth/me` seyrek dönerse; `/api/users/{id}` vb. ile gelen avatarı birleştirir.
   UserResponseDto withFilledAvatarFrom(UserResponseDto? other) {
     if (other == null) return this;

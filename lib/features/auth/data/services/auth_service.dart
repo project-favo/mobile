@@ -1,6 +1,9 @@
 import 'package:dio/dio.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../../../core/cache/current_user_cache.dart';
+import '../../../../core/cache/following_id_set_cache.dart';
 import '../../../../core/utils/session_helper.dart';
+import '../../../../core/utils/user_display_name_prefs.dart';
 import '../../../../core/utils/exceptions.dart';
 import '../models/user_response_dto.dart';
 import '../models/user_update_request_dto.dart';
@@ -60,6 +63,14 @@ class AuthService {
     return _authRepository.login(idToken);
   }
 
+  Future<UserResponseDto> _finalizeUserResponse(UserResponseDto u) async {
+    final merged = await UserDisplayNamePrefs.instance.mergeInto(u);
+    if (merged.id.trim().isNotEmpty) {
+      CurrentUserCache.instance.rememberFromDto(merged);
+    }
+    return merged;
+  }
+
   /// Mevcut Firebase oturumu ile `POST /api/auth/login` (kayıt / e-posta doğrulama sonrası).
   Future<UserResponseDto> establishBackendSession() async {
     final user = _firebaseAuth.currentUser;
@@ -67,7 +78,7 @@ class AuthService {
       throw Exception('Not signed in');
     }
     final token = await _getFreshIdToken(user);
-    return _backendLoginWithIdToken(token);
+    return _finalizeUserResponse(await _backendLoginWithIdToken(token));
   }
 
   /// Firebase + backend login. E-posta doğrulanmamış olsa da oturum açılır (profilde uyarı).
@@ -94,7 +105,7 @@ class AuthService {
       try {
         final login = await _backendLoginWithIdToken(idToken);
         _sessionHelper.markBackendLoginSucceeded();
-        return login;
+        return _finalizeUserResponse(login);
       } on DioException catch (e) {
         if (looksLikeDeactivatedAccountMessage(
           dioResponseDataAsSearchString(e.response?.data),
@@ -225,7 +236,7 @@ class AuthService {
     }
 
     try {
-      return await _authRepository.getMe(idToken);
+      return await _finalizeUserResponse(await _authRepository.getMe(idToken));
     } catch (e) {
       final buf = StringBuffer(e.toString());
       if (e is DioException) {
@@ -233,16 +244,16 @@ class AuthService {
       }
       final msg = buf.toString().toUpperCase();
       if (msg.contains('EMAIL_NOT_VERIFIED')) {
-        return _fallbackUserWhenMeBlocked(user);
+        return await _finalizeUserResponse(_fallbackUserWhenMeBlocked(user));
       }
       if (msg.contains('NO_SUCH')) {
         try {
           await user.reload();
           idToken = await freshToken();
           if (idToken == null) {
-            return _fallbackUserWhenMeBlocked(user);
+            return await _finalizeUserResponse(_fallbackUserWhenMeBlocked(user));
           }
-          return await _authRepository.login(idToken);
+          return await _finalizeUserResponse(await _authRepository.login(idToken));
         } catch (e2) {
           final buf2 = StringBuffer(e2.toString());
           if (e2 is DioException) {
@@ -250,7 +261,7 @@ class AuthService {
           }
           final m2 = buf2.toString().toUpperCase();
           if (m2.contains('NO_SUCH')) {
-            return _fallbackUserWhenMeBlocked(user);
+            return await _finalizeUserResponse(_fallbackUserWhenMeBlocked(user));
           }
           rethrow;
         }
@@ -275,17 +286,12 @@ class AuthService {
 
   /// Me update endpoint - User bilgilerini günceller
   Future<UserResponseDto> updateMe(UserUpdateRequestDto request) async {
-    try {
-      final user = _firebaseAuth.currentUser;
-      if (user == null) {
-        throw Exception('User not authenticated');
-      }
-
-      final idToken = await _getFreshIdToken(user);
-      return await _authRepository.updateMe(idToken, request);
-    } catch (e) {
-      throw Exception(e.toString());
+    final user = _firebaseAuth.currentUser;
+    if (user == null) {
+      throw Exception('User not authenticated');
     }
+    final idToken = await _getFreshIdToken(user);
+    return _finalizeUserResponse(await _authRepository.updateMe(idToken, request));
   }
 
   /// E-posta doğrulama kodunu backend'e gönderir.
@@ -293,7 +299,9 @@ class AuthService {
     final user = _firebaseAuth.currentUser;
     if (user == null) throw Exception('User not authenticated');
     final token = await _getFreshIdToken(user);
-    return _authRepository.verifyEmail(token, code);
+    return _finalizeUserResponse(
+      await _authRepository.verifyEmail(token, code),
+    );
   }
 
   /// Şifre sıfırlama: backend `POST /api/auth/forgot-password` (public, Bearer yok).
@@ -371,6 +379,8 @@ class AuthService {
   /// Çıkış yapar
   Future<void> signOut() async {
     _sessionHelper.clearSession();
+    CurrentUserCache.instance.clear();
+    FollowingIdSetCache.instance.invalidate();
     await _firebaseAuth.signOut();
   }
 

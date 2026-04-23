@@ -2,13 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../core/cache/following_id_set_cache.dart';
 import '../../../core/notifications/notification_realtime_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/utils/error_handler.dart';
+import '../../../core/utils/session_helper.dart';
 import '../../../core/widgets/main_bottom_nav_items.dart';
-import '../../../core/widgets/skeleton_loader.dart';
 import '../domain/activity_models.dart';
 import '../domain/activity_type.dart';
 import '../../auth/presentation/home_page.dart';
@@ -16,11 +17,14 @@ import '../../auth/presentation/friend_feed_page.dart';
 import '../../auth/presentation/profile/pages/profile_page.dart';
 import '../../auth/presentation/profile/pages/user_profile_page.dart';
 import '../../auth/presentation/review/pages/review_page.dart';
+import '../../auth/data/repositories/interaction_repository.dart';
+import '../../auth/data/services/auth_service.dart';
 import '../../auth/presentation/search_page.dart';
 import '../../../core/cache/product_memory_cache.dart';
 import '../../auth/data/models/product_dto.dart';
 import '../../auth/data/models/tag_dto.dart';
 import 'activity_controller.dart';
+import 'widgets/activity_feed_list_skeleton.dart';
 import 'widgets/activity_feed_row.dart';
 
 /// Activity feed backed by the notifications API (app color palette).
@@ -96,6 +100,13 @@ class _ActivityPageState extends State<ActivityPage>
       _onRealtimePush,
     );
     _scrollController.addListener(_onScroll);
+    unawaited(
+      FollowingIdSetCache.instance.ensureLoaded(
+        InteractionRepository(),
+        AuthService(),
+        SessionHelper(),
+      ),
+    );
     _controller.hydrateFromCache();
     unawaited(_bootstrapActivity());
   }
@@ -342,7 +353,9 @@ class _ActivityPageState extends State<ActivityPage>
         listenable: _controller,
         builder: (context, _) {
           if (_controller.loadingFirst) {
-            return _ActivityFeedSkeletonList(controller: _scrollController);
+            return ActivityFeedListSkeleton(
+              scrollController: _scrollController,
+            );
           }
 
           if (_controller.errorMessage != null) {
@@ -438,7 +451,7 @@ class _ActivityPageState extends State<ActivityPage>
               separatorBuilder: (_, __) => const SizedBox(height: 10),
               itemBuilder: (context, index) {
                 if (index >= visible.length) {
-                  return const _ActivityLoadMoreSkeleton();
+                  return const ActivityFeedLoadMoreSkeleton();
                 }
                 final item = visible[index];
                 return Container(
@@ -472,122 +485,6 @@ class _ActivityPageState extends State<ActivityPage>
         },
       ),
       bottomNavigationBar: _buildBottomNavigationBar(),
-    );
-  }
-}
-
-/// İlk yükleme: [ActivityFeedRow] ile aynı hizalama (avatar + metin + isteğe bağlı thumb).
-class _ActivityFeedSkeletonList extends StatelessWidget {
-  const _ActivityFeedSkeletonList({required this.controller});
-
-  final ScrollController controller;
-
-  static const _dividerAlpha = 0.12;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView.separated(
-      controller: controller,
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.only(top: 4),
-      itemCount: 9,
-      separatorBuilder:
-          (_, __) => Divider(
-            height: 1,
-            thickness: 1,
-            color: AppColors.textSecondary.withValues(alpha: _dividerAlpha),
-          ),
-      itemBuilder: (context, index) {
-        final showThumb = index % 3 != 1;
-        final line2Width = index % 2 == 0 ? 220.0 : 150.0;
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(width: 14),
-              ClipOval(
-                child: SkeletonLoader(
-                  width: 40,
-                  height: 40,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: SkeletonLoader(
-                            width: double.infinity,
-                            height: 16,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        SkeletonLoader(
-                          width: 40,
-                          height: 12,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    SkeletonLoader(
-                      width: line2Width,
-                      height: 14,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  ],
-                ),
-              ),
-              if (showThumb) ...[
-                const SizedBox(width: 10),
-                SkeletonLoader(
-                  width: 44,
-                  height: 56,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              ],
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _ActivityLoadMoreSkeleton extends StatelessWidget {
-  const _ActivityLoadMoreSkeleton();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          ClipOval(
-            child: SkeletonLoader(
-              width: 36,
-              height: 36,
-              borderRadius: BorderRadius.circular(18),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: SkeletonLoader(
-              width: double.infinity,
-              height: 14,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

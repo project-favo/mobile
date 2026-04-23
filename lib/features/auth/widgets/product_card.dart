@@ -87,6 +87,8 @@ class _ProductCardState extends State<ProductCard> {
   void initState() {
     super.initState();
     if (widget.loadReviewCount) {
+      _reviewCount = _ReviewCountCache.get(widget.productId);
+      _likeCount = _LikeCountCache.get(widget.productId);
       _loadSocialCounts();
     }
   }
@@ -94,21 +96,17 @@ class _ProductCardState extends State<ProductCard> {
   @override
   void didUpdateWidget(ProductCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.isFavorite != widget.isFavorite && _likeCount != null) {
-      final delta = widget.isFavorite ? 1 : -1;
-      final updated = (_likeCount! + delta).clamp(0, 999999);
-      _LikeCountCache.set(widget.productId, updated);
+    if (!widget.loadReviewCount) return;
+    if (oldWidget.isFavorite == widget.isFavorite) return;
+    final c = _LikeCountCache.get(widget.productId);
+    if (c != null) {
       setState(() {
-        _likeCount = updated;
+        _likeCount = c;
       });
     }
   }
 
   Future<void> _loadSocialCounts() async {
-    // Basit cache: productId -> reviewCount, böylece liste yeniden
-    // yüklense bile sayı anında görünür, gidip gelmez.
-    _reviewCount = _ReviewCountCache.get(widget.productId);
-    _likeCount = _LikeCountCache.get(widget.productId);
     try {
       final reviewRepository = ReviewRepository();
       final interactionRepository = InteractionRepository();
@@ -413,4 +411,40 @@ void invalidateProductCardSocialCaches(String productId) {
   if (productId.isEmpty) return;
   _ReviewCountCache.remove(productId);
   _LikeCountCache.remove(productId);
+}
+
+/// Detay ekranından dönmeden hemen (sunucu refetch yok) grid sayılarını doldurur; flash yapmaz.
+void seedProductCardSocialCaches(
+  String productId, {
+  required int likeCount,
+  required int reviewCount,
+}) {
+  if (productId.isEmpty) return;
+  _LikeCountCache.set(productId, likeCount);
+  _ReviewCountCache.set(productId, reviewCount);
+}
+
+/// Sunucudan gelen sayaçlarla in-memory cache’i günceller; kartı söküp [invalidate] etmez
+/// (böylece eski değer → 0/loading anı olmaz).
+void setProductCardSocialCaches(
+  String productId, {
+  required int likeCount,
+  required int reviewCount,
+}) {
+  if (productId.isEmpty) return;
+  _LikeCountCache.set(productId, likeCount);
+  _ReviewCountCache.set(productId, reviewCount);
+}
+
+/// Ana sayfa grid’de like toggler; in-memory like sayacını [seed] değerinin üstüne tekrar +1 eklemesin.
+void applyLocalLikeCountDeltaOnToggle(
+  String productId, {
+  required bool wasLiked,
+  required bool isNowLiked,
+}) {
+  if (productId.isEmpty) return;
+  if (wasLiked == isNowLiked) return;
+  final cur = _LikeCountCache.get(productId) ?? 0;
+  final next = (cur + (isNowLiked ? 1 : -1)).clamp(0, 999999);
+  _LikeCountCache.set(productId, next);
 }

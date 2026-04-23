@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../../../core/theme/app_colors.dart';
+import 'review_delete_action.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 
@@ -16,6 +17,7 @@ class ReviewCard extends StatelessWidget {
   final bool showChatIcon;
   final VoidCallback? onChatTap;
   final VoidCallback? onReportTap;
+  final VoidCallback? onDeleteTap;
   final bool isCurrentUser;
   final String? reviewDateLabel;
 
@@ -33,6 +35,7 @@ class ReviewCard extends StatelessWidget {
     this.showChatIcon = false,
     this.onChatTap,
     this.onReportTap,
+    this.onDeleteTap,
     this.isCurrentUser = false,
     this.reviewDateLabel,
   });
@@ -183,6 +186,16 @@ class ReviewCard extends StatelessWidget {
                           ],
                         ),
                       ),
+                      if (onDeleteTap != null) ...[
+                        const SizedBox(width: 10),
+                        Container(
+                          width: 1,
+                          height: 14,
+                          color: AppColors.border,
+                        ),
+                        const SizedBox(width: 10),
+                        ReviewInlineDeleteIcon(onTap: onDeleteTap!),
+                      ],
                       if (onReportTap != null) ...[
                         const SizedBox(width: 10),
                         Container(

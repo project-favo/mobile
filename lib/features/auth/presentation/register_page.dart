@@ -8,6 +8,7 @@ import '../../../core/widgets/app_button.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/error_handler.dart';
+import '../../../core/utils/username_input_rules.dart';
 import '../data/services/auth_service.dart';
 import '../data/models/register_request_dto.dart';
 import 'register_firebase_verify_gate_page.dart';
@@ -136,15 +137,10 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 
   String? _userNameValidator(String? v) {
-    // Önce backend error'u kontrol et (username zaten alınmış gibi)
     if (_registerError != null && _registerError!.toLowerCase().contains('username')) {
       return _registerError;
     }
-    
-    final value = (v ?? '').trim();
-    if (value.isEmpty) return "Username is required";
-    if (value.length < 3) return "Min 3 characters";
-    return null;
+    return UsernameInputRules.validateForForm(v);
   }
 
   String? _nameValidator(String? v) {

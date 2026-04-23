@@ -13,8 +13,10 @@ import '../../../../../core/routes/custom_page_transitions.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/utils/product_rating_display.dart';
 import '../../../../../core/widgets/new_product_badge.dart';
+import '../../../../../core/cache/current_user_cache.dart';
 import '../../../../../core/cache/product_memory_cache.dart';
 import '../../../../../core/cache/review_memory_cache.dart';
+import '../../../../../core/utils/in_flight_id_lock.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/models/review_dto.dart';
@@ -29,6 +31,8 @@ import 'review_detail_page.dart';
 import 'compare_product_select_page.dart';
 import '../../messages/product_ai_chat_page.dart';
 import '../../profile/pages/user_profile_page.dart';
+import '../review_page_pop_result.dart';
+import '../widgets/review_delete_flow.dart';
 
 class ReviewPage extends StatefulWidget {
   /// Tam product verilirse doğrudan kullanılır.
@@ -62,6 +66,9 @@ class _ReviewPageState extends State<ReviewPage> {
   Map<int, int>? _cachedRatingCounts;
   bool _isRatingExpanded = false;
   bool _isDescriptionExpanded = false;
+  final InFlightFlag _productPageLikeLock = InFlightFlag();
+  final InFlightIdLock _reviewListLikeLock = InFlightIdLock();
+  final InFlightIdLock _reviewDeleteLock = InFlightIdLock();
   static const EdgeInsets _contentHorizontalPadding = EdgeInsets.symmetric(
     horizontal: AppSpacing.xxLarge,
   );
@@ -203,9 +210,22 @@ class _ReviewPageState extends State<ReviewPage> {
     );
   }
 
+  bool _isMyReview(ReviewDto review) {
+    if (CurrentUserCache.instance.isMyReview(review)) return true;
+    final id = _currentUserId;
+    if (id == null) return false;
+    return review.ownerId.trim() == id.trim();
+  }
+
   @override
   void initState() {
     super.initState();
+    final cu = CurrentUserCache.instance;
+    if (cu.hasUserId) {
+      _currentUserId = cu.userId;
+      _currentUsername = cu.userName;
+    }
+    unawaited(_loadCurrentUserEarly());
     if (widget.product != null) {
       _currentProduct = widget.product!;
       ProductMemoryCache.instance.remember(_currentProduct);
@@ -232,6 +252,35 @@ class _ReviewPageState extends State<ReviewPage> {
     _hydrateReviewsFromCache();
     _loadReviews(background: _reviews.isNotEmpty);
     _loadProductById();
+  }
+
+  /// Review satırında kendi incelemeni tespit et: [getMe] ürün/review cevabından önce tamamlanır, gri→kırmızı flash olmaz.
+  Future<void> _loadCurrentUserEarly() async {
+    final u = FirebaseAuth.instance.currentUser;
+    if (u == null) return;
+    final warm = CurrentUserCache.instance;
+    if (warm.hasUserId) {
+      if (mounted) {
+        setState(() {
+          _currentUserId = warm.userId;
+          _currentUsername = warm.userName;
+        });
+      } else {
+        _currentUserId = warm.userId;
+        _currentUsername = warm.userName;
+      }
+    }
+    if (_currentUserId != null && _currentUsername != null) return;
+    try {
+      final t = await _sessionHelper.ensureSession();
+      if (t == null || !mounted) return;
+      final me = await AuthService().getMe();
+      if (!mounted) return;
+      setState(() {
+        _currentUsername = me.userName;
+        _currentUserId = me.id;
+      });
+    } catch (_) {}
   }
 
   void _hydrateReviewsFromCache() {
@@ -466,7 +515,14 @@ class _ReviewPageState extends State<ReviewPage> {
         throw Exception('Failed to get Firebase ID token');
       }
 
-      // Mevcut kullanıcının backend username'ini al — sadece bir kez yükle
+      // Mevcut kullanıcı (önbellek veya getMe) — sadece bir kez
+      if (_currentUsername == null) {
+        final c = CurrentUserCache.instance;
+        if (c.hasUserId) {
+          _currentUsername = c.userName;
+          _currentUserId = c.userId;
+        }
+      }
       if (_currentUsername == null) {
         try {
           final authService = AuthService();
@@ -497,6 +553,29 @@ class _ReviewPageState extends State<ReviewPage> {
     }
   }
 
+  Future<void> _handleDeleteReview(ReviewDto review) async {
+    if (!_reviewDeleteLock.tryEnter(review.id)) return;
+    try {
+      final ok = await ReviewDeleteFlow.confirmAndDelete(
+        context,
+        repository: _reviewRepository,
+        sessionHelper: _sessionHelper,
+        reviewId: review.id,
+      );
+      if (!mounted || !ok) return;
+      setState(() {
+        _reviews.removeWhere((r) => r.id == review.id);
+        _cachedRatingCounts = null;
+      });
+      ReviewMemoryCache.instance.removeReviewFromProduct(
+        _currentProduct.id,
+        review.id,
+      );
+    } finally {
+      _reviewDeleteLock.leave(review.id);
+    }
+  }
+
   Future<void> _toggleLike() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
@@ -510,6 +589,7 @@ class _ReviewPageState extends State<ReviewPage> {
       }
       return;
     }
+    if (!_productPageLikeLock.tryEnter()) return;
 
     // Optimistic update - UI'ı hemen güncelle (loading indicator yok)
     final previousLikeStatus = _currentProduct.isLiked ?? false;
@@ -551,6 +631,8 @@ class _ReviewPageState extends State<ReviewPage> {
           ),
         );
       }
+    } finally {
+      _productPageLikeLock.leave();
     }
   }
 
@@ -694,9 +776,22 @@ class _ReviewPageState extends State<ReviewPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, Object? value) {
+        if (didPop) return;
+        if (!context.mounted) return;
+        Navigator.of(context).pop(
+          ReviewPagePopResult(
+            product: _currentProduct,
+            likeCount: _likeCount,
+            reviewCount: _reviews.length,
+          ),
+        );
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         automaticallyImplyLeading: false,
@@ -706,7 +801,15 @@ class _ReviewPageState extends State<ReviewPage> {
         titleSpacing: 4,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: AppColors.primary),
-          onPressed: () => Navigator.of(context).pop(_currentProduct),
+          onPressed: () {
+            Navigator.of(context).pop(
+              ReviewPagePopResult(
+                product: _currentProduct,
+                likeCount: _likeCount,
+                reviewCount: _reviews.length,
+              ),
+            );
+          },
         ),
         title: Text(
           _currentProduct.name,
@@ -1257,17 +1360,13 @@ class _ReviewPageState extends State<ReviewPage> {
                         isSponsored: review.isCollaborative,
                         likeCount: review.likeCount,
                         isLiked: review.isLikedByCurrentUser,
-                        isCurrentUser:
-                            _currentUserId != null &&
-                            review.ownerId.trim() == _currentUserId!.trim(),
+                        isCurrentUser: _isMyReview(review),
                         showChatIcon:
                             _currentUsername != null &&
                             review.ownerUserName.toLowerCase() !=
                                 _currentUsername!.toLowerCase(),
                         onReportTap:
-                            _currentUserId != null &&
-                                    review.ownerId.trim() ==
-                                        _currentUserId!.trim()
+                            _isMyReview(review)
                                 ? null
                                 : () async {
                                   await openReviewReportFlow(
@@ -1275,10 +1374,13 @@ class _ReviewPageState extends State<ReviewPage> {
                                     reviewId: review.id,
                                   );
                                 },
+                        onDeleteTap:
+                            _isMyReview(review)
+                                ? () => _handleDeleteReview(review)
+                                : null,
                         onChatTap: () => _onChatIconTap(review),
                         onUsernameTap: () {
-                          if (_currentUserId != null &&
-                              review.ownerId.trim() == _currentUserId!.trim()) {
+                          if (_isMyReview(review)) {
                             return;
                           }
                           Navigator.push(
@@ -1293,8 +1395,7 @@ class _ReviewPageState extends State<ReviewPage> {
                           );
                         },
                         onTap: () async {
-                          // Review detail'den dönüldüğünde review listesini yenile
-                          final result = await Navigator.push(
+                          final result = await Navigator.push<dynamic>(
                             context,
                             SlideRightRoute(
                               page: ReviewDetailPage(
@@ -1303,8 +1404,8 @@ class _ReviewPageState extends State<ReviewPage> {
                               ),
                             ),
                           );
-                          // Review detail'de like yapıldıysa review listesini güncelle
-                          if (result == true) {
+                          if (result == true ||
+                              result == ReviewDeleteFlow.popResultDeleted) {
                             await _loadReviews();
                           }
                         },
@@ -1323,7 +1424,10 @@ class _ReviewPageState extends State<ReviewPage> {
                             }
                             return;
                           }
-
+                          if (!_reviewListLikeLock.tryEnter(review.id)) {
+                            return;
+                          }
+                          try {
                           // Optimistic update - UI'ı hemen güncelle
                           final reviewIndex = _reviews.indexWhere(
                             (r) => r.id == review.id,
@@ -1433,6 +1537,9 @@ class _ReviewPageState extends State<ReviewPage> {
                               );
                             }
                           }
+                          } finally {
+                            _reviewListLikeLock.leave(review.id);
+                          }
                         },
                       ),
                     ),
@@ -1444,7 +1551,7 @@ class _ReviewPageState extends State<ReviewPage> {
           ),
         ),
       ),
-
+    ),
     );
   }
 

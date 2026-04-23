@@ -4,6 +4,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/utils/error_handler.dart';
+import '../../../core/utils/username_input_rules.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_input.dart';
 import '../data/models/register_request_dto.dart';
@@ -68,10 +69,7 @@ class _CompleteAppProfilePageState extends State<CompleteAppProfilePage> {
     if (_fieldError != null && _fieldError!.toLowerCase().contains('username')) {
       return _fieldError;
     }
-    final value = (v ?? '').trim();
-    if (value.isEmpty) return 'Username is required';
-    if (value.length < 3) return 'Min 3 characters';
-    return null;
+    return UsernameInputRules.validateForForm(v);
   }
 
   String? _nameValidator(String? v) {

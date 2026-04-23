@@ -166,15 +166,8 @@ class AuthRepository {
         data: request.toJson(),
       );
       return UserResponseDto.fromJson(response.data);
-    } on DioException catch (e) {
-      if (e.response != null) {
-        final errorData = e.response?.data;
-        final errorMessage = errorData is Map
-            ? (errorData['message'] ?? errorData['error'] ?? 'Update failed')
-            : errorData?.toString() ?? 'Update failed';
-        throw Exception(errorMessage);
-      }
-      throw Exception('Network error: ${e.message}');
+    } on DioException {
+      rethrow;
     }
   }
 

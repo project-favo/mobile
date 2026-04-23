@@ -5,6 +5,7 @@ import '../../../core/utils/session_helper.dart';
 import '../../../core/theme/app_colors.dart';
 import '../data/repositories/product_repository.dart';
 import '../data/repositories/tag_repository.dart';
+import '../data/services/auth_service.dart';
 import 'home_page.dart';
 import 'login_page.dart';
 import 'onboarding_page.dart';
@@ -41,6 +42,15 @@ class _AuthSplashGateState extends State<AuthSplashGate> {
         );
         SearchWarmCache.instance.rememberSeedProducts(feed.content);
       } catch (_) {}
+    } catch (_) {}
+  }
+
+  /// Oturum kullanıcısını (getMe) splash sırasında yükler; yorum ekranlarında sahiplik gecikmesini azaltır.
+  Future<void> _warmCurrentUser() async {
+    try {
+      final token = await _sessionHelper.ensureSession();
+      if (token == null) return;
+      await AuthService().getMe();
     } catch (_) {}
   }
 
@@ -82,6 +92,7 @@ class _AuthSplashGateState extends State<AuthSplashGate> {
     await Future.wait([
       minSplashFuture,
       _warmHomeCache().timeout(const Duration(seconds: 3), onTimeout: () {}),
+      _warmCurrentUser().timeout(const Duration(seconds: 4), onTimeout: () {}),
     ]);
     if (!mounted) return;
     setState(() => _screen = const HomePage());

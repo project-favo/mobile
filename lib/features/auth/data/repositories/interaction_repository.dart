@@ -348,6 +348,27 @@ class InteractionRepository {
     }
   }
 
+  /// Tüm sayfalarda takip edilen kullanıcı id’leri (string); bildirim satırlarında `isFollowing` yükünü N istek yerine 1+ akışa indirir.
+  Future<Set<String>> getFollowingIdSet(
+    String userId, {
+    int pageSize = 100,
+  }) async {
+    final out = <String>{};
+    var page = 0;
+    while (true) {
+      final list = await getFollowing(userId, page: page, size: pageSize);
+      if (list.isEmpty) break;
+      for (final u in list) {
+        if (u.id > 0) {
+          out.add(u.id.toString());
+        }
+      }
+      if (list.length < pageSize) break;
+      page += 1;
+    }
+    return out;
+  }
+
   /// Takipçi sayısı. Returns: `{ "count": number }`
   Future<int> getFollowerCount(String userId) async {
     try {

@@ -156,6 +156,92 @@ class ErrorHandler {
     }
   }
 
+  /// Profil/kayıt: kullanıcı adı veya e-posta zaten kullanımda (409, [400] validation, bazen gövdede net ifade).
+  static String? _messageForUsernameConflict(
+    int? code,
+    dynamic data,
+    String? serverMessage,
+  ) {
+    final flat = (
+      '${serverMessage ?? ''} ${dioResponseDataAsSearchString(data)}'
+    ).toLowerCase();
+
+    bool textSuggestsUsernameTaken() {
+      if (flat.isEmpty) return false;
+      final hasUser = flat.contains('username') ||
+          flat.contains('user_name') ||
+          flat.contains('user name');
+      if (!hasUser) return false;
+      return flat.contains('taken') ||
+          flat.contains('already') ||
+          flat.contains('exists') ||
+          flat.contains('duplicate') ||
+          flat.contains('unique') ||
+          flat.contains('constraint') ||
+          flat.contains('data integrity') ||
+          flat.contains('in use') ||
+          flat.contains('in_use') ||
+          flat.contains('not available') ||
+          flat.contains('conflict') ||
+          flat.contains('registered');
+    }
+
+    bool textSuggestsEmailTaken() {
+      if (flat.isEmpty) return false;
+      if (!flat.contains('email')) return false;
+      return flat.contains('taken') ||
+          flat.contains('already') ||
+          flat.contains('exists') ||
+          flat.contains('duplicate') ||
+          flat.contains('unique') ||
+          flat.contains('registered') ||
+          flat.contains('in use');
+    }
+
+    // 409: tipik unique ihlali — mesaj boş veya jenerik olsa bile net metin ver
+    if (code == 409) {
+      if (textSuggestsEmailTaken() && !textSuggestsUsernameTaken()) {
+        return 'This email is already in use. Please use a different one.';
+      }
+      return 'This username is already taken. Please choose a different one.';
+    }
+
+    if (textSuggestsUsernameTaken()) {
+      return 'This username is already taken. Please choose a different one.';
+    }
+    if (textSuggestsEmailTaken()) {
+      return 'This email is already in use. Please use a different one.';
+    }
+
+    // Sunucu hatalı 401/403 döndürdüyse ama gövde çakışma söylüyorsa (nadir)
+    if ((code == 401 || code == 403) &&
+        (flat.contains('username') || flat.contains('unique')) &&
+        (flat.contains('conflict') || flat.contains('duplicate'))) {
+      return 'This username is already taken. Please choose a different one.';
+    }
+
+    // 400/403: Spring / MySQL duplicate key, uk_username vb. (mesajda "username" yok)
+    if ((code == 400 || code == 403) && flat.isNotEmpty) {
+      if ((flat.contains('duplicate') && (flat.contains('user') || flat.contains('uk_'))) ||
+          (flat.contains('unique') && (flat.contains('user') || flat.contains('uk_')))) {
+        if (flat.contains('email') &&
+            !flat.contains('user') &&
+            !flat.contains('uk_')) {
+          return 'This email is already in use. Please use a different one.';
+        }
+        return 'This username is already taken. Please choose a different one.';
+      }
+    }
+
+    return null;
+  }
+
+  static bool _isPutMe(DioException e) {
+    if (e.requestOptions.method.toUpperCase() != 'PUT') return false;
+    final p = e.requestOptions.path.toLowerCase();
+    return p.contains('auth/me') || p.contains('/me');
+  }
+
   /// Handles Dio/Network errors
   static String _handleDioError(DioException e) {
     // Network connectivity issues
@@ -184,9 +270,35 @@ class ErrorHandler {
         serverMessage = errorData;
       }
 
+      final conflictMsg = _messageForUsernameConflict(
+        statusCode,
+        errorData,
+        serverMessage?.toString(),
+      );
+      if (conflictMsg != null) return conflictMsg;
+
+      final fullText =
+          ('${serverMessage ?? ''} ${dioResponseDataAsSearchString(errorData)}')
+              .toLowerCase();
+
+      // PUT /api/auth/me: duplicate bazen gövdede; jenerik 401'den önce yakala
+      if (_isPutMe(e) &&
+          (fullText.contains('duplicate') ||
+              fullText.contains('uk_') ||
+              (fullText.contains('unique') && fullText.contains('user')))) {
+        return 'This username is already taken. Please choose a different one.';
+      }
+
       // Handle specific status codes
       switch (statusCode) {
         case 400:
+          if (_isPutMe(e) &&
+              (fullText.contains('duplicate') ||
+                  fullText.contains('uk_') ||
+                  (fullText.contains('unique') &&
+                      (fullText.contains('user') || fullText.contains('name'))))) {
+            return 'This username is already taken. Please choose a different one.';
+          }
           return serverMessage ?? 'Invalid request. Please check your input.';
         case 401:
           if (serverMessage != null) {
@@ -216,8 +328,16 @@ class ErrorHandler {
               return 'Incorrect email or password.';
             }
           }
+          // PUT /api/auth/me: Kalan 401'lerde (Unauthorized, Full authentication…, vb.) çoğunlukla alınmış username; "session updating" yanıltıcı
+          if (_isPutMe(e)) {
+            return 'This username is already taken. Please choose a different one.';
+          }
           return 'Your session is still updating. Please try Continue again in a few seconds.';
         case 403:
+          if (_isPutMe(e) &&
+              (fullText.contains('duplicate') || fullText.contains('uk_') || fullText.contains('unique'))) {
+            return 'This username is already taken. Please choose a different one.';
+          }
           return 'You do not have permission to perform this action.';
         case 404:
           return 'The requested resource was not found.';
