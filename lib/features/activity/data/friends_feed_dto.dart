@@ -1,5 +1,6 @@
 import 'package:favo_mobile/core/utils/product_listing_flags.dart';
 import 'package:favo_mobile/core/utils/user_account_flags.dart';
+import 'package:favo_mobile/core/utils/app_datetime.dart';
 
 bool _userMapLooksDeactivated(Map<String, dynamic> m) {
   final st = (m['status'] ?? m['accountStatus'] ?? '')
@@ -96,7 +97,7 @@ class FriendsFeedItemDto {
 
     DateTime? parseDate(dynamic raw) {
       if (raw == null) return null;
-      if (raw is String) return DateTime.tryParse(raw);
+      if (raw is String) return parseBackendDateTimeToLocal(raw);
       if (raw is List && raw.isNotEmpty) {
         int nAt(int i, [int fallback = 0]) {
           if (i >= raw.length) return fallback;
@@ -105,14 +106,14 @@ class FriendsFeedItemDto {
           return int.tryParse(e.toString()) ?? fallback;
         }
         try {
-          return DateTime(
+          return DateTime.utc(
             nAt(0, DateTime.now().year),
             nAt(1, 1),
             nAt(2, 1),
             nAt(3),
             nAt(4),
             nAt(5),
-          );
+          ).toLocal();
         } catch (_) {
           return null;
         }

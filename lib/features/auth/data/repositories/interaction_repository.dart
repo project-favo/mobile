@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../../../../core/config/api_config.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/utils/app_datetime.dart';
 import '../../../../core/utils/entity_active.dart';
 import '../../../../core/utils/exceptions.dart';
 import '../models/conversation_dto.dart';
@@ -490,10 +491,12 @@ class InteractionRepository {
           if (item['product'] != null && item['product'] is Map) {
             product = ProductDto.fromJson(item['product'] as Map<String, dynamic>);
             final dateStr = item['likedAt']?.toString() ?? item['addedAt']?.toString() ?? item['createdAt']?.toString() ?? item['created_at']?.toString();
-            if (dateStr != null) date = DateTime.tryParse(dateStr);
+            date = parseBackendDateTimeToLocal(dateStr);
           } else {
             product = ProductDto.fromJson(item);
-            date = item['likedAt'] != null ? DateTime.tryParse(item['likedAt'].toString()) : product.createdAt;
+            date = item['likedAt'] != null
+                ? parseBackendDateTimeToLocal(item['likedAt'].toString())
+                : product.createdAt;
           }
 
           if (date != null) {

@@ -6,6 +6,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/utils/entity_active.dart';
+import '../../../../core/utils/app_datetime.dart';
 import '../../../../core/utils/error_handler.dart';
 import '../../../../core/utils/session_helper.dart';
 import '../../../../core/utils/resolve_media_url.dart';
@@ -61,9 +62,9 @@ class _ConversationListPageState extends State<ConversationListPage> {
       final page = await _messageRepository.getConversations(page: 0, size: 20);
       if (!mounted) return;
       final sorted = [...page.content]..sort((a, b) {
-          final da = DateTime.tryParse(a.lastMessageAt) ??
+          final da = parseBackendDateTimeToLocal(a.lastMessageAt) ??
               DateTime.fromMillisecondsSinceEpoch(0);
-          final db = DateTime.tryParse(b.lastMessageAt) ??
+          final db = parseBackendDateTimeToLocal(b.lastMessageAt) ??
               DateTime.fromMillisecondsSinceEpoch(0);
           return db.compareTo(da);
         });
@@ -138,8 +139,10 @@ class _ConversationListPageState extends State<ConversationListPage> {
 
   List<ConversationDto> _sortedConversations(List<ConversationDto> list) {
     return [...list]..sort((a, b) {
-        final da = DateTime.tryParse(a.lastMessageAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
-        final db = DateTime.tryParse(b.lastMessageAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final da = parseBackendDateTimeToLocal(a.lastMessageAt) ??
+            DateTime.fromMillisecondsSinceEpoch(0);
+        final db = parseBackendDateTimeToLocal(b.lastMessageAt) ??
+            DateTime.fromMillisecondsSinceEpoch(0);
         return db.compareTo(da);
       });
   }
@@ -229,11 +232,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
   }
 
   String _formatTime(String iso) {
-    if (iso.length >= 16) {
-      // "2025-03-04T14:30:00" -> "14:30"
-      return iso.substring(11, 16);
-    }
-    return '';
+    return formatShortTimeFromBackend(iso, fallback: '');
   }
 
   @override

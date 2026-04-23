@@ -8,6 +8,7 @@ import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/widgets/app_input.dart';
 import '../../../../../core/utils/error_handler.dart';
+import '../../../../../core/utils/app_datetime.dart';
 import '../../../../../core/utils/user_display_name_prefs.dart';
 import '../../../../../core/utils/username_input_rules.dart';
 import '../../../../../core/utils/resolve_media_url.dart';
@@ -55,7 +56,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     // Birthdate'i parse et
     if (widget.user.birthdate != null && widget.user.birthdate!.isNotEmpty) {
       try {
-        _selectedDate = DateTime.parse(widget.user.birthdate!);
+        _selectedDate = parseBackendDateTimeToLocal(widget.user.birthdate!);
       } catch (e) {
         // Parse hatası durumunda null bırak
         if (kDebugMode) {
@@ -547,7 +548,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
                       }
                       // Tarih formatını kontrol et
                       try {
-                        final date = DateTime.parse(value.trim());
+                        final date = parseBackendDateTimeToLocal(value.trim());
+                        if (date == null) {
+                          return 'Invalid date format';
+                        }
                         final now = DateTime.now();
                         // Şu anki tarihten ileri olamaz
                         if (date.isAfter(now)) {

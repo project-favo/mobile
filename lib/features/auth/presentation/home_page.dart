@@ -1913,6 +1913,7 @@ class _SubChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final displayTitle = _formatCategoryLabel(title);
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
@@ -1928,7 +1929,7 @@ class _SubChip extends StatelessWidget {
           ),
         ),
         child: Text(
-          title,
+          displayTitle,
           style: TextStyle(
             color: selected ? Colors.white : iconColor,
             fontSize: 12,
@@ -1944,6 +1945,30 @@ class _SubChip extends StatelessWidget {
 }
 
 // ─── Horizontal kategori scroll kartı ────────────────────────────────────────
+
+/// Birleşik kategori adlarını okunur hale getirir.
+/// Örn: `BeautyandPersonalCare` -> `Beauty and Personal Care`
+String _formatCategoryLabel(String raw) {
+  var text = raw.trim();
+  if (text.isEmpty) return raw;
+
+  // Snake / kebab adlarını normalize et.
+  text = text.replaceAll('_', ' ').replaceAll('-', ' ');
+  // `BeautyandPersonalCare` gibi kalıpta "and" bağlacını ayır.
+  text = text.replaceAllMapped(
+    RegExp(r'([a-z])and([A-Z])'),
+    (m) => '${m.group(1)} and ${m.group(2)}',
+  );
+  // Camel/Pascal case ayır.
+  text = text.replaceAllMapped(
+    RegExp(r'([a-z0-9])([A-Z])'),
+    (m) => '${m.group(1)} ${m.group(2)}',
+  );
+  // Fazla boşlukları sadeleştir.
+  text = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+  return text;
+}
 
 /// Kategori adına göre (icon, iconColor, bgColor) döndürür
 ({IconData icon, Color iconColor, Color bgColor}) _categoryStyle(String name) {
@@ -2203,6 +2228,7 @@ class _CircleCategoryItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = _categoryStyle(label);
+    final displayLabel = _formatCategoryLabel(label);
     return GestureDetector(
       onTap: onTap,
       child: SizedBox(
@@ -2242,7 +2268,7 @@ class _CircleCategoryItem extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              label,
+              displayLabel,
               textAlign: TextAlign.center,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,

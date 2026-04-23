@@ -38,6 +38,7 @@ import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../../../../core/widgets/app_button.dart';
 import '../../../../../core/utils/in_flight_id_lock.dart';
 import '../../../../../core/utils/product_report_storage.dart';
+import '../../../../../core/utils/app_datetime.dart';
 import '../../../../../core/utils/resolve_media_url.dart';
 import '../../../../../core/utils/review_report_storage.dart';
 import '../../../../../routes/app_routes.dart';
@@ -312,10 +313,10 @@ class _ProfilePageState extends State<ProfilePage>
     final sorted = List<ReviewDto>.from(source);
     sorted.sort((a, b) {
       final da =
-          DateTime.tryParse(a.createdAt) ??
+          parseBackendDateTimeToLocal(a.createdAt) ??
           DateTime.fromMillisecondsSinceEpoch(0);
       final db =
-          DateTime.tryParse(b.createdAt) ??
+          parseBackendDateTimeToLocal(b.createdAt) ??
           DateTime.fromMillisecondsSinceEpoch(0);
       if (_selectedDateSort == 'Newest') {
         return db.compareTo(da);
@@ -1053,10 +1054,10 @@ class _ProfilePageState extends State<ProfilePage>
     final sorted = List<ReviewDto>.from(_myReviews);
     sorted.sort((a, b) {
       final da =
-          DateTime.tryParse(a.createdAt) ??
+          parseBackendDateTimeToLocal(a.createdAt) ??
           DateTime.fromMillisecondsSinceEpoch(0);
       final db =
-          DateTime.tryParse(b.createdAt) ??
+          parseBackendDateTimeToLocal(b.createdAt) ??
           DateTime.fromMillisecondsSinceEpoch(0);
       if (_selectedDateSort == 'Newest') {
         return db.compareTo(da);

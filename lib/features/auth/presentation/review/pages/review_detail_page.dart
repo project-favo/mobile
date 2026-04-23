@@ -14,6 +14,7 @@ import '../../../../../core/cache/review_memory_cache.dart';
 import '../../../../../core/utils/exceptions.dart';
 import '../../../../../core/utils/content_availability_messages.dart';
 import '../../../../../core/utils/content_unavailable_dialog.dart';
+import '../../../../../core/utils/app_datetime.dart';
 import '../../../../../core/utils/entity_active.dart';
 import '../../../../../core/utils/in_flight_id_lock.dart';
 import '../../../../../core/utils/session_helper.dart';
@@ -794,26 +795,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
 
   /// Tarih formatını düzenler
   String _formatDate(String dateString) {
-    try {
-      final date = DateTime.parse(dateString);
-      final months = [
-        'January',
-        'February',
-        'March',
-        'April',
-        'May',
-        'June',
-        'July',
-        'August',
-        'September',
-        'October',
-        'November',
-        'December',
-      ];
-      return '${months[date.month - 1]} ${date.day}, ${date.year}';
-    } catch (e) {
-      return dateString;
-    }
+    return formatDateTimeFromBackend(dateString, fallback: dateString);
   }
 
   void _openMediaPreview(String imageUrl) {

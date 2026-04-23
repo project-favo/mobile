@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../../../../core/utils/app_datetime.dart';
 import '../../../../core/utils/product_listing_flags.dart';
 import '../../../../core/utils/user_account_flags.dart';
 
@@ -7,7 +8,7 @@ import '../../../../core/utils/user_account_flags.dart';
 DateTime? parseFlexibleDateTime(dynamic value) {
   if (value == null) return null;
   if (value is String) {
-    return DateTime.tryParse(value);
+    return parseBackendDateTimeToLocal(value);
   }
   if (value is List && value.isNotEmpty) {
     int nAt(int i) {
@@ -24,7 +25,7 @@ DateTime? parseFlexibleDateTime(dynamic value) {
     final mi = value.length > 4 ? nAt(4) : 0;
     final s = value.length > 5 ? nAt(5) : 0;
     try {
-      return DateTime(y, mo, d, h, mi, s);
+      return DateTime.utc(y, mo, d, h, mi, s).toLocal();
     } catch (_) {
       return null;
     }

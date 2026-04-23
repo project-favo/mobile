@@ -1,4 +1,5 @@
 import '../../../../core/utils/product_listing_flags.dart';
+import '../../../../core/utils/app_datetime.dart';
 import 'tag_dto.dart';
 
 class ProductDto {
@@ -45,7 +46,9 @@ class ProductDto {
           : null,
       isLiked: json['isLiked'] as bool?,
       createdAt: (json['createdAt'] ?? json['created_at']) != null
-          ? DateTime.tryParse((json['createdAt'] ?? json['created_at']).toString())
+          ? parseBackendDateTimeToLocal(
+              (json['createdAt'] ?? json['created_at']).toString(),
+            )
           : null,
       isProductNotListed: isProductDataNotListedInMap(json),
     );

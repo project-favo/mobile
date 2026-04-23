@@ -14,6 +14,7 @@ import '../../../../../core/utils/content_availability_messages.dart';
 import '../../../../../core/utils/content_unavailable_dialog.dart';
 import '../../../../../core/utils/product_report_storage.dart';
 import '../../../../../core/utils/review_report_storage.dart';
+import '../../../../../core/utils/app_datetime.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../../../../core/cache/product_memory_cache.dart';
@@ -336,8 +337,10 @@ class _UserProfilePageState extends State<UserProfilePage>
     if (_reviews.isEmpty) return;
     final sorted = List<ReviewDto>.from(_reviews);
     sorted.sort((a, b) {
-      final da = DateTime.tryParse(a.createdAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
-      final db = DateTime.tryParse(b.createdAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final da = parseBackendDateTimeToLocal(a.createdAt) ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      final db = parseBackendDateTimeToLocal(b.createdAt) ??
+          DateTime.fromMillisecondsSinceEpoch(0);
       if (_selectedDateSort == 'Newest') {
         return db.compareTo(da);
       }

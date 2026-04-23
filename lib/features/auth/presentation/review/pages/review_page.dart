@@ -12,6 +12,7 @@ import '../../../../../core/routes/custom_page_transitions.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/utils/exceptions.dart';
 import '../../../../../core/utils/product_rating_display.dart';
+import '../../../../../core/utils/app_datetime.dart';
 import '../../../../../core/widgets/new_product_badge.dart';
 import '../../../../../core/cache/current_user_cache.dart';
 import '../../../../../core/cache/product_memory_cache.dart';
@@ -85,10 +86,10 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
   );
 
   String _formatReviewRelativeDate(String raw) {
-    final parsed = DateTime.tryParse(raw);
+    final parsed = parseBackendDateTimeToLocal(raw);
     if (parsed == null) return '';
     final now = DateTime.now();
-    var diff = now.difference(parsed.toLocal());
+    var diff = now.difference(parsed);
     if (diff.isNegative) diff = Duration.zero;
     if (diff.inMinutes < 1) return 'Just now';
     if (diff.inHours < 1) {
