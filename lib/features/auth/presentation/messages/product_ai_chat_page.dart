@@ -297,10 +297,10 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
 
   Widget _buildProductStrip(List<_ProductAiProduct> products) {
     return SizedBox(
-      height: 160,
+      height: _kProductAiStripHeight,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(vertical: AppSpacing.small),
+        padding: const EdgeInsets.symmetric(vertical: 2),
         itemCount: products.length,
         separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.medium),
         itemBuilder: (context, i) => _ProductAiChip(
@@ -535,6 +535,9 @@ class _ProductAiProduct {
   });
 }
 
+const double _kProductAiCardHeight = 132;
+const double _kProductAiStripHeight = _kProductAiCardHeight + 6;
+
 class _ProductAiChip extends StatelessWidget {
   final _ProductAiProduct product;
   final VoidCallback onTap;
@@ -545,77 +548,89 @@ class _ProductAiChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
+      child: SizedBox(
         width: 110,
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 6,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ClipRRect(
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(12)),
-              child: Container(
-                height: 80,
-                width: 110,
-                color: AppColors.background,
-                child: product.imageURL.isNotEmpty
-                    ? Image.network(
-                        product.imageURL,
-                        height: 80,
-                        width: 110,
-                        fit: BoxFit.contain,
-                        alignment: Alignment.center,
-                        errorBuilder: (_, __, ___) => _placeholder(),
-                      )
-                    : _placeholder(),
+        height: _kProductAiCardHeight,
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.06),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(6, 6, 6, 4),
-              child: Text(
-                product.name,
-                style: AppTextStyles.bodySmall.copyWith(
-                  fontWeight: FontWeight.w600,
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.max,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ClipRRect(
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(12)),
+                child: Container(
+                  height: 72,
+                  width: 110,
+                  color: AppColors.background,
+                  child: product.imageURL.isNotEmpty
+                      ? Image.network(
+                          product.imageURL,
+                          height: 72,
+                          width: 110,
+                          fit: BoxFit.contain,
+                          alignment: Alignment.center,
+                          errorBuilder: (_, __, ___) => _placeholder(),
+                        )
+                      : _placeholder(),
                 ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: Row(
-                children: [
-                  const Icon(Icons.star_rounded,
-                      size: 12, color: Colors.amber),
-                  const SizedBox(width: 2),
-                  Text(
-                    product.averageRating.toStringAsFixed(1),
-                    style: AppTextStyles.bodySmall.copyWith(fontSize: 11),
-                  ),
-                  if (product.reviewCount > 0) ...[
-                    const SizedBox(width: 3),
-                    Text(
-                      '(${product.reviewCount})',
-                      style: AppTextStyles.bodySmall.copyWith(
-                        fontSize: 10,
-                        color: AppColors.textSecondary,
-                      ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(5, 4, 5, 0),
+                child: SizedBox(
+                  height: 32,
+                  child: Text(
+                    product.name,
+                    style: AppTextStyles.bodySmall.copyWith(
+                      fontSize: 12,
+                      height: 1.2,
+                      fontWeight: FontWeight.w600,
                     ),
-                  ],
-                ],
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.start,
+                  ),
+                ),
               ),
-            ),
-          ],
+              const Spacer(),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(5, 0, 5, 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.star_rounded,
+                        size: 12, color: Colors.amber),
+                    const SizedBox(width: 2),
+                    Text(
+                      product.averageRating.toStringAsFixed(1),
+                      style: AppTextStyles.bodySmall.copyWith(fontSize: 11),
+                    ),
+                    if (product.reviewCount > 0) ...[
+                      const SizedBox(width: 3),
+                      Text(
+                        '(${product.reviewCount})',
+                        style: AppTextStyles.bodySmall.copyWith(
+                          fontSize: 10,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -623,7 +638,7 @@ class _ProductAiChip extends StatelessWidget {
 
   Widget _placeholder() {
     return Container(
-      height: 80,
+      height: 72,
       width: 110,
       color: AppColors.primary.withValues(alpha: 0.08),
       child: const Icon(Icons.image_not_supported_outlined,

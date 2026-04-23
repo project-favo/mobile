@@ -263,11 +263,12 @@ class _AiChatPageState extends State<AiChatPage>
   }
 
   Widget _buildProductStrip(List<_AiProduct> products) {
+    // Fixed card height (see [_kChatProductCardHeight]) so all chips align in a row.
     return SizedBox(
-      height: 160,
+      height: _kChatProductStripHeight,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(vertical: AppSpacing.small),
+        padding: const EdgeInsets.symmetric(vertical: 2),
         itemCount: products.length,
         separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.medium),
         itemBuilder: (context, i) => _ProductChip(
@@ -482,6 +483,10 @@ class _AiProduct {
   });
 }
 
+// Product strip: list padding 2*2 + fixed card
+const double _kChatProductCardHeight = 132;
+const double _kChatProductStripHeight = _kChatProductCardHeight + 6;
+
 // ─── Product chip in chat ─────────────────────────────────────────────────────
 
 class _ProductChip extends StatelessWidget {
@@ -494,90 +499,84 @@ class _ProductChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
+      child: SizedBox(
         width: 110,
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: AppDecorations.softCardShadow,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ClipRRect(
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(16)),
-              child: Container(
-                height: 80,
-                width: 110,
-                color: AppColors.background,
-                child: product.imageURL.isNotEmpty
-                    ? Image.network(
-                        product.imageURL,
-                        height: 80,
-                        width: 110,
-                        fit: BoxFit.contain,
-                        errorBuilder: (_, __, ___) => _placeholder(),
-                      )
-                    : _placeholder(),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(6, 6, 6, 4),
-              child: Text(
-                product.name,
-                style: AppTextStyles.bodySmall.copyWith(
-                  fontWeight: FontWeight.w600,
+        height: _kChatProductCardHeight,
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: AppDecorations.softCardShadow,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.max,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ClipRRect(
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(16)),
+                child: Container(
+                  height: 72,
+                  width: 110,
+                  color: AppColors.background,
+                  child: product.imageURL.isNotEmpty
+                      ? Image.network(
+                          product.imageURL,
+                          height: 72,
+                          width: 110,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) => _placeholder(),
+                        )
+                      : _placeholder(),
                 ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: Builder(
-                builder: (context) {
-                  final hasRating = product.averageRating > 0.001 &&
-                      !product.averageRating.isNaN &&
-                      !product.averageRating.isInfinite;
-                  if (!hasRating && product.reviewCount <= 0) {
-                    return Text(
-                      'New',
-                      style: AppTextStyles.bodySmall.copyWith(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.primary,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(5, 4, 5, 0),
+                child: SizedBox(
+                  height: 32,
+                  child: Text(
+                    product.name,
+                    style: AppTextStyles.bodySmall.copyWith(
+                      fontSize: 12,
+                      height: 1.2,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.start,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(5, 0, 5, 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.star_rounded, size: 12, color: Colors.amber),
+                    const SizedBox(width: 2),
+                    Text(
+                      product.averageRating.isNaN ||
+                              product.averageRating.isInfinite
+                          ? '—'
+                          : product.averageRating.toStringAsFixed(1),
+                      style: AppTextStyles.bodySmall.copyWith(fontSize: 11),
+                    ),
+                    if (product.reviewCount > 0) ...[
+                      const SizedBox(width: 3),
+                      Text(
+                        '(${product.reviewCount})',
+                        style: AppTextStyles.bodySmall.copyWith(
+                          fontSize: 10,
+                          color: AppColors.textSecondary,
+                        ),
                       ),
-                    );
-                  }
-                  return Row(
-                    children: [
-                      if (hasRating) ...[
-                        const Icon(Icons.star_rounded,
-                            size: 12, color: Colors.amber),
-                        const SizedBox(width: 2),
-                        Text(
-                          product.averageRating.toStringAsFixed(1),
-                          style:
-                              AppTextStyles.bodySmall.copyWith(fontSize: 11),
-                        ),
-                      ],
-                      if (product.reviewCount > 0) ...[
-                        if (hasRating) const SizedBox(width: 3),
-                        Text(
-                          '(${product.reviewCount})',
-                          style: AppTextStyles.bodySmall.copyWith(
-                            fontSize: 10,
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                      ],
                     ],
-                  );
-                },
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -585,7 +584,7 @@ class _ProductChip extends StatelessWidget {
 
   Widget _placeholder() {
     return Container(
-      height: 80,
+      height: 72,
       width: 110,
       color: AppColors.primary.withValues(alpha: 0.08),
       child: const Icon(Icons.image_not_supported_outlined,

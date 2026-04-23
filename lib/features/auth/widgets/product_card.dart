@@ -6,6 +6,7 @@ import '../../../../core/theme/app_icon_sizes.dart';
 import '../../../../core/theme/app_decorations.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/utils/product_rating_display.dart';
+import '../../../../core/widgets/rating_stars_row.dart';
 import '../../../../core/utils/entity_active.dart';
 import '../data/repositories/interaction_repository.dart';
 import '../data/repositories/review_repository.dart';
@@ -255,35 +256,29 @@ class _ProductCardState extends State<ProductCard> {
                 builder: (context) {
                   final raw = widget.rating;
                   if (!productHasMeaningfulRating(raw)) {
-                    return Text(
-                      'No rating yet',
-                      style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.textSecondary,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
+                    return Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'No rating yet',
+                        style: AppTextStyles.bodySmall.copyWith(
+                          color: AppColors.textSecondary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     );
                   }
                   final rating = (raw.isNaN || raw.isInfinite)
                       ? 0.0
                       : raw.clamp(0.0, 5.0);
-                  return Row(
-                    children: [
-                      const Icon(
-                        Icons.star_rounded,
-                        size: 14,
-                        color: Colors.amber,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        rating.toStringAsFixed(1),
-                        style: AppTextStyles.bodySmall.copyWith(
-                          color: AppColors.textPrimary,
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
+                  return Align(
+                    alignment: Alignment.centerLeft,
+                    child: RatingStarsRow(
+                      rating: rating,
+                      size: 12.5,
+                      gap: 1.5,
+                      showNumeric: true,
+                    ),
                   );
                 },
               ),
