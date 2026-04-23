@@ -16,7 +16,14 @@ import '../../../data/repositories/review_repository.dart';
 class AddReviewPage extends StatefulWidget {
   final ProductDto product;
 
-  const AddReviewPage({super.key, required this.product});
+  /// Doluysa [PUT /api/reviews/{id}] ile güncelleme modu
+  final ReviewDto? reviewToEdit;
+
+  const AddReviewPage({
+    super.key,
+    required this.product,
+    this.reviewToEdit,
+  });
 
   @override
   State<AddReviewPage> createState() => _AddReviewPageState();
@@ -35,9 +42,21 @@ class _AddReviewPageState extends State<AddReviewPage> {
   final ImagePicker _imagePicker = ImagePicker();
   final List<XFile> _selectedImages = [];
 
+  bool get _isEditMode => widget.reviewToEdit != null;
+
   @override
   void initState() {
     super.initState();
+    final r = widget.reviewToEdit;
+    if (r != null) {
+      final body = (r.description != null && r.description!.trim().isNotEmpty)
+          ? r.description!
+          : r.title;
+      _reviewController.text = body;
+      final rt = r.rating;
+      _selectedRating = rt >= 1 && rt <= 5 ? rt : 0;
+      _isCollaborative = r.isCollaborative;
+    }
     _reviewController.addListener(() {
       setState(() {}); // Character count için
     });
@@ -138,7 +157,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
     return mediaList;
   }
 
-  void _showSuccessDialog() {
+  void _showSuccessDialog({required bool isEdit}) {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -174,7 +193,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
                 
                 // Success Title
                 Text(
-                  'Review Posted!',
+                  isEdit ? 'Review updated!' : 'Review Posted!',
                   style: AppTextStyles.heading2.copyWith(
                     color: AppColors.textPrimary,
                     fontWeight: FontWeight.bold,
@@ -185,7 +204,9 @@ class _AddReviewPageState extends State<AddReviewPage> {
                 
                 // Success Message
                 Text(
-                  'Your review has been successfully posted and is now visible to other users.',
+                  isEdit
+                      ? 'Your changes have been saved.'
+                      : 'Your review has been successfully posted and is now visible to other users.',
                   style: AppTextStyles.body.copyWith(
                     color: AppColors.textSecondary,
                   ),
@@ -243,32 +264,44 @@ class _AddReviewPageState extends State<AddReviewPage> {
         throw Exception('Failed to get Firebase ID token');
       }
 
-      // Fotoğrafları media list formatına çevir
+      // Yeni yüklenen görseller (güncellemede: yalnızca yeni dosya varsa gönderilir; yoksa mevcut medya korunur)
       List<ReviewMediaRequestDto>? mediaList;
       if (_selectedImages.isNotEmpty) {
         mediaList = await _convertImagesToMediaList();
       }
 
-      // Review oluştur
-      final request = CreateReviewRequestDto(
-        productId: widget.product.id,
-        title: _reviewController.text.length > 50
-            ? _reviewController.text.substring(0, 50)
-            : _reviewController.text,
-        description: _reviewController.text,
-        isCollaborative: _isCollaborative,
-        rating: _selectedRating,
-        mediaList: mediaList,
-      );
-
-      await _reviewRepository.createReview(firebaseIdToken, request);
+      final text = _reviewController.text;
+      if (widget.reviewToEdit != null) {
+        final request = UpdateReviewRequestDto(
+          title: text.length > 50 ? text.substring(0, 50) : text,
+          description: text,
+          isCollaborative: _isCollaborative,
+          rating: _selectedRating,
+          mediaList: mediaList,
+        );
+        await _reviewRepository.updateReview(
+          firebaseIdToken,
+          widget.reviewToEdit!.id,
+          request,
+        );
+      } else {
+        final request = CreateReviewRequestDto(
+          productId: widget.product.id,
+          title: text.length > 50 ? text.substring(0, 50) : text,
+          description: text,
+          isCollaborative: _isCollaborative,
+          rating: _selectedRating,
+          mediaList: mediaList,
+        );
+        await _reviewRepository.createReview(firebaseIdToken, request);
+      }
 
       setState(() {
         _isLoading = false;
       });
 
       if (mounted) {
-        _showSuccessDialog();
+        _showSuccessDialog(isEdit: widget.reviewToEdit != null);
       }
     } catch (e) {
       setState(() {
@@ -299,7 +332,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          'Add a Review',
+          _isEditMode ? 'Edit Review' : 'Add a Review',
           style: AppTextStyles.heading2,
         ),
         centerTitle: true,
@@ -579,9 +612,9 @@ class _AddReviewPageState extends State<AddReviewPage> {
               ),
               const SizedBox(height: AppSpacing.xxLarge),
 
-              // Post Review Button
+              // Post / update
               AppButton(
-                text: 'POST REVIEW',
+                text: _isEditMode ? 'UPDATE REVIEW' : 'POST REVIEW',
                 onPressed: _submitReview,
                 isLoading: _isLoading,
               ),

@@ -1,12 +1,50 @@
 import 'package:favo_mobile/core/utils/product_listing_flags.dart';
 import 'package:favo_mobile/core/utils/user_account_flags.dart';
 
+bool _userMapLooksDeactivated(Map<String, dynamic> m) {
+  final st = (m['status'] ?? m['accountStatus'] ?? '')
+      .toString()
+      .toLowerCase();
+  if (st == 'deactivated' || st == 'inactive' || st == 'suspended') {
+    return true;
+  }
+  if (m['isAccountDeactivated'] is bool && (m['isAccountDeactivated'] as bool)) {
+    return true;
+  }
+  if (m['active'] is bool && !(m['active'] as bool)) return true;
+  if (m['isActive'] is bool && !(m['isActive'] as bool)) return true;
+  if (m['enabled'] is bool && !(m['enabled'] as bool)) return true;
+  return false;
+}
+
+bool _actorDeactivatedFromFeedJson(Map<String, dynamic> json) {
+  final a = json['actorAccountDeactivated'] ?? json['actorDeactivated'];
+  if (a is bool) return a;
+  final actor = json['actor'] ?? json['user'];
+  if (actor is Map) {
+    if (_userMapLooksDeactivated(Map<String, dynamic>.from(actor))) {
+      return true;
+    }
+  }
+  for (final k in ['actorStatus', 'userStatus', 'actorAccountStatus']) {
+    final v = json[k]?.toString().toLowerCase() ?? '';
+    if (v == 'deactivated' || v == 'inactive' || v == 'suspended') {
+      return true;
+    }
+  }
+  if (json['actorActive'] is bool && !(json['actorActive'] as bool)) {
+    return true;
+  }
+  return false;
+}
+
 class FriendsFeedItemDto {
   FriendsFeedItemDto({
     required this.id,
     required this.type,
     required this.actorUserId,
     required this.actorUserName,
+    this.isActorAccountDeactivated = false,
     this.actorDisplayName,
     this.actorProfilePhotoUrl,
     this.productId,
@@ -24,6 +62,8 @@ class FriendsFeedItemDto {
   final String type;
   final String actorUserId;
   final String actorUserName;
+  /// API: hesabı kapatılmış aktör — feed’de gösterme.
+  final bool isActorAccountDeactivated;
   final String? actorDisplayName;
   final String? actorProfilePhotoUrl;
   final String? productId;
@@ -110,6 +150,7 @@ class FriendsFeedItemDto {
       type: firstNonEmpty(['type', 'activityType']),
       actorUserId: firstNonEmpty(['actorUserId', 'userId', 'actorId']),
       actorUserName: firstNonEmpty(['actorUserName', 'userName', 'username']),
+      isActorAccountDeactivated: _actorDeactivatedFromFeedJson(json),
       actorDisplayName: nullableFirstNonEmpty(['actorDisplayName', 'displayName']),
       actorProfilePhotoUrl: nullableFirstNonEmpty([
         'actorProfilePhotoUrl',

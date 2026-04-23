@@ -13,6 +13,8 @@ import '../../../core/notifications/notification_realtime_service.dart';
 import '../../../core/widgets/main_bottom_nav_items.dart';
 import '../../../features/activity/presentation/activity_page.dart';
 import '../data/models/product_dto.dart';
+import '../data/models/conversation_dto.dart';
+import '../data/models/review_dto.dart';
 import '../data/models/tag_dto.dart';
 import '../data/repositories/product_repository.dart';
 import '../data/repositories/review_repository.dart';
@@ -22,7 +24,9 @@ import '../data/services/auth_service.dart';
 import '../data/services/review_prefetch_service.dart';
 import '../widgets/product_card.dart';
 import '../../../core/widgets/skeleton_loader.dart';
+import '../../../core/widgets/profile_avatar.dart';
 import 'home_page.dart';
+import 'profile/pages/user_profile_page.dart';
 import 'friend_feed_page.dart';
 import 'profile/pages/profile_page.dart';
 import 'review/pages/review_page.dart';
@@ -62,6 +66,16 @@ class _SearchPageState extends State<SearchPage> {
   String? _firebaseIdToken;
   bool _notificationSvcAttached = false;
 
+  /// GET /api/reviews/top-reviewers — giriş yapmışken dolar
+  List<TopReviewerDto> _topReviewers = [];
+  bool _loadingTopReviewers = false;
+
+  /// Takip / takipçi (arama havuzu — giriş gerekir)
+  List<ConversationUserDto> _socialSearchUsers = [];
+
+  /// Aktif sorgu için eşleşen profiller (kullanıcı adı metni)
+  List<_ProfileSearchEntry> _profileSearchMatches = [];
+
   Route _noAnimationRoute(Widget page) {
     return PageRouteBuilder(
       pageBuilder: (_, __, ___) => page,
@@ -87,6 +101,149 @@ class _SearchPageState extends State<SearchPage> {
       setState(() {});
     });
     _loadInitialData();
+    unawaited(_loadSocialGraphForSearch());
+  }
+
+  /// Profil adına göre yerel eşleşme: top reviewers + takip edilen / takipçi.
+  List<_ProfileSearchEntry> _computeProfileMatches(String q) {
+    if (q.isEmpty) return const [];
+    final seen = <String>{};
+    final merged = <_ProfileSearchEntry>[];
+
+    void add(
+      String userId,
+      String userName,
+      String? imageUrl, {
+      String? subtitle,
+    }) {
+      final id = userId.trim();
+      final name = userName.trim();
+      if (id.isEmpty || name.isEmpty) return;
+      if (!seen.add(id)) return;
+      merged.add(
+        _ProfileSearchEntry(
+          userId: id,
+          userName: name,
+          profileImageUrl: imageUrl,
+          subtitle: subtitle,
+        ),
+      );
+    }
+
+    for (final t in _topReviewers) {
+      add(
+        t.userId,
+        t.userName,
+        t.profileImageUrl,
+        subtitle: t.reviewCount > 0 ? '${t.reviewCount} reviews' : null,
+      );
+    }
+    for (final c in _socialSearchUsers) {
+      if (c.id <= 0) continue;
+      add(
+        c.id.toString(),
+        c.username,
+        c.profilePhotoUrl,
+        subtitle: 'In your network',
+      );
+    }
+
+    final out =
+        merged.where((e) {
+          final n = e.userName.toLowerCase();
+          return n.contains(q);
+        }).toList()
+          ..sort((a, b) {
+            final an = a.userName.toLowerCase();
+            final bn = b.userName.toLowerCase();
+            final aStarts = an.startsWith(q) ? 0 : 1;
+            final bStarts = bn.startsWith(q) ? 0 : 1;
+            if (aStarts != bStarts) return aStarts - bStarts;
+            return an.compareTo(bn);
+          });
+    if (out.length > 20) return out.sublist(0, 20);
+    return out;
+  }
+
+  void _recomputeProfileMatchesIfNeeded() {
+    if (!mounted) return;
+    final q = _activeQuery;
+    if (q.isEmpty) {
+      if (_profileSearchMatches.isNotEmpty) {
+        setState(() => _profileSearchMatches = []);
+      }
+      return;
+    }
+    setState(() {
+      _profileSearchMatches = _computeProfileMatches(q);
+    });
+  }
+
+  Future<void> _loadSocialGraphForSearch() async {
+    try {
+      final t = await _sessionHelper.ensureSession();
+      if (t == null || !mounted) return;
+      final me = await _authService.getMe();
+      if (!mounted || me.id.trim().isEmpty) return;
+      final following = await _interactionRepository.getFollowing(
+        me.id,
+        page: 0,
+        size: 100,
+      );
+      final followers = await _interactionRepository.getFollowers(
+        me.id,
+        page: 0,
+        size: 100,
+      );
+      if (!mounted) return;
+      final byId = <int, ConversationUserDto>{};
+      for (final u in following) {
+        if (u.id > 0) {
+          byId[u.id] = u;
+        }
+      }
+      for (final u in followers) {
+        if (u.id > 0) {
+          byId[u.id] = u;
+        }
+      }
+      setState(() {
+        _socialSearchUsers = byId.values.toList();
+      });
+      _recomputeProfileMatchesIfNeeded();
+    } catch (_) {}
+  }
+
+  /// Token zorunlu; giriş yok veya hata → sessizce boş
+  Future<void> _loadTopReviewers() async {
+    if (!mounted) return;
+    setState(() => _loadingTopReviewers = true);
+    try {
+      final token = await _sessionHelper.ensureSession();
+      if (token == null) {
+        if (mounted) {
+          setState(() {
+            _topReviewers = [];
+            _loadingTopReviewers = false;
+          });
+        }
+        return;
+      }
+      final list = await _reviewRepository.getTopReviewers(token, limit: 5);
+      if (!mounted) return;
+      setState(() {
+        _topReviewers = list;
+        _loadingTopReviewers = false;
+      });
+      _recomputeProfileMatchesIfNeeded();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _topReviewers = [];
+          _loadingTopReviewers = false;
+        });
+      }
+    }
   }
 
   void _applyProductFromReviewExit(ReviewPagePopResult r) {
@@ -175,6 +332,7 @@ class _SearchPageState extends State<SearchPage> {
         _errorMessage = null;
       });
       unawaited(_refreshInitialDataInBackground());
+      unawaited(_loadTopReviewers());
       return;
     }
 
@@ -221,6 +379,7 @@ class _SearchPageState extends State<SearchPage> {
         });
       }
     }
+    unawaited(_loadTopReviewers());
   }
 
   Future<void> _refreshInitialDataInBackground() async {
@@ -323,12 +482,140 @@ class _SearchPageState extends State<SearchPage> {
     });
   }
 
+  Widget _buildSearchResultsBody() {
+    final hasProfiles = _profileSearchMatches.isNotEmpty;
+    final hasProducts = _searchResults.isNotEmpty;
+    if (!hasProfiles && !hasProducts) {
+      return const Center(
+        child: Text(
+          'No matching products or people',
+          style: AppTextStyles.bodySecondary,
+          textAlign: TextAlign.center,
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (hasProfiles) ...[
+          const Padding(
+            padding: EdgeInsets.only(left: 2, bottom: 8),
+            child: Text(
+              'Profiles',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textSecondary,
+                letterSpacing: 0.4,
+              ),
+            ),
+          ),
+          SizedBox(
+            height: 90,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: _profileSearchMatches.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (context, index) {
+                final e = _profileSearchMatches[index];
+                return _ProfileSearchHitRow(
+                  entry: e,
+                  onTap: () {
+                    if (e.userId.isEmpty) return;
+                    Navigator.push<void>(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => UserProfilePage(
+                          userId: e.userId,
+                          userName: e.userName,
+                          profileImageUrl: e.profileImageUrl,
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+          if (hasProducts) const SizedBox(height: AppSpacing.large),
+        ],
+        if (hasProducts && hasProfiles)
+          const Padding(
+            padding: EdgeInsets.only(left: 2, bottom: 8),
+            child: Text(
+              'Products',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textSecondary,
+                letterSpacing: 0.4,
+              ),
+            ),
+          ),
+        Expanded(
+          child: hasProducts
+              ? GridView.builder(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: AppSpacing.xLarge,
+                    mainAxisSpacing: AppSpacing.xLarge,
+                    childAspectRatio: 0.60,
+                  ),
+                  itemCount: _searchResults.length,
+                  itemBuilder: (context, index) {
+                    final product = _searchResults[index];
+                    return ProductCard(
+                      key: ValueKey('spq_${product.id}_${_productCardResync[product.id] ?? 0}'),
+                      productId: product.id,
+                      imageUrl: product.imageURL,
+                      title: product.name,
+                      category: product.tag.name,
+                      categoryPath: product.tag.categoryPath,
+                      rating: product.averageRating ?? 0.0,
+                      desc: product.description ?? '',
+                      isFavorite: product.isLiked ?? false,
+                      loadReviewCount: true,
+                      onTap: () async {
+                        final r = await Navigator.push<ReviewPagePopResult?>(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ReviewPage(product: product),
+                          ),
+                        );
+                        if (!mounted) return;
+                        if (r != null) {
+                          _applyProductFromReviewExit(r);
+                        } else {
+                          unawaited(_refreshProductAfterReview(product.id));
+                        }
+                      },
+                    );
+                  },
+                )
+              : Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(AppSpacing.xLarge),
+                    child: Text(
+                      hasProfiles
+                          ? 'No products match this search'
+                          : 'No matching products or people',
+                      style: AppTextStyles.bodySecondary,
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+
   Future<void> _onSearchChanged(String query) async {
     final normalizedQuery = query.trim().toLowerCase();
     _activeQuery = normalizedQuery;
     if (normalizedQuery.isEmpty) {
       setState(() {
         _searchResults = [];
+        _profileSearchMatches = [];
         _isSearching = false;
         _showCategoryResults = false;
         _activeLeafCategory = null;
@@ -366,6 +653,7 @@ class _SearchPageState extends State<SearchPage> {
       if (!mounted || _activeQuery != normalizedQuery) return;
       setState(() {
         _searchResults = results;
+        _profileSearchMatches = _computeProfileMatches(normalizedQuery);
         _isSearching = false;
       });
       ReviewPrefetchService.instance.prefetchForProducts(
@@ -448,7 +736,7 @@ class _SearchPageState extends State<SearchPage> {
                             fontWeight: FontWeight.w500,
                           ),
                           decoration: InputDecoration(
-                            hintText: 'Search products or categories...',
+                            hintText: 'Search products, categories, or usernames...',
                             hintStyle: TextStyle(
                               color: AppColors.textSecondary.withValues(alpha: 0.7),
                               fontSize: 15,
@@ -483,56 +771,72 @@ class _SearchPageState extends State<SearchPage> {
                           ),
                         ),
                       ),
+                      if (_searchController.text.trim().isEmpty && !_showCategoryResults) ...[
+                        if (_loadingTopReviewers)
+                          const Padding(
+                            padding: EdgeInsets.only(bottom: AppSpacing.medium),
+                            child: Center(
+                              child: SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                            ),
+                          )
+                        else if (_topReviewers.isNotEmpty) ...[
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8, left: 2),
+                            child: Text(
+                              'Top reviewers',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textSecondary,
+                                letterSpacing: 0.4,
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            height: 88,
+                            child: ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: _topReviewers.length,
+                              separatorBuilder: (_, __) => const SizedBox(width: 10),
+                              itemBuilder: (context, index) {
+                                final t = _topReviewers[index];
+                                return _TopReviewerRow(
+                                  data: t,
+                                  onTap: () {
+                                    if (t.userId.isEmpty) return;
+                                    Navigator.push<void>(
+                                      context,
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => UserProfilePage(
+                                          userId: t.userId,
+                                          userName: t.userName,
+                                          profileImageUrl: t.profileImageUrl,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      ],
+                      if ((_searchController.text.trim().isEmpty && !_showCategoryResults) &&
+                          (_loadingTopReviewers || _topReviewers.isNotEmpty))
+                        const SizedBox(height: AppSpacing.small),
                       const SizedBox(height: AppSpacing.xLarge),
                       Expanded(
                         child: _searchController.text.trim().isNotEmpty
                             ? (_isSearching
                             ? const Center(child: ListLoadMoreSkeleton())
-                            : _searchResults.isEmpty
-                                    ? const Center(
-                                        child: Text(
-                                          'No matching products found',
-                                          style: AppTextStyles.bodySecondary,
-                                        ),
-                                      )
-                                    : GridView.builder(
-                                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                                          crossAxisCount: 2,
-                                          crossAxisSpacing: AppSpacing.xLarge,
-                                          mainAxisSpacing: AppSpacing.xLarge,
-                                          childAspectRatio: 0.60,
-                                        ),
-                                        itemCount: _searchResults.length,
-                                        itemBuilder: (context, index) {
-                                          final product = _searchResults[index];
-                                          return ProductCard(
-                                            key: ValueKey('spq_${product.id}_${_productCardResync[product.id] ?? 0}'),
-                                            productId: product.id,
-                                            imageUrl: product.imageURL,
-                                            title: product.name,
-                                            category: product.tag.name,
-                                            categoryPath: product.tag.categoryPath,
-                                            rating: product.averageRating ?? 0.0,
-                                            desc: product.description ?? '',
-                                            isFavorite: product.isLiked ?? false,
-                                            loadReviewCount: true,
-                                            onTap: () async {
-                                              final r = await Navigator.push<ReviewPagePopResult?>(
-                                                context,
-                                                MaterialPageRoute(
-                                                  builder: (_) => ReviewPage(product: product),
-                                                ),
-                                              );
-                                              if (!mounted) return;
-                                              if (r != null) {
-                                                _applyProductFromReviewExit(r);
-                                              } else {
-                                                unawaited(_refreshProductAfterReview(product.id));
-                                              }
-                                            },
-                                          );
-                                        },
-                                      ))
+                            : _buildSearchResultsBody())
                             : _showCategoryResults
                                     ? Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -762,6 +1066,158 @@ class _SearchPageState extends State<SearchPage> {
           }
         },
         items: MainBottomNavItems.barItems,
+      ),
+    );
+  }
+}
+
+/// Arama: ürün dışı kullanıcı satırı
+class _ProfileSearchEntry {
+  const _ProfileSearchEntry({
+    required this.userId,
+    required this.userName,
+    this.profileImageUrl,
+    this.subtitle,
+  });
+
+  final String userId;
+  final String userName;
+  final String? profileImageUrl;
+  final String? subtitle;
+}
+
+class _ProfileSearchHitRow extends StatelessWidget {
+  const _ProfileSearchHitRow({
+    required this.entry,
+    required this.onTap,
+  });
+
+  final _ProfileSearchEntry entry;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: 200,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.border, width: 1),
+          ),
+          child: Row(
+            children: [
+              ProfileAvatarImage(
+                size: 40,
+                imageUrl: entry.profileImageUrl,
+                fallbackInitial: entry.userName,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      entry.userName.isNotEmpty ? '@${entry.userName}' : '—',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    if (entry.subtitle != null && entry.subtitle!.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        entry.subtitle!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodySmall.copyWith(
+                          color: AppColors.textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TopReviewerRow extends StatelessWidget {
+  const _TopReviewerRow({
+    required this.data,
+    required this.onTap,
+  });
+
+  final TopReviewerDto data;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: 200,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.border, width: 1),
+          ),
+          child: Row(
+            children: [
+              ProfileAvatarImage(
+                size: 40,
+                imageUrl: data.profileImageUrl,
+                fallbackInitial: data.userName,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      data.userName.isNotEmpty ? '@${data.userName}' : '—',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${data.reviewCount} ${data.reviewCount == 1 ? 'review' : 'reviews'}',
+                      maxLines: 1,
+                      style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

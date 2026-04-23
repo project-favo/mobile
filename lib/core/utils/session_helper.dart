@@ -175,6 +175,10 @@ class SessionHelper {
   bool _looksLikeDeactivatedAccountFromMe(dynamic data) {
     if (data is! Map) return false;
     final map = Map<String, dynamic>.from(data);
+    if (map['isAccountDeactivated'] is bool &&
+        (map['isAccountDeactivated'] as bool)) {
+      return true;
+    }
     final status = map['status']?.toString().toLowerCase() ?? '';
     final active = map['active'];
     final enabled = map['enabled'];

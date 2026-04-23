@@ -19,8 +19,37 @@ bool _falsyFlag(dynamic v) {
   return false;
 }
 
+/// Sadece kullanıcı/owner gibi; ürün + review kökü ile karışmasın.
+bool _looksLikePureUserMap(Map<String, dynamic> m) {
+  if (m.containsKey('tag')) return false; // [ProductDto]
+  if (m.containsKey('productName') && m.containsKey('ownerId')) return false; // [ReviewDto]
+  final u = m['userName'] ?? m['username'] ?? m['email'] ?? m['eMail'];
+  if (u == null || u.toString().trim().isEmpty) return false;
+  if (m.containsKey('imageURL') && m['imageURL'].toString().trim().isNotEmpty) {
+    return false;
+  }
+  return true;
+}
+
+/// Review veya yorum-embed kökü; [active] / [status] hesap veya owner ile aynı JSON’da.
+bool _isLikelyReviewNode(Map<String, dynamic> m) {
+  if (!m.containsKey('ownerId') || m['ownerId'].toString().trim().isEmpty) {
+    return false;
+  }
+  if (m.containsKey('rating')) return true;
+  if (m.containsKey('title') && m.containsKey('productId')) return true;
+  if (m.containsKey('ownerUserName') && m.containsKey('productName')) {
+    return true;
+  }
+  return false;
+}
+
 /// [ReviewDto] ve [ProductDto] JSON'unda ürünün vitrinden kalkmış / askıda olduğunu tespit eder.
 bool isProductDataNotListedInMap(Map<String, dynamic> m) {
+  if (_looksLikePureUserMap(m)) return false;
+
+  final reviewLike = _isLikelyReviewNode(m);
+
   if (_truthyFlag(m['suspended']) ||
       _truthyFlag(m['productSuspended']) ||
       _truthyFlag(m['isSuspended']) ||
@@ -34,33 +63,40 @@ bool isProductDataNotListedInMap(Map<String, dynamic> m) {
       _truthyFlag(m['removed'])) {
     return true;
   }
-  if (m['active'] is bool && (m['active'] as bool) == false) {
-    return true;
-  }
-  // Spring / Jackson: `boolean isActive()` → JSON’da çoğu zaman `active`, bazen `isActive`.
-  if (m['isActive'] is bool && (m['isActive'] as bool) == false) {
-    return true;
-  }
-  if (m['is_active'] is bool && (m['is_active'] as bool) == false) {
-    return true;
-  }
-  // Bazı API'ler 0/1 veya 0.0 sayı taşır
-  for (final k in ['active', 'isActive', 'is_active', 'productActive', 'product_active']) {
-    if (m[k] is num && (m[k] as num) == 0) {
+  if (!reviewLike) {
+    if (m['active'] is bool && (m['active'] as bool) == false) {
       return true;
     }
-  }
-  if (m['productActive'] is bool && (m['productActive'] as bool) == false) {
-    return true;
-  }
-  if (_falsyFlag(m['isActive']) ||
-      _falsyFlag(m['is_active']) ||
-      _falsyFlag(m['active']) ||
-      _falsyFlag(m['productActive']) ||
-      _falsyFlag(m['enabled']) ||
-      _falsyFlag(m['isEnabled']) ||
-      _falsyFlag(m['is_enabled'])) {
-    return true;
+    if (m['isActive'] is bool && (m['isActive'] as bool) == false) {
+      return true;
+    }
+    if (m['is_active'] is bool && (m['is_active'] as bool) == false) {
+      return true;
+    }
+    for (final k in ['active', 'isActive', 'is_active', 'productActive', 'product_active']) {
+      if (m[k] is num && (m[k] as num) == 0) {
+        return true;
+      }
+    }
+    if (m['productActive'] is bool && (m['productActive'] as bool) == false) {
+      return true;
+    }
+    if (_falsyFlag(m['isActive']) ||
+        _falsyFlag(m['is_active']) ||
+        _falsyFlag(m['active']) ||
+        _falsyFlag(m['productActive']) ||
+        _falsyFlag(m['enabled']) ||
+        _falsyFlag(m['isEnabled']) ||
+        _falsyFlag(m['is_enabled'])) {
+      return true;
+    }
+  } else {
+    if (m['productActive'] is bool && (m['productActive'] as bool) == false) {
+      return true;
+    }
+    if (_falsyFlag(m['productActive'])) {
+      return true;
+    }
   }
   if (m['visible'] is bool && (m['visible'] as bool) == false) {
     return true;
@@ -81,25 +117,32 @@ bool isProductDataNotListedInMap(Map<String, dynamic> m) {
       _falsyFlag(m['in_catalog'])) {
     return true;
   }
-  if (_truthyFlag(m['deactivated']) || _truthyFlag(m['unavailable'])) {
+  if (!reviewLike &&
+      (_truthyFlag(m['deactivated']) || _truthyFlag(m['unavailable']))) {
     return true;
   }
-  final st = (m['status'] ?? m['productStatus'] ?? m['state'] ?? m['listingStatus'] ?? m['productState'] ?? '')
+  // Review kökünde: generic `status` genelde hesap; ürün için productStatus/listingStatus kullan.
+  final st = (reviewLike
+          ? (m['productStatus'] ?? m['listingStatus'] ?? m['state'] ?? m['productState'] ?? '')
+          : (m['status'] ?? m['productStatus'] ?? m['state'] ?? m['listingStatus'] ?? m['productState'] ?? ''))
       .toString()
       .toLowerCase();
-  if (st.contains('suspend') ||
-      st.contains('unpublish') ||
-      st == 'hidden' ||
-      st == 'inactive' ||
-      st == 'disabled' ||
-      st == 'banned' ||
-      st == 'delisted' ||
-      st == 'unavailable' ||
-      st == 'removed' ||
-      st == 'rejected' ||
-      st == 'suspended' ||
-      st == 'dismissed') {
-    return true;
+  if (st.isNotEmpty) {
+    if (st.contains('suspend') ||
+        st.contains('unpublish') ||
+        st == 'hidden' ||
+        st == 'banned' ||
+        st == 'delisted' ||
+        st == 'unavailable' ||
+        st == 'removed' ||
+        st == 'rejected' ||
+        st == 'dismissed' ||
+        st == 'disabled') {
+      return true;
+    }
+    if (!reviewLike && (st == 'inactive' || st == 'suspended')) {
+      return true;
+    }
   }
   // Ana sayfa / katalog: vitrin dışı
   if (_falsyFlag(m['inHomeFeed']) ||

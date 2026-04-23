@@ -191,6 +191,7 @@ class _ProfilePageState extends State<ProfilePage>
         ),
       );
       unawaited(_loadWishlist(background: true));
+      unawaited(_revalidateMeOnWarmProfileCache());
     } else {
       _loadUserData();
       // Profil açılır açılmaz My Reviews'ı yükle (ilk sekme)
@@ -650,6 +651,15 @@ class _ProfilePageState extends State<ProfilePage>
     );
   }
 
+  /// Sıcak önbellekle açılışta [getMe] atlanabiliyor; kapatılmış hesabı tespit etmek için arka planda doğrular.
+  Future<void> _revalidateMeOnWarmProfileCache() async {
+    try {
+      await _authService.getMe();
+    } on DeactivatedAccountException {
+      // [SessionHelper.handleDeactivatedAccount] oturumu kapatır ve girişe yönlendirir
+    } catch (_) {}
+  }
+
   Future<void> _loadUserData({bool background = false}) async {
     if (!background) {
       setState(() {
@@ -684,6 +694,8 @@ class _ProfilePageState extends State<ProfilePage>
       if (user.id.isNotEmpty) {
         unawaited(_loadFollowCounts(user.id));
       }
+    } on DeactivatedAccountException {
+      if (!mounted) return;
     } catch (e) {
       if (background && _user != null) {
         _isLoading = false;

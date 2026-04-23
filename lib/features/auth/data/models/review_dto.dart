@@ -229,6 +229,33 @@ class UpdateReviewRequestDto {
   }
 }
 
+/// GET /api/reviews/top-reviewers — en çok review yazan kullanıcılar
+class TopReviewerDto {
+  final String userId;
+  final String userName;
+  final String? profileImageUrl;
+  final int reviewCount;
+
+  const TopReviewerDto({
+    required this.userId,
+    required this.userName,
+    this.profileImageUrl,
+    required this.reviewCount,
+  });
+
+  factory TopReviewerDto.fromJson(Map<String, dynamic> json) {
+    return TopReviewerDto(
+      userId: json['userId']?.toString() ?? json['user_id']?.toString() ?? '',
+      userName: json['userName']?.toString() ?? json['user_name']?.toString() ?? '',
+      profileImageUrl: json['profileImageUrl']?.toString() ??
+          json['profile_image_url']?.toString(),
+      reviewCount: (json['reviewCount'] as num?)?.toInt() ??
+          (json['review_count'] as num?)?.toInt() ??
+          0,
+    );
+  }
+}
+
 /// Review şikayeti gövdesi (`/flag` ve uyumluluk için `/report`).
 class ReportReviewRequestDto {
   final String reason;

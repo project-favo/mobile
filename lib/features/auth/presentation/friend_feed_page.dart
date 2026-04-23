@@ -181,7 +181,7 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
               : _items.length.clamp(20, 50))
           : 20;
       final res = await _repository.getFriendsFeed(page: 0, size: pageSize);
-      final mapped = res.content.map(activityItemFromFriendsFeed).toList();
+      final mapped = activityItemsFromFriendsFeedDtos(res.content);
       if (!mounted) return;
       setState(() {
         _items
@@ -217,7 +217,7 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
       final res = await _repository.getFriendsFeed(page: _page + 1, size: 20);
       if (!mounted) return;
       setState(() {
-        final mapped = res.content.map(activityItemFromFriendsFeed).toList();
+        final mapped = activityItemsFromFriendsFeedDtos(res.content);
         _items.addAll(mapped);
         _page = res.number;
         _totalPages = res.totalPages;

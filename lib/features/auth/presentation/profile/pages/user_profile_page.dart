@@ -82,6 +82,8 @@ class _UserProfilePageState extends State<UserProfilePage>
   List<ReviewDto> _reviews = [];
   bool _isLoadingReviews = true;
   bool _isLoadingCounts = true;
+  /// Backend hesabı kapatılmış; içerik ve etkileşim gösterme.
+  bool _profileUnavailable = false;
   /// Görünen profil fotoğrafı (parametre veya yorum listesinden)
   String? _avatarImageUrl;
   Uint8List? _avatarMemoryBytes;
@@ -106,6 +108,8 @@ class _UserProfilePageState extends State<UserProfilePage>
         Navigator.of(context).pop();
         return;
       }
+    } on DeactivatedAccountException {
+      return;
     } catch (_) {}
     if (!mounted) return;
     await _revalidateTargetUserOrExit();
@@ -157,11 +161,14 @@ class _UserProfilePageState extends State<UserProfilePage>
     try {
       final u = await _authService.getUserById(widget.userId);
       if (!mounted) return;
-      if (u != null && u.isAccountInactive) {
+      if (u != null &&
+          (u.isAccountInactive || u.isAccountDeactivated)) {
         _exitToHomeBecauseUserUnavailable();
         return;
       }
-      if (u != null && !u.isAccountInactive) {
+      if (u != null &&
+          !u.isAccountInactive &&
+          !u.isAccountDeactivated) {
         setState(() => _canShowMessageToProfileUser = true);
       }
     } on TargetUserNotAvailableException {
@@ -190,15 +197,32 @@ class _UserProfilePageState extends State<UserProfilePage>
     );
   }
 
+  Future<void> _refreshProfile() async {
+    if (!mounted) return;
+    if (_profileUnavailable) {
+      setState(() {
+        _profileUnavailable = false;
+        _isLoadingCounts = true;
+        _isLoadingReviews = true;
+      });
+    }
+    await _start();
+  }
+
   Future<void> _enrichProfileFromApi() async {
     if (_exitedBecauseUserGone) return;
     try {
       final u = await _authService.getUserById(widget.userId);
-      if (u != null && u.isAccountInactive && mounted) {
+      if (u != null &&
+          (u.isAccountInactive || u.isAccountDeactivated) &&
+          mounted) {
         _exitToHomeBecauseUserUnavailable();
         return;
       }
-      if (u != null && !u.isAccountInactive && mounted) {
+      if (u != null &&
+          !u.isAccountInactive &&
+          !u.isAccountDeactivated &&
+          mounted) {
         setState(() => _canShowMessageToProfileUser = true);
       }
       if (u != null && mounted) {
@@ -631,7 +655,7 @@ class _UserProfilePageState extends State<UserProfilePage>
         ),
         centerTitle: true,
         actions: [
-          if (_canShowMessageToProfileUser)
+          if (_canShowMessageToProfileUser && !_profileUnavailable)
             IconButton(
               icon: const Icon(Icons.chat_bubble_outline),
               color: AppColors.primary,
@@ -642,8 +666,31 @@ class _UserProfilePageState extends State<UserProfilePage>
       ),
       body: RefreshIndicator(
         color: AppColors.primary,
-        onRefresh: _loadAll,
-        child: SingleChildScrollView(
+        onRefresh: _refreshProfile,
+        child: _profileUnavailable
+            ? ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: [
+                  const SizedBox(height: 80),
+                  const Icon(
+                    Icons.person_off_outlined,
+                    size: 56,
+                    color: AppColors.textSecondary,
+                  ),
+                  const SizedBox(height: AppSpacing.large),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.xLarge,
+                    ),
+                    child: Text(
+                      'This profile is not available.',
+                      textAlign: TextAlign.center,
+                      style: AppTextStyles.bodyMedium,
+                    ),
+                  ),
+                ],
+              )
+            : SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           child: Column(
             children: [
