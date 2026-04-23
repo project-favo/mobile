@@ -42,5 +42,9 @@ class ActivityMemoryCache {
           : Set<String>.from(followingUserIds),
     );
   }
+
+  void clear() {
+    _snapshot = null;
+  }
 }
 

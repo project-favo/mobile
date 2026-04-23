@@ -10,7 +10,9 @@ import '../../../../../core/config/api_config.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/cache/current_user_cache.dart';
 import '../../../../../core/cache/review_memory_cache.dart';
+import '../../../../../core/utils/exceptions.dart';
 import '../../../../../core/utils/in_flight_id_lock.dart';
+import '../../../../../core/utils/product_listing_flags.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/network/api_client.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
@@ -20,6 +22,7 @@ import '../../profile/pages/user_profile_page.dart';
 import '../../../data/models/review_dto.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/repositories/interaction_repository.dart';
+import '../../../data/repositories/product_repository.dart';
 import '../../../data/repositories/review_repository.dart';
 import '../../../data/repositories/message_repository.dart';
 import '../../../data/services/auth_service.dart';
@@ -42,6 +45,7 @@ class ReviewDetailPage extends StatefulWidget {
 
 class _ReviewDetailPageState extends State<ReviewDetailPage> {
   final InteractionRepository _interactionRepository = InteractionRepository();
+  final ProductRepository _productRepository = ProductRepository();
   final ReviewRepository _reviewRepository = ReviewRepository();
   final SessionHelper _sessionHelper = SessionHelper();
   final ApiClient _apiClient = ApiClient();
@@ -55,6 +59,10 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
   final Map<String, Future<Uint8List?>> _mediaFutures = {};
   final InFlightFlag _reviewDetailLikeLock = InFlightFlag();
   final InFlightFlag _reviewDeleteLock = InFlightFlag();
+
+  /// Ürün askı / vitrin dışı: detay metnini ve ürün bilgisini göstermeyiz.
+  bool _productListingBlocked = false;
+  bool _productListingCheckDone = false;
 
   bool get _isOwnReview {
     if (CurrentUserCache.instance.isMyReview(_currentReview)) return true;
@@ -74,8 +82,51 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
     unawaited(_loadViewerId());
     // Defer the refresh so the first frame renders fully before making an API call.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _refreshReview();
+      if (mounted) {
+        unawaited(_revalidateProductListing());
+        unawaited(_refreshReview());
+      }
     });
+  }
+
+  /// Profil dışı rotalarda eski [ProductDto] ile gelinebilir; GET ile teyit.
+  Future<void> _revalidateProductListing() async {
+    if (widget.review.isProductNotListed || widget.product.isProductNotListed) {
+      if (mounted) {
+        setState(() {
+          _productListingBlocked = true;
+          _productListingCheckDone = true;
+        });
+      }
+      return;
+    }
+    try {
+      final token = await _sessionHelper.getTokenAndSetHeader();
+      final p = await _productRepository.getProductById(
+        widget.product.id,
+        firebaseIdToken: token,
+        bypassCache: true,
+      );
+      if (!mounted) return;
+      final blocked =
+          p.isProductNotListed ||
+          isNotListedImpliedByEmptyProductImage(p.imageURL);
+      setState(() {
+        _productListingBlocked = blocked;
+        _productListingCheckDone = true;
+      });
+    } on ProductNotAvailableException {
+      if (mounted) {
+        setState(() {
+          _productListingBlocked = true;
+          _productListingCheckDone = true;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _productListingCheckDone = true);
+      }
+    }
   }
 
   /// Pre-creates and caches a Future for each auth-required media item.
@@ -515,6 +566,47 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
     }
   }
 
+  Widget _buildProductSuspendedBody(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.xLarge),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              'SUSPENDED',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.w900,
+                color: AppColors.primary,
+                letterSpacing: 2,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.large),
+            Text(
+              'This product is no longer available. Review details are hidden until the product is back.',
+              textAlign: TextAlign.center,
+              style: AppTextStyles.body.copyWith(
+                color: AppColors.textSecondary,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xLarge),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Go back'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -543,7 +635,20 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
             ),
         ],
       ),
-      body: Column(
+      body: Builder(
+        builder: (context) {
+          if (!_productListingCheckDone) {
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24.0),
+                child: CircularProgressIndicator(),
+              ),
+            );
+          }
+          if (_productListingBlocked) {
+            return _buildProductSuspendedBody(context);
+          }
+          return Column(
         children: [
           Expanded(
             child: SingleChildScrollView(
@@ -1088,6 +1193,8 @@ class _ReviewDetailPageState extends State<ReviewDetailPage> {
             ),
           ),
         ],
+      );
+        },
       ),
     );
   }

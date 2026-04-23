@@ -42,6 +42,16 @@ class ConversationUserDto {
       profilePhotoData: data,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'userName': username,
+      'username': username,
+      'profilePhotoUrl': profilePhotoUrl,
+      'profilePhotoData': profilePhotoData,
+    };
+  }
 }
 
 class ConversationDto {
@@ -74,6 +84,16 @@ class ConversationDto {
       lastMessageAt: json['lastMessageAt']?.toString() ?? '',
       unreadCount: (json['unreadCount'] as num?)?.toInt() ?? 0,
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'otherParticipant': otherParticipant.toJson(),
+      'lastMessage': lastMessage,
+      'lastMessageAt': lastMessageAt,
+      'unreadCount': unreadCount,
+    };
   }
 }
 

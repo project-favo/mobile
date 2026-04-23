@@ -31,4 +31,8 @@ class FriendFeedMemoryCache {
       totalPages: totalPages,
     );
   }
+
+  void clear() {
+    _snapshot = null;
+  }
 }

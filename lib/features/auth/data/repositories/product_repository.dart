@@ -1,6 +1,8 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../../../../core/cache/product_memory_cache.dart';
+import '../../../../core/utils/exceptions.dart';
+import '../../../../core/utils/product_listing_flags.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/network/firebase_auth_api_interceptor.dart';
 import '../models/product_dto.dart';
@@ -407,10 +409,11 @@ class ProductRepository {
     }
     try {
       final response = await _apiClient.dio.get('/api/products/$productId');
-
-      final product = ProductDto.fromJson(
-        response.data as Map<String, dynamic>,
-      );
+      final data = response.data as Map<String, dynamic>;
+      var product = ProductDto.fromJson(data);
+      if (isProductNotListedInResponseJson(data)) {
+        product = product.copyWith(isProductNotListed: true);
+      }
 
       // Rating ve like bilgilerini paralel olarak çek
       try {
@@ -457,6 +460,10 @@ class ProductRepository {
       }
     } on DioException catch (e) {
       if (e.response != null) {
+        final code = e.response?.statusCode;
+        if (code == 404 || code == 410 || code == 403) {
+          throw ProductNotAvailableException(productId, statusCode: code);
+        }
         final errorData = e.response?.data;
         final errorMessage =
             errorData is Map

@@ -11,6 +11,7 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/exceptions.dart'
     show dioExceptionBodyContains, dioResponseDataAsSearchString;
+import '../../../core/cache/app_session_cache.dart';
 import '../../../core/utils/session_helper.dart';
 import '../../../routes/app_routes.dart';
 import '../data/services/auth_service.dart';
@@ -314,6 +315,7 @@ class _BackendEmailVerificationPageState
   Future<void> _signOut() async {
     SessionHelper().clearSession();
     AuthService.clearRegisterFormDraft();
+    clearAllAppCachesOnLogout();
     await FirebaseAuth.instance.signOut();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(

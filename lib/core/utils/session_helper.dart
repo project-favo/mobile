@@ -8,6 +8,7 @@ import '../network/api_client.dart';
 import '../config/api_config.dart';
 import 'exceptions.dart';
 import 'review_report_storage.dart';
+import '../cache/app_session_cache.dart';
 
 /// Session management helper
 /// Handles backend session establishment and token management
@@ -200,6 +201,7 @@ class SessionHelper {
     _isHandlingDeactivatedState = true;
     try {
       clearSession();
+      clearAllAppCachesOnLogout();
       await FirebaseAuth.instance.signOut();
       final navigator = appNavigatorKey.currentState;
       if (navigator != null) {

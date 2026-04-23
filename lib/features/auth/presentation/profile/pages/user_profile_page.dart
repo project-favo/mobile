@@ -8,6 +8,9 @@ import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/utils/exceptions.dart';
+import '../../../../../core/utils/product_listing_flags.dart';
+import '../../../../../core/utils/product_report_storage.dart';
+import '../../../../../core/utils/review_report_storage.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../../../../core/cache/product_memory_cache.dart';
@@ -53,6 +56,9 @@ class _UserProfilePageState extends State<UserProfilePage>
 
   /// Reviews listesinde ürün görseli için prefetch.
   final Map<String, ProductDto> _reviewProductHints = {};
+  final Set<String> _unlistedProductIdsFromFailedFetch = {};
+  final Set<String> _productIdsReportedByMeFromServer = {};
+  final Set<String> _reviewProductIdsNotOnHomeFirstPage = {};
 
   late TabController _tabController;
   String _selectedDateSort = 'Newest';
@@ -72,6 +78,8 @@ class _UserProfilePageState extends State<UserProfilePage>
   @override
   void initState() {
     super.initState();
+    unawaited(ReviewReportStorage.hydrateForCurrentUser());
+    unawaited(ProductReportStorage.hydrateForCurrentUser());
     _tabController = TabController(length: 1, vsync: this);
     _avatarImageUrl = widget.profileImageUrl;
     _start();
@@ -177,11 +185,16 @@ class _UserProfilePageState extends State<UserProfilePage>
       setState(() {
         _reviews = reviews;
         _reviewProductHints.clear();
+        _unlistedProductIdsFromFailedFetch.clear();
+        _productIdsReportedByMeFromServer.clear();
+        _reviewProductIdsNotOnHomeFirstPage.clear();
         _avatarImageUrl = avatar;
         _isLoadingReviews = false;
       });
       _sortReviews();
       unawaited(_prefetchProductsForReviews(reviews));
+      unawaited(_syncReportedProductFlagsFromServer());
+      unawaited(_syncNotOnHomeFirstPageSet(reviews));
     } catch (_) {
       if (!mounted) return;
       setState(() => _isLoadingReviews = false);
@@ -213,20 +226,154 @@ class _UserProfilePageState extends State<UserProfilePage>
       if (!mounted) return;
       final end = (i + batch > list.length) ? list.length : i + batch;
       final slice = list.sublist(i, end);
-      await Future.wait(
+      final unlisted = <String>[];
+      final newHints = <String, ProductDto>{};
+      final rows = await Future.wait(
         slice.map((id) async {
           try {
-            final p = await _productRepository.getProductById(
+            return MapEntry(
               id,
-              firebaseIdToken: token,
+              await _productRepository.getProductById(
+                id,
+                firebaseIdToken: token,
+                bypassCache: true,
+              ),
             );
-            if (mounted) {
-              setState(() => _reviewProductHints[id] = p);
-            }
-          } catch (_) {}
+          } on ProductNotAvailableException {
+            return MapEntry<String, ProductDto?>(id, null);
+          } catch (_) {
+            return null;
+          }
         }),
       );
+      for (final e in rows) {
+        if (e == null) continue;
+        if (e.value == null) {
+          unlisted.add(e.key);
+        } else {
+          newHints[e.key] = e.value!;
+        }
+      }
+      if (mounted && (unlisted.isNotEmpty || newHints.isNotEmpty)) {
+        setState(() {
+          _unlistedProductIdsFromFailedFetch.addAll(unlisted);
+          _reviewProductHints.addAll(newHints);
+        });
+      }
     }
+  }
+
+  Future<void> _syncNotOnHomeFirstPageSet(List<ReviewDto> reviews) async {
+    final mine = reviews
+        .map((r) => r.productId.trim())
+        .where((s) => s.isNotEmpty)
+        .toSet();
+    if (mine.isEmpty) return;
+    try {
+      final token = await _sessionHelper.getTokenAndSetHeader();
+      if (!mounted) return;
+      final feed = await _productRepository.getHomeFeed(
+        page: 0,
+        size: 50,
+        firebaseIdToken: token,
+      );
+      if (!mounted) return;
+      final onHome = feed.content.map((e) => e.id.trim()).toSet();
+      final missing = mine.where((id) => !onHome.contains(id)).toSet();
+      if (mounted) {
+        setState(() {
+          _reviewProductIdsNotOnHomeFirstPage
+            ..clear()
+            ..addAll(missing);
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _syncReportedProductFlagsFromServer() async {
+    final ids = _reviews
+        .map((r) => r.productId)
+        .where((s) => s.isNotEmpty)
+        .toSet();
+    if (ids.isEmpty) return;
+    final token = await _sessionHelper.getTokenAndSetHeader();
+    if (token == null) return;
+    final list = ids.toList();
+    const inc = 5;
+    final fromApi = <String>{};
+    for (var i = 0; i < list.length; i += inc) {
+      if (!mounted) return;
+      final j = i + inc > list.length ? list.length : i + inc;
+      final slice = list.sublist(i, j);
+      final rows = await Future.wait(
+        slice.map(
+          (id) async {
+            final ok = await _interactionRepo.isProductReported(token, id);
+            return MapEntry(id, ok);
+          },
+        ),
+      );
+      for (final e in rows) {
+        if (e.value) fromApi.add(e.key);
+      }
+    }
+    if (mounted) {
+      setState(() {
+        _productIdsReportedByMeFromServer
+          ..clear()
+          ..addAll(fromApi);
+      });
+    }
+  }
+
+  bool _reviewRowNotListed(ReviewDto review, ProductDto? hint) {
+    if (review.isProductNotListed) return true;
+    if (hint?.isProductNotListed == true) return true;
+    if (_unlistedProductIdsFromFailedFetch.contains(review.productId)) {
+      return true;
+    }
+    if (hint != null &&
+        isNotListedImpliedByEmptyProductImage(hint.imageURL)) {
+      return true;
+    }
+    if (_reviewProductIdsNotOnHomeFirstPage.contains(review.productId) &&
+        (hint == null ||
+            isNotListedImpliedByEmptyProductImage(hint.imageURL))) {
+      return true;
+    }
+    return false;
+  }
+
+  Widget _buildUserProfileReviewRow(ReviewDto r) {
+    final hint = _reviewProductHints[r.productId];
+    final notListed = _reviewRowNotListed(r, hint);
+    return ProfileReviewRowCard(
+      review: r,
+      productImageUrl: hint?.imageURL,
+      isProductNotListed: notListed,
+      youReportedThisReview: ReviewReportStorage.hasReportedSync(r.id),
+      youReportedThisProduct:
+          ProductReportStorage.hasReportedSync(r.productId) ||
+          _productIdsReportedByMeFromServer.contains(r.productId),
+      onTap:
+          notListed
+              ? null
+              : () {
+                final cached =
+                    ProductMemoryCache.instance.peek(r.productId) ??
+                    _reviewProductHints[r.productId];
+                final product = _productForReviewDetail(r, cached);
+                Navigator.push(
+                  context,
+                  SlideRightRoute(
+                    page: ReviewDetailPage(
+                      review: r,
+                      product: product,
+                    ),
+                  ),
+                );
+              },
+    );
   }
 
   String _reviewsAverageLabel() {
@@ -243,6 +390,7 @@ class _UserProfilePageState extends State<UserProfilePage>
       imageURL: '',
       description: null,
       tag: TagDto(id: '', name: ''),
+      isProductNotListed: review.isProductNotListed,
     );
   }
 
@@ -579,28 +727,7 @@ class _UserProfilePageState extends State<UserProfilePage>
                       for (var i = 0; i < _reviews.length; i++) ...[
                         if (i > 0)
                           const SizedBox(height: AppSpacing.medium),
-                        ProfileReviewRowCard(
-                          review: _reviews[i],
-                          productImageUrl:
-                              _reviewProductHints[_reviews[i].productId]
-                                  ?.imageURL,
-                          onTap: () {
-                            final r = _reviews[i];
-                            final cached =
-                                ProductMemoryCache.instance.peek(r.productId) ??
-                                _reviewProductHints[r.productId];
-                            final product = _productForReviewDetail(r, cached);
-                            Navigator.push(
-                              context,
-                              SlideRightRoute(
-                                page: ReviewDetailPage(
-                                  review: r,
-                                  product: product,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
+                        _buildUserProfileReviewRow(_reviews[i]),
                       ],
                     ],
                   ),

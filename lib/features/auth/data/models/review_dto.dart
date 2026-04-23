@@ -1,3 +1,5 @@
+import '../../../../core/utils/product_listing_flags.dart';
+
 class ReviewDto {
   final String id;
   final String title;
@@ -14,6 +16,9 @@ class ReviewDto {
   final int likeCount;
   final bool isLikedByCurrentUser;
 
+  /// true: ürün artık vitrinde yok (askı, kaldırıldı) — [ProfileReviewRowCard] bant
+  final bool isProductNotListed;
+
   ReviewDto({
     required this.id,
     required this.title,
@@ -29,6 +34,7 @@ class ReviewDto {
     required this.mediaList,
     required this.likeCount,
     required this.isLikedByCurrentUser,
+    this.isProductNotListed = false,
   });
 
   static String? _ownerPhotoFromJson(Map<String, dynamic> json) {
@@ -47,6 +53,10 @@ class ReviewDto {
           ?.toString();
     }
     return null;
+  }
+
+  static bool _productNotListedFromJson(Map<String, dynamic> json) {
+    return isProductNotListedFromJsonMap(json);
   }
 
   factory ReviewDto.fromJson(Map<String, dynamic> json) {
@@ -68,6 +78,7 @@ class ReviewDto {
           [],
       likeCount: (json['likeCount'] as num?)?.toInt() ?? 0,
       isLikedByCurrentUser: json['isLikedByCurrentUser'] as bool? ?? false,
+      isProductNotListed: _productNotListedFromJson(json),
     );
   }
 
@@ -86,6 +97,7 @@ class ReviewDto {
       'mediaList': mediaList.map((m) => m.toJson()).toList(),
       'likeCount': likeCount,
       'isLikedByCurrentUser': isLikedByCurrentUser,
+      'isProductNotListed': isProductNotListed,
     };
   }
 }

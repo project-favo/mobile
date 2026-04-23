@@ -70,6 +70,17 @@ class DeactivatedAccountException implements Exception {
   String toString() => 'DeactivatedAccountException';
 }
 
+/// GET /api/products/{id} ürünü döndürmüyor (silindi, askıda, 403/404/410).
+class ProductNotAvailableException implements Exception {
+  final String productId;
+  final int? statusCode;
+
+  const ProductNotAvailableException(this.productId, {this.statusCode});
+
+  @override
+  String toString() => 'ProductNotAvailableException';
+}
+
 bool looksLikeDeactivatedAccountMessage(String value) {
   final s = value.toLowerCase();
   if (s.contains('deactivated')) return true;

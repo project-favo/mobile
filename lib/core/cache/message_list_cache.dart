@@ -18,4 +18,8 @@ class MessageListCache {
       _map.remove(_map.keys.first);
     }
   }
+
+  void clear() {
+    _map.clear();
+  }
 }

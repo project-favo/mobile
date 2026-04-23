@@ -1,5 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../../../core/cache/conversation_list_cache.dart';
+import '../../../core/cache/home_feed_cache.dart';
 import '../../../core/cache/search_warm_cache.dart';
 import '../../../core/utils/session_helper.dart';
 import '../../../core/theme/app_colors.dart';
@@ -41,6 +43,7 @@ class _AuthSplashGateState extends State<AuthSplashGate> {
           firebaseIdToken: token,
         );
         SearchWarmCache.instance.rememberSeedProducts(feed.content);
+        HomeFeedCache.instance.setFromResult(feed);
       } catch (_) {}
     } catch (_) {}
   }
@@ -88,6 +91,9 @@ class _AuthSplashGateState extends State<AuthSplashGate> {
       setState(() => _screen = const LoginPage());
       return;
     }
+
+    await HomeFeedCache.instance.restoreFromDisk();
+    await ConversationListCache.instance.restoreFromDisk();
 
     await Future.wait([
       minSplashFuture,

@@ -17,6 +17,7 @@ import '../../../../../core/cache/current_user_cache.dart';
 import '../../../../../core/cache/product_memory_cache.dart';
 import '../../../../../core/cache/review_memory_cache.dart';
 import '../../../../../core/utils/in_flight_id_lock.dart';
+import '../../../../../core/utils/product_report_storage.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/models/review_dto.dart';
@@ -699,6 +700,7 @@ class _ReviewPageState extends State<ReviewPage> {
         _currentProduct.id,
       );
       if (!mounted) return;
+      unawaited(ProductReportStorage.markReported(_currentProduct.id));
       if (reported) {
         await showBrandedOkDialog(context, title: 'Successfully reported');
       } else {

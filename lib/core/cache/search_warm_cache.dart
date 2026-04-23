@@ -19,5 +19,10 @@ class SearchWarmCache {
 
   List<TagDto> peekRootTags() => List<TagDto>.from(_rootTags);
   List<ProductDto> peekSeedProducts() => List<ProductDto>.from(_seedProducts);
+
+  void clear() {
+    _rootTags = const [];
+    _seedProducts = const [];
+  }
 }
 

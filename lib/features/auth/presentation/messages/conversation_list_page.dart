@@ -95,6 +95,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
   }
 
   Future<void> _loadConversations() async {
+    await ConversationListCache.instance.restoreFromDisk();
     // Cache varsa anında göster
     final warm = ConversationListCache.instance.peek();
     if (warm != null && warm.isNotEmpty) {

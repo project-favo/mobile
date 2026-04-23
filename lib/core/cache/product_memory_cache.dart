@@ -26,4 +26,8 @@ class ProductMemoryCache {
   void remove(String productId) {
     _map.remove(productId.trim());
   }
+
+  void clear() {
+    _map.clear();
+  }
 }

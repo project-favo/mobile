@@ -15,6 +15,8 @@ import '../../../core/widgets/skeleton_loader.dart';
 import '../../../core/routes/custom_page_transitions.dart';
 import '../../../core/utils/in_flight_id_lock.dart';
 import '../../../core/cache/following_id_set_cache.dart';
+import '../../../core/cache/home_feed_cache.dart';
+import '../../../core/cache/home_top_picks_cache.dart';
 import '../../../core/cache/search_warm_cache.dart';
 import '../../../core/cache/friend_feed_memory_cache.dart';
 import '../../../features/activity/domain/activity_type.dart';
@@ -45,8 +47,6 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-enum _TopPicksTab { weeklyLikes, forYou }
-
 class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
   // BottomNavigationBar index mapping:
   // 0: search, 1: add (placeholder), 2: home, 3: activity, 4: profile
@@ -62,17 +62,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   List<TagDto> _tags = [];
   List<TagDto> _subTags = [];
-  static final Map<_TopPicksTab, List<ProductDto>> _topPicksStaticCache = {};
-
-  final Map<_TopPicksTab, List<ProductDto>> _topPicksByTab = {
-    _TopPicksTab.weeklyLikes: [],
-    _TopPicksTab.forYou: [],
+  final Map<HomeTopPicksTab, List<ProductDto>> _topPicksByTab = {
+    HomeTopPicksTab.weeklyLikes: [],
+    HomeTopPicksTab.forYou: [],
   };
-  final Set<_TopPicksTab> _topPicksLoadingTabs = <_TopPicksTab>{};
-  final Map<_TopPicksTab, int> _topPicksLatestRequestByTab = {};
+  final Set<HomeTopPicksTab> _topPicksLoadingTabs = <HomeTopPicksTab>{};
+  final Map<HomeTopPicksTab, int> _topPicksLatestRequestByTab = {};
   int _topPicksRequestSeq = 0;
   // Active banner: null = home feed, otherwise shows banner products
-  _TopPicksTab? _activeBannerTab;
+  HomeTopPicksTab? _activeBannerTab;
   List<ProductDto> _filteredProducts = []; // Current page products
   int _currentPage = 0;
   int _totalPages = 0;
@@ -102,6 +100,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   String _searchQuery = '';
   List<ProductDto> _searchResults = [];
   Timer? _searchDebounce;
+  /// Tüm kategori ana sayfasında: yeni ürünler için arka planda periyodik kontrol.
+  Timer? _homeFeedPollTimer;
+  bool _homeFeedPollInFlight = false;
   int _searchReqSeq = 0;
   bool _isSearchLoading = false;
 
@@ -167,29 +168,43 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_hookNotificationsIfSignedIn());
     });
-    // Preload banner tabs from static cache
-    for (final tab in [_TopPicksTab.weeklyLikes, _TopPicksTab.forYou]) {
-      final cached = _topPicksStaticCache[tab];
+    // Banner: önbellekten (çıkışta temizlenir)
+    for (final tab in [HomeTopPicksTab.weeklyLikes, HomeTopPicksTab.forYou]) {
+      final cached = HomeTopPicksCache.peek(tab);
       if (cached != null && cached.isNotEmpty) {
         _topPicksByTab[tab] = List<ProductDto>.from(cached);
       }
     }
+    // Ana grid: önce HomeFeedCache (disk + splash aynı API), yok eski SearchWarmCache.
+    final homeSnap = HomeFeedCache.instance.peek();
     final warmTags = SearchWarmCache.instance.peekRootTags();
-    final warmProducts = SearchWarmCache.instance.peekSeedProducts();
-    if (warmTags.isNotEmpty || warmProducts.isNotEmpty) {
+    if (homeSnap != null && homeSnap.content.isNotEmpty) {
       _tags = warmTags;
-      _filteredProducts = warmProducts;
+      _filteredProducts = List<ProductDto>.from(homeSnap.content);
+      _currentPage = homeSnap.number;
+      _totalPages = homeSnap.totalPages;
+      _totalElements = homeSnap.totalElements;
       _isLoading = false;
       _isFiltering = false;
       _errorMessage = null;
-      if (_filteredProducts.isNotEmpty) {
-        _currentPage = 0;
-        _totalPages = 1;
-        _totalElements = _filteredProducts.length;
-      }
       unawaited(_loadData(background: true));
     } else {
-      _loadData();
+      final warmProducts = SearchWarmCache.instance.peekSeedProducts();
+      if (warmTags.isNotEmpty || warmProducts.isNotEmpty) {
+        _tags = warmTags;
+        _filteredProducts = warmProducts;
+        _isLoading = false;
+        _isFiltering = false;
+        _errorMessage = null;
+        if (_filteredProducts.isNotEmpty) {
+          _currentPage = 0;
+          _totalPages = 1;
+          _totalElements = _filteredProducts.length;
+        }
+        unawaited(_loadData(background: true));
+      } else {
+        _loadData();
+      }
     }
     MessageUnreadService.instance.attach();
     unawaited(
@@ -208,6 +223,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _searchFocusNode.addListener(() {
       setState(() {});
     });
+    _homeFeedPollTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => unawaited(_pollHomeFeedForUpdates()),
+    );
   }
 
   Future<void> _hookNotificationsIfSignedIn() async {
@@ -229,6 +248,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _searchDebounce?.cancel();
     _searchController.dispose();
     _searchFocusNode.dispose();
+    _homeFeedPollTimer?.cancel();
     super.dispose();
   }
 
@@ -372,7 +392,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
   }
 
-  Future<void> _onBannerTap(_TopPicksTab tab) async {
+  Future<void> _onBannerTap(HomeTopPicksTab tab) async {
     if (_activeBannerTab == tab) {
       setState(() => _activeBannerTab = null);
       return;
@@ -384,7 +404,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
   }
 
-  Future<void> _loadTopPicksForTab(_TopPicksTab tab) async {
+  Future<void> _loadTopPicksForTab(HomeTopPicksTab tab) async {
     if (_topPicksLoadingTabs.contains(tab)) return;
     final requestId = ++_topPicksRequestSeq;
     _topPicksLatestRequestByTab[tab] = requestId;
@@ -394,7 +414,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final firebaseIdToken = await _sessionHelper.ensureSession();
       late ProductSearchResultDto result;
       switch (tab) {
-        case _TopPicksTab.weeklyLikes:
+        case HomeTopPicksTab.weeklyLikes:
           result = await _productRepository
               .getTrendingLikesWeekFeed(
                 page: 0,
@@ -403,7 +423,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               )
               .timeout(const Duration(seconds: 8));
           break;
-        case _TopPicksTab.forYou:
+        case HomeTopPicksTab.forYou:
           if (firebaseIdToken == null) {
             result = await _productRepository
                 .getTrendingReviewsFeed(page: 0, size: 10, firebaseIdToken: null)
@@ -431,7 +451,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       }
       if (!mounted || _topPicksLatestRequestByTab[tab] != requestId) return;
       final products = result.content.take(10).toList();
-      _topPicksStaticCache[tab] = products;
+      HomeTopPicksCache.remember(tab, products);
       setState(() => _topPicksByTab[tab] = products);
     } catch (_) {
       // silently fail
@@ -462,6 +482,72 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _isLoadingMore = false;
       });
     }
+  }
+
+  /// Aynı API ile ilk sayfayı tekrar yükleyip, değişiklik varsa listeyi günceller (yeni ürün, sıra, toplam).
+  Future<void> _pollHomeFeedForUpdates() async {
+    if (!mounted) return;
+    if (_activeCategoryPathPrefix != null) return;
+    if (_activeBannerTab != null) return;
+    if (_searchQuery.trim().isNotEmpty) return;
+    if (_isLoading || _isLoadingMore || _homeFeedPollInFlight) return;
+
+    _homeFeedPollInFlight = true;
+    try {
+      final token = await _sessionHelper.ensureSession();
+      if (!mounted) return;
+
+      final result = await _productRepository.getHomeFeed(
+        page: 0,
+        size: 10,
+        firebaseIdToken: token,
+      );
+      if (!mounted) return;
+
+      if (_homeFeedFirstPageUnchanged(result)) return;
+
+      // Aşağıdayken yeni ürün gelse bile listenin başı zıplamasın
+      final savedOffset =
+          _scrollController.hasClients ? _scrollController.offset : 0.0;
+      const keepScrollThreshold = 32.0;
+
+      setState(() {
+        _filteredProducts = result.content;
+        _currentPage = result.number;
+        _totalPages = result.totalPages;
+        _totalElements = result.totalElements;
+        _isFiltering = false;
+      });
+      if (savedOffset > keepScrollThreshold) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || !_scrollController.hasClients) return;
+          final maxx = _scrollController.position.maxScrollExtent;
+          _scrollController.jumpTo(savedOffset.clamp(0.0, maxx));
+        });
+      }
+      HomeFeedCache.instance.setFromResult(result);
+      ReviewPrefetchService.instance.prefetchForProducts(
+        _filteredProducts,
+        maxCount: 8,
+      );
+    } catch (_) {
+      // Sessiz — arka plan tazeleme
+    } finally {
+      _homeFeedPollInFlight = false;
+    }
+  }
+
+  /// [getHomeFeed] ilk sayfa ile mevcut gridin başı aynı mı, toplam adet aynı mı?
+  bool _homeFeedFirstPageUnchanged(ProductSearchResultDto result) {
+    if (result.totalElements != _totalElements) return false;
+    final next = result.content;
+    if (next.isEmpty) return _filteredProducts.isEmpty;
+    final n = next.length;
+    if (_filteredProducts.length < n) return false;
+    for (var i = 0; i < n; i++) {
+      if (next[i].id != _filteredProducts[i].id) return false;
+    }
+    return true;
   }
 
   /// Ürün listesi artık token olmadan da çalışır (backend 200 döner).
@@ -501,6 +587,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _totalElements = result.totalElements;
         _isFiltering = false;
       });
+
+      if (!append &&
+          _activeCategoryPathPrefix == null) {
+        HomeFeedCache.instance.setFromResult(result);
+      }
 
       // Ana sayfa feed'ini [SearchWarmCache] üzerine yazma — inline arama tüm katalogu kullansın.
 
@@ -1016,7 +1107,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   /// Full-width banner card shown when a banner tab is active.
   Widget _buildBannerActiveHeader() {
     final tab = _activeBannerTab!;
-    final isLiked = tab == _TopPicksTab.weeklyLikes;
+    final isLiked = tab == HomeTopPicksTab.weeklyLikes;
     final label = isLiked ? 'Most Liked' : 'For You';
     final subtitle = isLiked
         ? 'Most loved products this week'
@@ -1370,6 +1461,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     setState(() {
       _mergeProductFromDetail(id, r.product, bumpResync: true);
     });
+    // beklemeden: ortalama puan + review sayısı API ile tutarlı olsun (yarış azalır)
+    unawaited(_refreshProductLikeStatus(id));
   }
 
   void _mergeProductFromDetail(
@@ -1384,7 +1477,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     if (fi != -1) {
       _filteredProducts[fi] = updated;
     }
-    for (final tab in _TopPicksTab.values) {
+    for (final tab in HomeTopPicksTab.values) {
       final list = _topPicksByTab[tab]!;
       final i = list.indexWhere((p) => p.id == productId);
       if (i != -1) {
@@ -1458,8 +1551,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       SearchWarmCache.instance.rememberRootTags(tags);
       await Future.wait([
         _loadProductsPage(0),
-        _loadTopPicksForTab(_TopPicksTab.weeklyLikes),
-        _loadTopPicksForTab(_TopPicksTab.forYou),
+        _loadTopPicksForTab(HomeTopPicksTab.weeklyLikes),
+        _loadTopPicksForTab(HomeTopPicksTab.forYou),
       ]);
 
       if (mounted) {
@@ -2162,7 +2255,7 @@ class _CircleCategoryItem extends StatelessWidget {
 // ─── Banner Carousel ──────────────────────────────────────────────────────────
 
 class _BannerCarousel extends StatefulWidget {
-  final void Function(_TopPicksTab) onBannerTap;
+  final void Function(HomeTopPicksTab) onBannerTap;
 
   const _BannerCarousel({
     super.key,
@@ -2180,14 +2273,14 @@ class _BannerCarouselState extends State<_BannerCarousel> {
 
   static const _banners = [
     (
-      tab: _TopPicksTab.weeklyLikes,
+      tab: HomeTopPicksTab.weeklyLikes,
       title: 'Most Liked',
       subtitle: 'Explore the most liked products this week',
       icon: Icons.local_fire_department_rounded,
       gradientEnd: Color(0xFFFF4081),
     ),
     (
-      tab: _TopPicksTab.forYou,
+      tab: HomeTopPicksTab.forYou,
       title: 'For You',
       subtitle: 'Personalized picks based on your taste',
       icon: Icons.stars_rounded,

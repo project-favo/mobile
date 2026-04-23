@@ -17,6 +17,8 @@ import '../../data/models/message_dto.dart';
 import '../../data/services/auth_service.dart';
 import '../../../../core/widgets/skeleton_loader.dart';
 import '../../../../core/widgets/profile_avatar.dart';
+import '../../../../core/cache/chat_outgoing_user_cache.dart';
+import '../../../../core/cache/current_user_cache.dart';
 import '../../../../core/cache/message_list_cache.dart';
 import '../profile/pages/user_profile_page.dart';
 
@@ -39,12 +41,6 @@ class _ChatDetailPageState extends State<ChatDetailPage>
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _inputFocusNode = FocusNode();
-
-  // Oturum bilgisi statik cache — her chat açılışında getMe() çağrılmasın
-  static int? _cachedUserId;
-  static String? _cachedAvatarUrl;
-  static Uint8List? _cachedAvatarBytes;
-  static String? _cachedInitial;
 
   late int _conversationId;
   /// İlk token / kullanıcı bilgisi gelene kadar tam ekran iskelet.
@@ -101,28 +97,38 @@ class _ChatDetailPageState extends State<ChatDetailPage>
       if (token == null) {
         throw Exception('Please login to see messages.');
       }
-      // Kullanıcı bilgisi cache'de varsa hemen ata; yoksa arka planda yükle
-      if (_cachedUserId != null) {
-        _currentUserId = _cachedUserId;
-        _myAvatarUrl   = _cachedAvatarUrl;
-        _myAvatarBytes = _cachedAvatarBytes;
-        _myInitial     = _cachedInitial;
+      // Sohbetler arası önbellek veya [CurrentUserCache] — getMe’yi kritik yolda bekleme
+      if (ChatOutgoingUserCache.userId != null) {
+        _currentUserId = ChatOutgoingUserCache.userId;
+        _myAvatarUrl = ChatOutgoingUserCache.avatarUrl;
+        _myAvatarBytes = ChatOutgoingUserCache.avatarBytes;
+        _myInitial = ChatOutgoingUserCache.initial ?? '?';
       } else {
-        try {
-          var me = await _authService.getMe();
-          if (!me.hasProfileAvatarVisual && me.id.isNotEmpty) {
-            final extra = await _authService.getUserById(me.id);
-            me = me.withFilledAvatarFrom(extra);
-          }
-          _currentUserId  = int.tryParse(me.id);
-          _myAvatarUrl    = me.profileImageUrl;
-          _myAvatarBytes  = decodeProfilePhotoBytes(me.profilePhotoData);
-          _myInitial      = me.userName.isNotEmpty ? me.userName[0].toUpperCase() : '?';
-          _cachedUserId      = _currentUserId;
-          _cachedAvatarUrl   = _myAvatarUrl;
-          _cachedAvatarBytes = _myAvatarBytes;
-          _cachedInitial     = _myInitial;
-        } catch (_) {}
+        final cu = CurrentUserCache.instance;
+        if (cu.hasUserId) {
+          _currentUserId = int.tryParse(cu.userId!);
+          final n = cu.userName ?? '';
+          _myInitial = n.isNotEmpty ? n[0].toUpperCase() : '?';
+        }
+        if (_currentUserId == null) {
+          try {
+            var me = await _authService.getMe();
+            if (!me.hasProfileAvatarVisual && me.id.isNotEmpty) {
+              final extra = await _authService.getUserById(me.id);
+              me = me.withFilledAvatarFrom(extra);
+            }
+            _currentUserId = int.tryParse(me.id);
+            _myAvatarUrl = me.profileImageUrl;
+            _myAvatarBytes = decodeProfilePhotoBytes(me.profilePhotoData);
+            _myInitial = me.userName.isNotEmpty ? me.userName[0].toUpperCase() : '?';
+            _syncChatOutgoingCache();
+          } catch (_) {}
+        } else {
+          unawaited(_fillAvatarsFromServer());
+        }
+      }
+      if (_currentUserId != null) {
+        _syncChatOutgoingCache();
       }
       unawaited(_enrichOtherParticipant());
       await _bootstrapExistingConversationIfNeeded();
@@ -148,6 +154,30 @@ class _ChatDetailPageState extends State<ChatDetailPage>
         _messagesLoading = false;
       });
     }
+  }
+
+  void _syncChatOutgoingCache() {
+    ChatOutgoingUserCache.userId = _currentUserId;
+    ChatOutgoingUserCache.avatarUrl = _myAvatarUrl;
+    ChatOutgoingUserCache.avatarBytes = _myAvatarBytes;
+    ChatOutgoingUserCache.initial = _myInitial;
+  }
+
+  Future<void> _fillAvatarsFromServer() async {
+    try {
+      var me = await _authService.getMe();
+      if (!me.hasProfileAvatarVisual && me.id.isNotEmpty) {
+        final extra = await _authService.getUserById(me.id);
+        me = me.withFilledAvatarFrom(extra);
+      }
+      if (!mounted) return;
+      setState(() {
+        _myAvatarUrl = me.profileImageUrl;
+        _myAvatarBytes = decodeProfilePhotoBytes(me.profilePhotoData);
+        _myInitial = me.userName.isNotEmpty ? me.userName[0].toUpperCase() : '?';
+        _syncChatOutgoingCache();
+      });
+    } catch (_) {}
   }
 
   /// Profil / sentetik konuşmadan açıldıysa, liste API’sinde zaten var olan thread’i bulur.

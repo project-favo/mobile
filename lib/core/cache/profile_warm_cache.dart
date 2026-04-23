@@ -46,5 +46,9 @@ class ProfileWarmCache {
       followingCount: followingCount,
     );
   }
+
+  void clear() {
+    _snapshot = null;
+  }
 }
 

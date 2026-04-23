@@ -96,14 +96,36 @@ class _ProductCardState extends State<ProductCard> {
   @override
   void didUpdateWidget(ProductCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!widget.loadReviewCount) return;
-    if (oldWidget.isFavorite == widget.isFavorite) return;
-    final c = _LikeCountCache.get(widget.productId);
-    if (c != null) {
-      setState(() {
-        _likeCount = c;
-      });
+    if (!widget.loadReviewCount) {
+      if (oldWidget.isFavorite == widget.isFavorite) return;
+      final c = _LikeCountCache.get(widget.productId);
+      if (c != null) {
+        setState(() {
+          _likeCount = c;
+        });
+      }
+      return;
     }
+    // Ana sayfa: [seedProductCardSocialCaches] / parent [setState] sonrası önbellekten oku
+    final rc = _ReviewCountCache.get(widget.productId);
+    final lc = _LikeCountCache.get(widget.productId);
+    var needBuild = false;
+    if (rc != null && rc != _reviewCount) {
+      _reviewCount = rc;
+      needBuild = true;
+    }
+    if (lc != null && lc != _likeCount) {
+      _likeCount = lc;
+      needBuild = true;
+    }
+    if (oldWidget.isFavorite != widget.isFavorite) {
+      final c = _LikeCountCache.get(widget.productId);
+      if (c != null) {
+        _likeCount = c;
+        needBuild = true;
+      }
+    }
+    if (needBuild && mounted) setState(() {});
   }
 
   Future<void> _loadSocialCounts() async {

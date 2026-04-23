@@ -1,3 +1,4 @@
+import '../../../../core/utils/product_listing_flags.dart';
 import 'tag_dto.dart';
 
 class ProductDto {
@@ -10,6 +11,9 @@ class ProductDto {
   final bool? isLiked;
   final DateTime? createdAt;
 
+  /// GET /api/products JSON'unda askı / vitrinden kalkmış bilgisi.
+  final bool isProductNotListed;
+
   ProductDto({
     required this.id,
     required this.name,
@@ -19,6 +23,7 @@ class ProductDto {
     this.averageRating,
     this.isLiked,
     this.createdAt,
+    this.isProductNotListed = false,
   });
 
   factory ProductDto.fromJson(Map<String, dynamic> json) {
@@ -37,6 +42,7 @@ class ProductDto {
       createdAt: (json['createdAt'] ?? json['created_at']) != null
           ? DateTime.tryParse((json['createdAt'] ?? json['created_at']).toString())
           : null,
+      isProductNotListed: isProductDataNotListedInMap(json),
     );
   }
 
@@ -50,6 +56,7 @@ class ProductDto {
       'averageRating': averageRating,
       'isLiked': isLiked,
       'createdAt': createdAt?.toIso8601String(),
+      'isProductNotListed': isProductNotListed,
     };
   }
 
@@ -63,6 +70,7 @@ class ProductDto {
     double? averageRating,
     bool? isLiked,
     DateTime? createdAt,
+    bool? isProductNotListed,
   }) {
     return ProductDto(
       id: id ?? this.id,
@@ -75,6 +83,7 @@ class ProductDto {
       // isLiked için: eğer null değilse (false dahil) kullan, null ise this.isLiked kullan
       isLiked: isLiked ?? this.isLiked,
       createdAt: createdAt ?? this.createdAt,
+      isProductNotListed: isProductNotListed ?? this.isProductNotListed,
     );
   }
 }

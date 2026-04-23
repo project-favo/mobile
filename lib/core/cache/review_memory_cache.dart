@@ -38,5 +38,9 @@ class ReviewMemoryCache {
     if (list == null) return;
     _map[pid] = list.where((r) => r.id != rid).toList();
   }
+
+  void clear() {
+    _map.clear();
+  }
 }
 

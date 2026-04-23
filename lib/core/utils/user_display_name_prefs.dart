@@ -37,6 +37,17 @@ class UserDisplayNamePrefs {
     await p.remove(_key(id));
   }
 
+  /// Çıkışta tüm `username_display_case_v1_*` anahtarlarını kaldırır.
+  Future<void> removeAllCaseDisplayKeys() async {
+    final p = await SharedPreferences.getInstance();
+    final prefix = 'username_display_case_v1_';
+    for (final k in p.getKeys()) {
+      if (k.startsWith(prefix)) {
+        await p.remove(k);
+      }
+    }
+  }
+
   /// [getMe] / [updateMe] sonrası — sunucu adı ile eşleşiyorsa yerel tercihi uygular.
   Future<UserResponseDto> mergeInto(UserResponseDto u) async {
     final id = u.id.trim();

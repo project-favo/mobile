@@ -5,6 +5,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/utils/error_handler.dart';
+import '../../../core/cache/app_session_cache.dart';
 import '../../../core/utils/session_helper.dart';
 import '../data/models/register_request_dto.dart';
 import '../data/services/auth_service.dart';
@@ -72,6 +73,7 @@ class _RegisterFirebaseVerifyGatePageState
   Future<void> _signOutAndLeave() async {
     AuthService.clearRegisterFormDraft();
     SessionHelper().clearSession();
+    clearAllAppCachesOnLogout();
     await FirebaseAuth.instance.signOut();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(

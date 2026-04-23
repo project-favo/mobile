@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../../../core/cache/app_session_cache.dart';
 import '../../../../core/cache/current_user_cache.dart';
-import '../../../../core/cache/following_id_set_cache.dart';
 import '../../../../core/utils/session_helper.dart';
 import '../../../../core/utils/user_display_name_prefs.dart';
 import '../../../../core/utils/exceptions.dart';
@@ -367,6 +367,8 @@ class AuthService {
       // Backend'de hesabı sil
       await _authRepository.deleteMe(idToken);
 
+      _sessionHelper.clearSession();
+      clearAllAppCachesOnLogout();
       // Firebase oturumunu kapat
       await _firebaseAuth.signOut();
     } on FirebaseAuthException catch (e) {
@@ -379,8 +381,7 @@ class AuthService {
   /// Çıkış yapar
   Future<void> signOut() async {
     _sessionHelper.clearSession();
-    CurrentUserCache.instance.clear();
-    FollowingIdSetCache.instance.invalidate();
+    clearAllAppCachesOnLogout();
     await _firebaseAuth.signOut();
   }
 
