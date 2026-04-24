@@ -5,10 +5,10 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_spacing.dart';
+import '../../../../core/config/app_background_timers.dart';
 import '../../../../core/utils/entity_active.dart';
 import '../../../../core/utils/app_datetime.dart';
 import '../../../../core/utils/error_handler.dart';
-import '../../../../core/utils/exceptions.dart';
 import '../../../../core/utils/session_helper.dart';
 import '../../../../core/utils/resolve_media_url.dart';
 import '../../../../core/widgets/skeleton_loader.dart';
@@ -19,6 +19,7 @@ import '../../data/models/conversation_dto.dart';
 import '../../data/services/auth_service.dart';
 import '../../../../core/notifications/message_unread_service.dart';
 import '../../../../core/cache/conversation_list_cache.dart';
+import '../../../../core/routes/custom_page_transitions.dart';
 import 'chat_detail_page.dart';
 
 class ConversationListPage extends StatefulWidget {
@@ -39,14 +40,15 @@ class _ConversationListPageState extends State<ConversationListPage> {
   final Map<int, ({String? url, Uint8List? bytes})> _avatarExtras = {};
 
   Timer? _pollTimer;
+  final Set<int> _openingConversationIds = <int>{};
 
   @override
   void initState() {
     super.initState();
     _loadConversations();
     MessageUnreadService.instance.attach();
-    // 5 sn: pasif/deaktif konuşmaları düşür + yeni mesaj
-    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    // Pasif/deaktif konuşmaları düşür + yeni mesaj
+    _pollTimer = Timer.periodic(AppBackgroundTimers.standardListPoll, (_) {
       unawaited(_silentRefresh());
     });
   }
@@ -346,7 +348,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
                               Icon(
                                 Icons.chat_bubble_outline,
                                 size: 48,
-                                color: AppColors.textSecondary.withOpacity(0.7),
+                                color: AppColors.textSecondary.withValues(alpha: 0.7),
                               ),
                               const SizedBox(height: AppSpacing.large),
                               Text(
@@ -442,29 +444,23 @@ class _ConversationListPageState extends State<ConversationListPage> {
                                     unawaited(_loadConversations());
                                     return;
                                   }
-                                  try {
-                                    final u = await _authService.getUserById(
-                                      c.otherParticipant.id.toString(),
-                                    );
-                                    if (!mounted) return;
-                                    if (u != null && u.isProfileViewBlocked) {
-                                      unawaited(_loadConversations());
-                                      return;
-                                    }
-                                  } on TargetUserNotAvailableException {
-                                    if (mounted) unawaited(_loadConversations());
+                                  if (_openingConversationIds.contains(c.id)) {
                                     return;
-                                  } catch (_) {}
+                                  }
+                                  _openingConversationIds.add(c.id);
                                   if (!mounted) return;
-                                  final result = await Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) =>
-                                          ChatDetailPage(conversation: c),
-                                    ),
-                                  );
-                                  if (result == true) {
-                                    await _loadConversations();
+                                  try {
+                                    final result = await Navigator.push(
+                                      context,
+                                      SlideRightRoute(
+                                        page: ChatDetailPage(conversation: c),
+                                      ),
+                                    );
+                                    if (result == true && mounted) {
+                                      await _loadConversations();
+                                    }
+                                  } finally {
+                                    _openingConversationIds.remove(c.id);
                                   }
                                 },
                               ),

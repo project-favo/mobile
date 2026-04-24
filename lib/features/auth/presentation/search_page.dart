@@ -40,6 +40,7 @@ class SearchPage extends StatefulWidget {
 }
 
 class _SearchPageState extends State<SearchPage> {
+  static const Duration _topReviewersRefreshInterval = Duration(seconds: 10);
   final ProductRepository _productRepository = ProductRepository();
   final TagRepository _tagRepository = TagRepository();
   final ReviewRepository _reviewRepository = ReviewRepository();
@@ -65,6 +66,7 @@ class _SearchPageState extends State<SearchPage> {
   String _activeQuery = '';
   String? _firebaseIdToken;
   bool _notificationSvcAttached = false;
+  Timer? _topReviewersRefreshTimer;
 
   /// GET /api/reviews/top-reviewers — giriş yapmışken dolar
   List<TopReviewerDto> _topReviewers = [];
@@ -102,6 +104,7 @@ class _SearchPageState extends State<SearchPage> {
     });
     _loadInitialData();
     unawaited(_loadSocialGraphForSearch());
+    _scheduleTopReviewerRefresh();
   }
 
   /// Profil adına göre yerel eşleşme: top reviewers + takip edilen / takipçi.
@@ -214,10 +217,46 @@ class _SearchPageState extends State<SearchPage> {
     } catch (_) {}
   }
 
+  void _scheduleTopReviewerRefresh() {
+    _topReviewersRefreshTimer?.cancel();
+    _topReviewersRefreshTimer = Timer.periodic(_topReviewersRefreshInterval, (_) {
+      unawaited(
+        _loadTopReviewers(
+          force: true,
+          silentLoading: true,
+        ),
+      );
+    });
+  }
+
   /// Token zorunlu; giriş yok veya hata → sessizce boş
-  Future<void> _loadTopReviewers() async {
+  Future<void> _loadTopReviewers({
+    bool force = false,
+    bool silentLoading = false,
+  }) async {
     if (!mounted) return;
-    setState(() => _loadingTopReviewers = true);
+    final cachedReviewers = SearchWarmCache.instance.peekTopReviewers();
+    final cachedAt = SearchWarmCache.instance.peekTopReviewersFetchedAt();
+    final cacheIsFresh = !force &&
+        cachedReviewers.isNotEmpty &&
+        cachedAt != null &&
+        DateTime.now().difference(cachedAt) < _topReviewersRefreshInterval;
+
+    if (cacheIsFresh) {
+      if (mounted && _topReviewers != cachedReviewers) {
+        setState(() {
+          _topReviewers = cachedReviewers;
+          _loadingTopReviewers = false;
+        });
+      }
+      _recomputeProfileMatchesIfNeeded();
+      return;
+    }
+
+    final shouldShowLoader = !silentLoading && _topReviewers.isEmpty;
+    if (shouldShowLoader) {
+      setState(() => _loadingTopReviewers = true);
+    }
     try {
       final token = await _sessionHelper.ensureSession();
       if (token == null) {
@@ -231,6 +270,7 @@ class _SearchPageState extends State<SearchPage> {
       }
       final list = await _reviewRepository.getTopReviewers(token, limit: 5);
       if (!mounted) return;
+      SearchWarmCache.instance.rememberTopReviewers(list);
       setState(() {
         _topReviewers = list;
         _loadingTopReviewers = false;
@@ -315,6 +355,7 @@ class _SearchPageState extends State<SearchPage> {
     if (_notificationSvcAttached) {
       NotificationRealtimeService.instance.detach();
     }
+    _topReviewersRefreshTimer?.cancel();
     _searchController.dispose();
     _searchFocusNode.dispose();
     super.dispose();
@@ -332,7 +373,14 @@ class _SearchPageState extends State<SearchPage> {
         _errorMessage = null;
       });
       unawaited(_refreshInitialDataInBackground());
-      unawaited(_loadTopReviewers());
+      final warmTopReviewers = SearchWarmCache.instance.peekTopReviewers();
+      if (warmTopReviewers.isNotEmpty) {
+        setState(() {
+          _topReviewers = warmTopReviewers;
+          _loadingTopReviewers = false;
+        });
+      }
+      unawaited(_loadTopReviewers(silentLoading: true));
       return;
     }
 
@@ -379,7 +427,14 @@ class _SearchPageState extends State<SearchPage> {
         });
       }
     }
-    unawaited(_loadTopReviewers());
+    final warmTopReviewers = SearchWarmCache.instance.peekTopReviewers();
+    if (warmTopReviewers.isNotEmpty) {
+      setState(() {
+        _topReviewers = warmTopReviewers;
+        _loadingTopReviewers = false;
+      });
+    }
+    unawaited(_loadTopReviewers(silentLoading: true));
   }
 
   Future<void> _refreshInitialDataInBackground() async {
@@ -411,6 +466,18 @@ class _SearchPageState extends State<SearchPage> {
         }
       } catch (_) {}
     } catch (_) {}
+  }
+
+  Future<void> _refreshSearchPage() async {
+    await Future.wait<void>([
+      _refreshInitialDataInBackground(),
+      _loadTopReviewers(force: true, silentLoading: true),
+      _loadSocialGraphForSearch(),
+    ]);
+    final q = _searchController.text.trim();
+    if (q.isNotEmpty && mounted) {
+      await _onSearchChanged(q);
+    }
   }
 
   Future<void> _openCategory(TagDto category) async {
@@ -511,7 +578,7 @@ class _SearchPageState extends State<SearchPage> {
             ),
           ),
           SizedBox(
-            height: 90,
+            height: 72,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: _profileSearchMatches.length,
@@ -686,6 +753,13 @@ class _SearchPageState extends State<SearchPage> {
           ),
         ),
         centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded, color: AppColors.primary),
+            tooltip: 'Refresh',
+            onPressed: () => unawaited(_refreshSearchPage()),
+          ),
+        ],
       ),
       body: _isLoading
           ? const SearchPageBodySkeleton()
@@ -732,7 +806,7 @@ class _SearchPageState extends State<SearchPage> {
                             fontWeight: FontWeight.w500,
                           ),
                           decoration: InputDecoration(
-                            hintText: 'Search products, categories, or usernames...',
+                            hintText: 'Search user, products or categories',
                             hintStyle: TextStyle(
                               color: AppColors.textSecondary.withValues(alpha: 0.7),
                               fontSize: 15,
@@ -783,39 +857,47 @@ class _SearchPageState extends State<SearchPage> {
                             ),
                           )
                         else if (_topReviewers.isNotEmpty) ...[
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8, left: 2),
+                          const Padding(
+                            padding: EdgeInsets.only(top: 8, bottom: 10),
                             child: Text(
-                              'Top reviewers',
+                              'Top 5 Reviewers',
                               style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.textSecondary,
-                                letterSpacing: 0.4,
+                                fontSize: 22,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.textPrimary,
                               ),
+                              textAlign: TextAlign.center,
                             ),
                           ),
                           SizedBox(
-                            height: 88,
-                            child: ListView.separated(
-                              scrollDirection: Axis.horizontal,
-                              itemCount: _topReviewers.length,
-                              separatorBuilder: (_, __) => const SizedBox(width: 10),
-                              itemBuilder: (context, index) {
-                                final t = _topReviewers[index];
-                                return _TopReviewerRow(
-                                  data: t,
-                                  onTap: () {
-                                    if (t.userId.isEmpty) return;
-                                    openUserProfileIfActive(
-                                      context,
-                                      userId: t.userId,
-                                      userName: t.userName,
-                                      profileImageUrl: t.profileImageUrl,
-                                    );
-                                  },
+                            height: 106,
+                            child: Row(
+                              children: List.generate(5, (index) {
+                                final hasData = index < _topReviewers.length;
+                                final t = hasData ? _topReviewers[index] : null;
+                                return Expanded(
+                                  child: Padding(
+                                    padding: EdgeInsets.only(
+                                      left: index == 0 ? 0 : 4,
+                                      right: index == 4 ? 0 : 4,
+                                    ),
+                                    child: _TopReviewerRow(
+                                      data: t,
+                                      onTap: hasData
+                                          ? () {
+                                              if (t!.userId.isEmpty) return;
+                                              openUserProfileIfActive(
+                                                context,
+                                                userId: t.userId,
+                                                userName: t.userName,
+                                                profileImageUrl: t.profileImageUrl,
+                                              );
+                                            }
+                                          : null,
+                                    ),
+                                  ),
                                 );
-                              },
+                              }),
                             ),
                           ),
                         ],
@@ -1091,25 +1173,25 @@ class _ProfileSearchHitRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: AppColors.surface,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(10),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         child: Container(
-          width: 200,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          width: 172,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(10),
             border: Border.all(color: AppColors.border, width: 1),
           ),
           child: Row(
             children: [
               ProfileAvatarImage(
-                size: 40,
+                size: 34,
                 imageUrl: entry.profileImageUrl,
                 fallbackInitial: entry.userName,
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -1121,19 +1203,19 @@ class _ProfileSearchHitRow extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontWeight: FontWeight.w600,
-                        fontSize: 14,
+                        fontSize: 12.5,
                         color: AppColors.textPrimary,
                       ),
                     ),
                     if (entry.subtitle != null && entry.subtitle!.isNotEmpty) ...[
-                      const SizedBox(height: 2),
+                      const SizedBox(height: 1),
                       Text(
                         entry.subtitle!,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: AppTextStyles.bodySmall.copyWith(
                           color: AppColors.textSecondary,
-                          fontSize: 11,
+                          fontSize: 10,
                         ),
                       ),
                     ],
@@ -1154,57 +1236,78 @@ class _TopReviewerRow extends StatelessWidget {
     required this.onTap,
   });
 
-  final TopReviewerDto data;
-  final VoidCallback onTap;
+  final TopReviewerDto? data;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
+    final username = (data?.userName ?? '').trim();
+    final reviewLabel = data == null
+        ? ' '
+        : '${data!.reviewCount} ${data!.reviewCount == 1 ? 'review' : 'reviews'}';
     return Material(
       color: AppColors.surface,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(14),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         child: Container(
-          width: 200,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(4, 6, 4, 4),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(color: AppColors.border, width: 1),
           ),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              ProfileAvatarImage(
-                size: 40,
-                imageUrl: data.profileImageUrl,
-                fallbackInitial: data.userName,
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: ProfileAvatarImage(
+                    size: 40,
+                    imageUrl: data?.profileImageUrl,
+                    fallbackInitial: username.isNotEmpty ? username : '?',
+                  ),
+                ),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      data.userName.isNotEmpty ? '@${data.userName}' : '—',
+              const SizedBox(height: 4),
+              SizedBox(
+                height: 13,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 1),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      username.isNotEmpty ? '@$username' : '—',
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
                       style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 10.2,
                         color: AppColors.textPrimary,
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${data.reviewCount} ${data.reviewCount == 1 ? 'review' : 'reviews'}',
-                      maxLines: 1,
-                      style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.textSecondary,
-                        fontSize: 12,
-                      ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 1),
+              SizedBox(
+                height: 12,
+                child: Center(
+                  child: Text(
+                    reviewLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.bodySmall.copyWith(
+                      color: AppColors.textSecondary,
+                      fontSize: 9.2,
+                      fontWeight: FontWeight.w500,
                     ),
-                  ],
+                  ),
                 ),
               ),
             ],

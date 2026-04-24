@@ -39,6 +39,48 @@ class UserProfileImageFetch {
 class AuthRepository {
   final ApiClient _apiClient = ApiClient();
 
+  List<UserResponseDto> _parseUsersListResponse(dynamic data) {
+    List<dynamic> rows = const [];
+    if (data is List) {
+      rows = data;
+    } else if (data is Map) {
+      final m = Map<String, dynamic>.from(data);
+      final content = m['content'];
+      final users = m['users'];
+      final items = m['items'];
+      if (content is List) {
+        rows = content;
+      } else if (users is List) {
+        rows = users;
+      } else if (items is List) {
+        rows = items;
+      }
+    }
+    final out = <UserResponseDto>[];
+    for (final row in rows) {
+      if (row is! Map) continue;
+      try {
+        final dto = UserResponseDto.fromJson(Map<String, dynamic>.from(row));
+        if (dto.id.trim().isEmpty || dto.userName.trim().isEmpty) continue;
+        out.add(dto);
+      } catch (_) {}
+    }
+    return out;
+  }
+
+  bool _looksLikeLastPage(dynamic data) {
+    if (data is! Map) return false;
+    final m = Map<String, dynamic>.from(data);
+    final last = m['last'];
+    if (last is bool) return last;
+    final totalPages = m['totalPages'];
+    final number = m['number'];
+    if (totalPages is num && number is num) {
+      return number >= totalPages - 1;
+    }
+    return false;
+  }
+
   /// “Ben” endpoint’leri: backend bazen sadece `isActive: false` ile hesap kapatma gönderir.
   /// [getUserById] için **kullanma** (yanıltıcı `isActive` diğer kullanıcılarda da gelebiliyor).
   static UserResponseDto _withAccountDeactivated(UserResponseDto u) {
@@ -203,6 +245,95 @@ class AuthRepository {
       throw TargetUserNotAvailableException(userId);
     }
     return null;
+  }
+
+  Future<List<UserResponseDto>> searchUsers(
+    String firebaseIdToken,
+    String query, {
+    int size = 20,
+  }) async {
+    final q = query.trim();
+    if (q.isEmpty) return const [];
+    _apiClient.setAuthToken(firebaseIdToken);
+    final tries = <({String path, Map<String, dynamic>? params})>[
+      (path: '/api/users/search', params: {'q': q, 'page': 0, 'size': size}),
+      (path: '/api/users/search', params: {'query': q, 'page': 0, 'size': size}),
+      (path: '/api/users/search', params: {'keyword': q, 'page': 0, 'size': size}),
+      (path: '/api/users/search', params: {'username': q, 'page': 0, 'size': size}),
+      (path: '/api/users', params: {'q': q, 'page': 0, 'size': size}),
+      (path: '/api/users', params: {'query': q, 'page': 0, 'size': size}),
+      (path: '/api/users', params: {'username': q, 'page': 0, 'size': size}),
+      (path: '/api/auth/users/search', params: {'q': q, 'page': 0, 'size': size}),
+      (path: '/api/auth/users/search', params: {'query': q, 'page': 0, 'size': size}),
+      (path: '/api/auth/users/search', params: {'username': q, 'page': 0, 'size': size}),
+      (path: '/api/users/search/$q', params: null),
+      (path: '/api/auth/users/search/$q', params: null),
+    ];
+
+    for (final t in tries) {
+      try {
+        final response = await _apiClient.dio.get(
+          t.path,
+          queryParameters: t.params,
+        );
+        final parsed = _parseUsersListResponse(response.data)
+          ..sort((a, b) {
+            final aq = a.userName.toLowerCase();
+            final bq = b.userName.toLowerCase();
+            final ql = q.toLowerCase();
+            final aStarts = aq.startsWith(ql) ? 0 : 1;
+            final bStarts = bq.startsWith(ql) ? 0 : 1;
+            if (aStarts != bStarts) return aStarts - bStarts;
+            return aq.compareTo(bq);
+          });
+        if (parsed.isNotEmpty) return parsed;
+      } on DioException {
+        continue;
+      } catch (_) {
+        continue;
+      }
+    }
+    return const [];
+  }
+
+  Future<List<UserResponseDto>> fetchUserDirectory(
+    String firebaseIdToken, {
+    int maxPages = 10,
+    int pageSize = 100,
+  }) async {
+    _apiClient.setAuthToken(firebaseIdToken);
+    final seen = <String>{};
+    final out = <UserResponseDto>[];
+    final routes = <String>[
+      '/api/users',
+      '/api/users/all',
+      '/api/auth/users',
+    ];
+    for (final route in routes) {
+      var hadAnySuccess = false;
+      for (var page = 0; page < maxPages; page++) {
+        try {
+          final response = await _apiClient.dio.get(
+            route,
+            queryParameters: {'page': page, 'size': pageSize},
+          );
+          hadAnySuccess = true;
+          final parsed = _parseUsersListResponse(response.data);
+          for (final u in parsed) {
+            if (seen.add(u.id)) {
+              out.add(u);
+            }
+          }
+          if (parsed.isEmpty || _looksLikeLastPage(response.data)) break;
+        } on DioException {
+          break;
+        } catch (_) {
+          break;
+        }
+      }
+      if (hadAnySuccess && out.isNotEmpty) break;
+    }
+    return out;
   }
 
   /// [GET /api/users/{userId}/profile-image] — inactive kullanıcı **404/410**; yalnızca public görünür.

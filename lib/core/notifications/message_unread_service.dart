@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../features/auth/data/repositories/message_repository.dart';
+import '../config/app_background_timers.dart';
+import '../utils/app_logger.dart';
 import '../utils/session_helper.dart';
 
 /// Singleton that tracks total unread-conversation count across the app.
@@ -37,7 +39,10 @@ class MessageUnreadService {
 
   void _startPolling() {
     _refresh();
-    _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
+    _pollTimer = Timer.periodic(
+      AppBackgroundTimers.messageUnreadPoll,
+      (_) => _refresh(),
+    );
   }
 
   void _stopPolling() {
@@ -63,8 +68,8 @@ class MessageUnreadService {
       );
       final count = page.content.where((c) => c.unreadCount > 0).length;
       unreadCount.value = count;
-    } catch (_) {
-      // Sessizce yut; mevcut değer korunur
+    } catch (e, st) {
+      AppLogger.warnSilencedError('MessageUnreadService._refresh', e, st);
     } finally {
       _refreshing = false;
     }

@@ -22,6 +22,8 @@ import '../../../../../core/utils/review_report_storage.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/utils/content_availability_messages.dart';
 import '../../../../../core/utils/content_unavailable_dialog.dart';
+import '../../../../../core/config/app_background_timers.dart';
+import '../../../../../core/utils/app_logger.dart';
 import '../../../../../core/utils/entity_active.dart';
 import '../../../../../core/utils/user_profile_navigation.dart';
 import '../../../data/models/product_dto.dart';
@@ -74,7 +76,8 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
   final InFlightFlag _productPageLikeLock = InFlightFlag();
   final InFlightIdLock _reviewListLikeLock = InFlightIdLock();
   final InFlightIdLock _reviewDeleteLock = InFlightIdLock();
-  static const Duration _productListingPollInterval = Duration(seconds: 5);
+  static const Duration _productListingPollInterval =
+      AppBackgroundTimers.standardListPoll;
   Timer? _productListingPollTimer;
   bool _poppedBecauseProductUnlisted = false;
   /// [_syncProductPageInBackground] tekil çalışsın; üst üste API çağrısı olmasın.
@@ -84,6 +87,18 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
   static const EdgeInsets _contentHorizontalPadding = EdgeInsets.symmetric(
     horizontal: AppSpacing.xxLarge,
   );
+
+  List<ReviewDto> _sortedNewestFirst(List<ReviewDto> reviews) {
+    final out = List<ReviewDto>.from(reviews);
+    out.sort((a, b) {
+      final da = parseBackendDateTimeToLocal(a.createdAt) ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      final db = parseBackendDateTimeToLocal(b.createdAt) ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      return db.compareTo(da);
+    });
+    return out;
+  }
 
   String _formatReviewRelativeDate(String raw) {
     final parsed = parseBackendDateTimeToLocal(raw);
@@ -415,12 +430,12 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
         reviewsToken = await _sessionHelper.ensureSession();
         if (reviewsToken == null || !mounted) return;
       }
-      final reviews = filterVisibleReviews(
+      final reviews = _sortedNewestFirst(filterVisibleReviews(
         await _reviewRepository.getReviewsByProductId(
         _currentProduct.id,
         firebaseIdToken: reviewsToken,
         ),
-      );
+      ));
       if (!mounted) return;
       ReviewMemoryCache.instance.remember(_currentProduct.id, reviews);
       if (_reviewListDataChanged(_reviews, reviews)) {
@@ -501,7 +516,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
   void _hydrateReviewsFromCache() {
     final cached = ReviewMemoryCache.instance.peek(_currentProduct.id);
     if (cached == null || cached.isEmpty) return;
-    _reviews = filterVisibleReviews(cached);
+    _reviews = _sortedNewestFirst(filterVisibleReviews(cached));
     _isLoadingReviews = false;
     _errorMessage = null;
   }
@@ -557,7 +572,8 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       setState(() {
         _likeCount = count;
       });
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.warnSilencedError('_loadLikeCount', e, st);
       if (!mounted) return;
     }
   }
@@ -566,6 +582,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
     if (!isProductEntityActive(_currentProduct) || !isReviewEntityVisible(review)) {
       return;
     }
+    final pageContext = context;
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       if (mounted) {
@@ -611,27 +628,36 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                     recipientId: int.tryParse(review.ownerId),
                     content: text,
                   );
-                  if (mounted) {
-                    Navigator.of(context).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'Message sent to @${review.ownerUserName}',
-                        ),
+                  if (!context.mounted) return;
+                  Navigator.of(context).pop();
+                  if (!mounted || !pageContext.mounted) return;
+                  ScaffoldMessenger.of(pageContext).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        'Message sent to @${review.ownerUserName}',
                       ),
-                    );
-                  }
+                    ),
+                  );
                 } catch (e) {
-                  if (mounted) {
-                    final msg = ErrorHandler.getUserFriendlyMessage(e);
+                  final msg = ErrorHandler.getUserFriendlyMessage(e);
+                  if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(msg),
                         backgroundColor: AppColors.error,
                       ),
                     );
+                  } else if (mounted && pageContext.mounted) {
+                    ScaffoldMessenger.of(pageContext).showSnackBar(
+                      SnackBar(
+                        content: Text(msg),
+                        backgroundColor: AppColors.error,
+                      ),
+                    );
                   }
-                  setState(() => isSending = false);
+                  if (context.mounted) {
+                    setState(() => isSending = false);
+                  }
                 }
               }
 
@@ -728,12 +754,12 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       if (user == null) {
         // Kullanıcı giriş yapmamışsa, review'ları token olmadan çekmeyi dene
         try {
-          final reviews = filterVisibleReviews(
+          final reviews = _sortedNewestFirst(filterVisibleReviews(
             await _reviewRepository.getReviewsByProductId(
             _currentProduct.id,
             firebaseIdToken: null,
             ),
-          );
+          ));
           ReviewMemoryCache.instance.remember(_currentProduct.id, reviews);
           setState(() {
             _reviews = reviews;
@@ -774,12 +800,12 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       }
 
       // Review'ları çek
-      final reviews = filterVisibleReviews(
+      final reviews = _sortedNewestFirst(filterVisibleReviews(
         await _reviewRepository.getReviewsByProductId(
         _currentProduct.id,
         firebaseIdToken: firebaseIdToken,
         ),
-      );
+      ));
       ReviewMemoryCache.instance.remember(_currentProduct.id, reviews);
 
       setState(() {
@@ -1657,13 +1683,15 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                                     _currentProduct.id,
                                     _reviews,
                                   );
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        kMessageReviewNoLongerAvailable,
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          kMessageReviewNoLongerAvailable,
+                                        ),
                                       ),
-                                    ),
-                                  );
+                                    );
+                                  }
                                 }
                                 return;
                               }
@@ -1682,13 +1710,15 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                                   _currentProduct.id,
                                   _reviews,
                                 );
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      kMessageReviewNoLongerAvailable,
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        kMessageReviewNoLongerAvailable,
+                                      ),
                                     ),
-                                  ),
-                                );
+                                  );
+                                }
                               }
                             } catch (e) {
                               // Backend'den çekme başarısız olursa, toggle'dan dönen değeri kullan
@@ -1732,7 +1762,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                                 _reviews[reviewIndex] = review;
                               });
                             }
-                            if (mounted) {
+                            if (context.mounted) {
                               final errorMessage =
                                   ErrorHandler.getUserFriendlyMessage(e);
                               ScaffoldMessenger.of(context).showSnackBar(

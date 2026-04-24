@@ -4,11 +4,14 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../../../core/config/list_paging.dart';
+import '../../../../../core/navigation/app_route_observer.dart';
 import '../../../../../core/notifications/notification_realtime_service.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/utils/error_handler.dart';
+import '../../../../../core/widgets/paged_navigation_bar.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../../data/models/notification_dto.dart';
@@ -36,26 +39,43 @@ class NotificationsPage extends StatefulWidget {
   State<NotificationsPage> createState() => _NotificationsPageState();
 }
 
-class _NotificationsPageState extends State<NotificationsPage> {
+class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
   final NotificationRepository _repository = NotificationRepository();
   final AuthService _auth = AuthService();
-  final ScrollController _scrollController = ScrollController();
 
-  final List<NotificationDto> _items = [];
+  /// Tüm yüklenmiş ve süzülmüş satırlar (sıra korunur; sayfa pencereleri buna göre).
+  final List<NotificationDto> _allVisible = [];
+  int _uiPage = 0;
+  int _nextServerPage = 0;
+  int _serverTotalPages = 1;
   StreamSubscription<NotificationPushEvent>? _pushSub;
 
   late final Map<NotificationSection, bool> _sectionExpanded;
 
   bool _loadingFirst = true;
-  bool _loadingMore = false;
+  bool _paging = false;
   String? _errorMessage;
-  int _page = 0;
-  int _totalPages = 1;
   bool _markingAll = false;
-  Timer? _pollTimer;
-  bool _backgroundSyncInFlight = false;
-  static const _pollInterval = Duration(seconds: 5);
-  static const int _maxPollListSize = 100;
+
+  List<NotificationDto> get _items {
+    final start = _uiPage * kStandardListPageSize;
+    if (start >= _allVisible.length) return const [];
+    final end = (start + kStandardListPageSize).clamp(0, _allVisible.length);
+    return _allVisible.sublist(start, end);
+  }
+
+  int get _totalUiPages {
+    if (_allVisible.isEmpty) return 1;
+    return ((_allVisible.length - 1) ~/ kStandardListPageSize) + 1;
+  }
+
+  bool get _canGoPrev => _uiPage > 0;
+
+  bool get _canGoNext {
+    final nextStart = (_uiPage + 1) * kStandardListPageSize;
+    if (nextStart < _allVisible.length) return true;
+    return _nextServerPage < _serverTotalPages;
+  }
 
   @override
   void initState() {
@@ -67,20 +87,32 @@ class _NotificationsPageState extends State<NotificationsPage> {
     _pushSub = NotificationRealtimeService.instance.pushStream.listen((e) {
       unawaited(_onRealtimePush(e));
     });
-    _scrollController.addListener(_onScroll);
     unawaited(_loadFirstPage());
     unawaited(NotificationRealtimeService.instance.refreshUnread());
-    _pollTimer = Timer.periodic(_pollInterval, (_) {
-      unawaited(_syncNotificationsInBackground());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final route = ModalRoute.of(context);
+      if (route is PageRoute<dynamic>) {
+        appRouteObserver.subscribe(this, route);
+      }
     });
   }
 
   @override
+  void didPopNext() {
+    unawaited(_reloadAfterCoverPopped());
+  }
+
+  Future<void> _reloadAfterCoverPopped() async {
+    await _loadFirstPage();
+    if (!mounted) return;
+    await NotificationRealtimeService.instance.refreshUnread();
+  }
+
+  @override
   void dispose() {
-    _pollTimer?.cancel();
+    appRouteObserver.unsubscribe(this);
     _pushSub?.cancel();
-    _scrollController.removeListener(_onScroll);
-    _scrollController.dispose();
     NotificationRealtimeService.instance.detach();
     super.dispose();
   }
@@ -88,21 +120,54 @@ class _NotificationsPageState extends State<NotificationsPage> {
   Future<void> _onRealtimePush(NotificationPushEvent e) async {
     final n = e.notification;
     if (n == null || !mounted) return;
+    final uid = n.resolvedUserIdForVisibilityCheck;
+    if (uid != null && uid > 0) {
+      RemoteNotificationUserListabilityCache.instance.invalidateUser(uid);
+    }
     final visible = await filterNotificationsHidingUnlistedUsers([n], _auth);
     if (visible.isEmpty || !mounted) return;
     final n2 = visible.first;
-    if (_items.any((x) => x.id == n2.id)) return;
+    if (_allVisible.any((x) => x.id == n2.id)) return;
     setState(() {
-      _items.insert(0, n2);
+      _allVisible.insert(0, n2);
     });
   }
 
-  void _onScroll() {
-    if (_loadingMore || _loadingFirst) return;
-    if (_page + 1 >= _totalPages) return;
-    final pos = _scrollController.position;
-    if (pos.pixels >= pos.maxScrollExtent - 200) {
-      unawaited(_loadMore());
+  void _mergeFilteredIntoBuffer(
+    List<NotificationDto> list, {
+    required bool prependNewest,
+  }) {
+    final have = {for (final n in _allVisible) n.id: true};
+    for (final n in list) {
+      if (have.containsKey(n.id)) continue;
+      if (prependNewest) {
+        _allVisible.insert(0, n);
+        have[n.id] = true;
+      } else {
+        _allVisible.add(n);
+        have[n.id] = true;
+      }
+    }
+  }
+
+  Future<void> _pumpFromServerForVisibleCount(int needMinItems) async {
+    while (_allVisible.length < needMinItems &&
+        _nextServerPage < _serverTotalPages) {
+      final page = await _repository.getNotifications(
+        page: _nextServerPage,
+        size: kStandardListPageSize,
+      );
+      if (!mounted) return;
+      RemoteNotificationUserListabilityCache.instance
+          .invalidateForNotificationDtos(page.content);
+      final list = await filterNotificationsHidingUnlistedUsers(
+        page.content,
+        _auth,
+      );
+      if (!mounted) return;
+      _serverTotalPages = page.totalPages;
+      _nextServerPage = page.number + 1;
+      _mergeFilteredIntoBuffer(list, prependNewest: false);
     }
   }
 
@@ -110,24 +175,17 @@ class _NotificationsPageState extends State<NotificationsPage> {
     setState(() {
       _loadingFirst = true;
       _errorMessage = null;
-      _page = 0;
+      _allVisible.clear();
+      _uiPage = 0;
+      _nextServerPage = 0;
+      _serverTotalPages = 1;
     });
     try {
-      final page = await _repository.getNotifications(page: 0, size: 20);
+      // Pull-to-refresh / yeniden yükleme: askı ↔ aktif kontrolü için önbelleği sıfırla.
+      RemoteNotificationUserListabilityCache.instance.clear();
+      await _pumpFromServerForVisibleCount(kStandardListPageSize);
       if (!mounted) return;
-      final list = await filterNotificationsHidingUnlistedUsers(
-        page.content,
-        _auth,
-      );
-      if (!mounted) return;
-      setState(() {
-        _items
-          ..clear()
-          ..addAll(list);
-        _page = page.number;
-        _totalPages = page.totalPages;
-        _loadingFirst = false;
-      });
+      setState(() => _loadingFirst = false);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -137,58 +195,33 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
   }
 
-  /// Periyodik: sunucu deaktif ürün / silinen kullanıcı satırlarını kaldırdıysa listeyi hizala.
-  Future<void> _syncNotificationsInBackground() async {
-    if (!mounted || _backgroundSyncInFlight || _loadingFirst) return;
-    _backgroundSyncInFlight = true;
+  Future<void> _goNextPage() async {
+    if (!_canGoNext || _paging) return;
+    final nextStart = (_uiPage + 1) * kStandardListPageSize;
+    if (nextStart < _allVisible.length) {
+      setState(() => _uiPage++);
+      return;
+    }
+    setState(() => _paging = true);
     try {
-      final want = _items.isEmpty
-          ? 20
-          : _items.length.clamp(20, _maxPollListSize);
-      final page = await _repository.getNotifications(page: 0, size: want);
+      await _pumpFromServerForVisibleCount(nextStart + 1);
       if (!mounted) return;
-      final list = await filterNotificationsHidingUnlistedUsers(
-        page.content,
-        _auth,
-      );
-      if (!mounted) return;
-      setState(() {
-        _items
-          ..clear()
-          ..addAll(list);
-        _page = page.number;
-        _totalPages = page.totalPages;
-      });
-      await NotificationRealtimeService.instance.refreshUnread();
+      if (nextStart < _allVisible.length) {
+        setState(() {
+          _uiPage++;
+          _paging = false;
+        });
+      } else {
+        setState(() => _paging = false);
+      }
     } catch (_) {
-      // Sessiz; açık listeyi koru.
-    } finally {
-      _backgroundSyncInFlight = false;
+      if (mounted) setState(() => _paging = false);
     }
   }
 
-  Future<void> _loadMore() async {
-    if (_loadingMore || _page + 1 >= _totalPages) return;
-    setState(() => _loadingMore = true);
-    try {
-      final next =
-          await _repository.getNotifications(page: _page + 1, size: 20);
-      if (!mounted) return;
-      final more = await filterNotificationsHidingUnlistedUsers(
-        next.content,
-        _auth,
-      );
-      if (!mounted) return;
-      setState(() {
-        _items.addAll(more);
-        _page = next.number;
-        _totalPages = next.totalPages;
-        _loadingMore = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _loadingMore = false);
-    }
+  void _goPrevPage() {
+    if (!_canGoPrev) return;
+    setState(() => _uiPage--);
   }
 
   Future<void> _markAllRead() async {
@@ -217,10 +250,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
       try {
         await _repository.markRead(n.id);
         if (!mounted) return;
-        final idx = _items.indexWhere((e) => e.id == n.id);
+        final idx = _allVisible.indexWhere((e) => e.id == n.id);
         if (idx != -1) {
           setState(() {
-            _items[idx] = n.copyWith(readAt: DateTime.now());
+            _allVisible[idx] = n.copyWith(readAt: DateTime.now());
           });
         }
         await NotificationRealtimeService.instance.refreshUnread();
@@ -329,7 +362,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
   void _onDismissed(NotificationDto n) {
     setState(() {
-      _items.removeWhere((e) => e.id == n.id);
+      _allVisible.removeWhere((e) => e.id == n.id);
+      if (_uiPage > 0 && _uiPage * kStandardListPageSize >= _allVisible.length) {
+        _uiPage--;
+      }
     });
   }
 
@@ -350,7 +386,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
           ),
         ),
         actions: [
-          if (!_loadingFirst && _items.isNotEmpty)
+          if (!_loadingFirst && _allVisible.isNotEmpty)
             TextButton(
               onPressed: _markingAll ? null : _markAllRead,
               child: Text(
@@ -371,13 +407,34 @@ class _NotificationsPageState extends State<NotificationsPage> {
           ),
         ),
       ),
-      body: RefreshIndicator(
-        color: AppColors.primary,
-        onRefresh: () async {
-          await _loadFirstPage();
-          await NotificationRealtimeService.instance.refreshUnread();
-        },
-        child: _buildBody(),
+      body: Column(
+        children: [
+          Expanded(
+            child: RefreshIndicator(
+              color: AppColors.primary,
+              onRefresh: () async {
+                await _loadFirstPage();
+                await NotificationRealtimeService.instance.refreshUnread();
+              },
+              child: _buildBody(),
+            ),
+          ),
+          if (!_loadingFirst &&
+              _errorMessage == null &&
+              _allVisible.isNotEmpty)
+            PagedNavigationBar(
+              currentPage1Based: _uiPage + 1,
+              totalPages: _totalUiPages,
+              canGoPrevious: _canGoPrev,
+              canGoNext: _canGoNext,
+              isLoadingNext: _paging,
+              onPrevious: _goPrevPage,
+              onNext: () {
+                unawaited(_goNextPage());
+              },
+              backgroundColor: AppColors.background,
+            ),
+        ],
       ),
     );
   }
@@ -415,7 +472,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
         ],
       );
     }
-    if (_items.isEmpty) {
+    if (_allVisible.isEmpty) {
       return ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(AppSpacing.xLarge),
@@ -512,7 +569,12 @@ class _NotificationsPageState extends State<NotificationsPage> {
                           onDelete: () async {
                             if (await _deleteNotification(n) && mounted) {
                               setState(() {
-                                _items.removeWhere((e) => e.id == n.id);
+                                _allVisible.removeWhere((e) => e.id == n.id);
+                                if (_uiPage > 0 &&
+                                    _uiPage * kStandardListPageSize >=
+                                        _allVisible.length) {
+                                  _uiPage--;
+                                }
                               });
                             }
                           },
@@ -527,19 +589,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
       );
     }
 
-    if (_loadingMore) {
-      sectionWidgets.add(
-        const Padding(
-          padding: EdgeInsets.all(AppSpacing.large),
-          child: Center(child: ListLoadMoreSkeleton()),
-        ),
-      );
-    }
-
     sectionWidgets.add(const SizedBox(height: AppSpacing.large));
 
     return ListView(
-      controller: _scrollController,
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.only(top: AppSpacing.small),
       children: sectionWidgets,

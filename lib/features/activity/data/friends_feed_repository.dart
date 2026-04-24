@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 
+import '../../../core/config/list_paging.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/utils/session_helper.dart';
 import '../../auth/data/services/auth_service.dart';
@@ -22,7 +23,7 @@ class FriendsFeedRepository {
 
   Future<FriendsFeedPageDto> getFriendsFeed({
     int page = 0,
-    int size = 20,
+    int size = kStandardListPageSize,
   }) async {
     final safePage = page < 0 ? 0 : page;
     final safeSize = size.clamp(1, 50);

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
+import '../../../../../core/config/app_background_timers.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/utils/exceptions.dart';
 import '../../../../../core/utils/product_listing_flags.dart';
@@ -73,12 +74,11 @@ class _UserProfilePageState extends State<UserProfilePage>
   final Set<String> _reviewProductIdsNotOnHomeFirstPage = {};
 
   Timer? _otherUserProfilePollTimer;
-  static const Duration _otherUserProfilePollInterval = Duration(seconds: 5);
+  static const Duration _otherUserProfilePollInterval =
+      AppBackgroundTimers.standardListPoll;
   bool _otherUserProfilePollInFlight = false;
   /// Hedef kullanıcı yok / deaktif; [HomePage]'e dönüldü.
   bool _exitedBecauseUserGone = false;
-  /// [getUserById] cevabı geldiyse; askı / deaktif / hesap dışı ile kapatılır.
-  bool _canShowMessageToProfileUser = false;
 
   late TabController _tabController;
   String _selectedDateSort = 'Newest';
@@ -96,6 +96,8 @@ class _UserProfilePageState extends State<UserProfilePage>
   String? _avatarImageUrl;
   Uint8List? _avatarMemoryBytes;
   String? _avatarPhotoDataRaw;
+  String _profileUsername = '';
+  String? _profileFullName;
 
   @override
   void initState() {
@@ -104,7 +106,21 @@ class _UserProfilePageState extends State<UserProfilePage>
     unawaited(ProductReportStorage.hydrateForCurrentUser());
     _tabController = TabController(length: 1, vsync: this);
     _avatarImageUrl = widget.profileImageUrl;
+    _profileUsername = widget.userName.trim();
     _start();
+  }
+
+  void _applyIdentityFromUser(UserResponseDto u) {
+    final uname = u.userName.trim();
+    final name = (u.name ?? '').trim();
+    final surname = (u.surname ?? '').trim();
+    final fullName = [name, surname].where((e) => e.isNotEmpty).join(' ').trim();
+    setState(() {
+      if (uname.isNotEmpty) {
+        _profileUsername = uname;
+      }
+      _profileFullName = fullName.isNotEmpty ? fullName : null;
+    });
   }
 
   /// Kendi kullanıcı kartına gidilmesin; deep link / hata durumunda kapat.
@@ -180,6 +196,9 @@ class _UserProfilePageState extends State<UserProfilePage>
     }
     if (!mounted || _exitedBecauseUserGone) return;
     _applyTargetUserGate(preloaded, profileImage: prefillImg);
+    if (preloaded != null) {
+      _applyIdentityFromUser(preloaded);
+    }
     if (!mounted || _exitedBecauseUserGone) return;
     if (prefillImg != null && prefillImg.hasImage) {
       final px = prefillImg;
@@ -207,6 +226,7 @@ class _UserProfilePageState extends State<UserProfilePage>
           _avatarPhotoDataRaw = p.profilePhotoData;
         }
       });
+      _applyIdentityFromUser(p);
     }
     if (!mounted || _exitedBecauseUserGone) return;
     await _loadAll(sessionToken: preSession);
@@ -227,7 +247,7 @@ class _UserProfilePageState extends State<UserProfilePage>
     );
   }
 
-  /// 5 sn: takip sayıları + yorum listesi (askı/ silinen satırlar düşer) + zenginleştirme.
+  /// 5 sn: sadece canlı sayaç/takip bilgisi; ağır review görsel yüklemelerini tetiklemez.
   Future<void> _pollOtherUserProfileData() async {
     if (!mounted) return;
     if (_exitedBecauseUserGone) return;
@@ -244,12 +264,7 @@ class _UserProfilePageState extends State<UserProfilePage>
       await Future.wait<void>([
         _loadCounts(),
         _loadIsFollowing(token),
-        _loadReviews(token, background: true),
       ]);
-      if (!mounted) return;
-      unawaited(_prefetchProductsForReviews(_reviews));
-      unawaited(_syncReportedProductFlagsFromServer());
-      unawaited(_syncNotOnHomeFirstPageSet(_reviews));
     } catch (_) {
     } finally {
       _otherUserProfilePollInFlight = false;
@@ -269,9 +284,6 @@ class _UserProfilePageState extends State<UserProfilePage>
     if (profileImage != null && profileImage.isNotFound) {
       _exitToHomeBecauseUserUnavailable();
       return;
-    }
-    if (u != null) {
-      setState(() => _canShowMessageToProfileUser = true);
     }
   }
 
@@ -370,9 +382,6 @@ class _UserProfilePageState extends State<UserProfilePage>
         return;
       }
       if (u != null && mounted) {
-        setState(() => _canShowMessageToProfileUser = true);
-      }
-      if (u != null && mounted) {
         final profile = u;
         final bytes = decodeProfilePhotoBytes(profile.profilePhotoData);
         setState(() {
@@ -384,6 +393,7 @@ class _UserProfilePageState extends State<UserProfilePage>
             _avatarPhotoDataRaw = profile.profilePhotoData;
           }
         });
+        _applyIdentityFromUser(profile);
       }
     } on TargetUserNotAvailableException {
       if (mounted) _exitToHomeBecauseUserUnavailable();
@@ -579,7 +589,7 @@ class _UserProfilePageState extends State<UserProfilePage>
               await _productRepository.getProductById(
                 id,
                 firebaseIdToken: token,
-                bypassCache: true,
+                bypassCache: false,
               ),
             );
           } on ProductNotAvailableException {
@@ -853,7 +863,9 @@ class _UserProfilePageState extends State<UserProfilePage>
       );
     }
     final handle =
-        '@${widget.userName.toLowerCase().replaceAll(' ', '')}';
+        '@${_profileUsername.toLowerCase().replaceAll(' ', '')}';
+    final displayName = _profileFullName ?? _profileUsername;
+    final canOpenMessage = !_profileUnavailable && int.tryParse(widget.userId) != null;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -867,7 +879,7 @@ class _UserProfilePageState extends State<UserProfilePage>
         ),
         centerTitle: true,
         actions: [
-          if (_canShowMessageToProfileUser && !_profileUnavailable)
+          if (canOpenMessage)
             IconButton(
               icon: const Icon(Icons.chat_bubble_outline),
               color: AppColors.primary,
@@ -911,11 +923,11 @@ class _UserProfilePageState extends State<UserProfilePage>
                 radius: 50,
                 imageUrl: _avatarImageUrl ?? widget.profileImageUrl,
                 memoryBytes: _avatarMemoryBytes,
-                fallbackInitial: widget.userName,
+                fallbackInitial: _profileUsername,
               ),
               const SizedBox(height: AppSpacing.large),
               Text(
-                widget.userName,
+                displayName,
                 style: AppTextStyles.titleMedium,
               ),
               const SizedBox(height: AppSpacing.small),

@@ -7,6 +7,7 @@ import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/config/api_config.dart';
+import '../../../../../core/config/app_background_timers.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/cache/current_user_cache.dart';
 import '../../../../../core/cache/product_memory_cache.dart';
@@ -77,7 +78,8 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
   /// Ürün askı / vitrin dışı; [canPop] yokken tam ekran yedek.
   bool _productListingBlocked = false;
   bool _productListingCheckDone = false;
-  static const Duration _listingPollInterval = Duration(seconds: 5);
+  static const Duration _listingPollInterval =
+      AppBackgroundTimers.standardListPoll;
   Timer? _listingPollTimer;
   bool _poppedForListingGone = false;
   /// Son bildiğimiz home ilk sayfa (50) içindeyiz bilgisi — true→false askı/çıkarma ile uyumlu.
@@ -650,6 +652,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
 
     final controller = TextEditingController();
     bool isSending = false;
+    final pageContext = context;
 
     await showModalBottomSheet(
       context: context,
@@ -680,27 +683,36 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
                     recipientId: int.tryParse(_currentReview.ownerId),
                     content: text,
                   );
-                  if (mounted) {
-                    Navigator.of(context).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'Message sent to @${_currentReview.ownerUserName}',
-                        ),
+                  if (!context.mounted) return;
+                  Navigator.of(context).pop();
+                  if (!mounted || !pageContext.mounted) return;
+                  ScaffoldMessenger.of(pageContext).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        'Message sent to @${_currentReview.ownerUserName}',
                       ),
-                    );
-                  }
+                    ),
+                  );
                 } catch (e) {
-                  if (mounted) {
-                    final msg = ErrorHandler.getUserFriendlyMessage(e);
+                  final msg = ErrorHandler.getUserFriendlyMessage(e);
+                  if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(msg),
                         backgroundColor: AppColors.error,
                       ),
                     );
+                  } else if (mounted && pageContext.mounted) {
+                    ScaffoldMessenger.of(pageContext).showSnackBar(
+                      SnackBar(
+                        content: Text(msg),
+                        backgroundColor: AppColors.error,
+                      ),
+                    );
                   }
-                  setState(() => isSending = false);
+                  if (context.mounted) {
+                    setState(() => isSending = false);
+                  }
                 }
               }
 

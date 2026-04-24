@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 
+import '../../../core/config/list_paging.dart';
 import '../../../core/cache/activity_memory_cache.dart';
 import '../../../core/cache/following_id_set_cache.dart';
 import '../../../core/utils/error_handler.dart';
@@ -40,8 +41,6 @@ class ActivityController extends ChangeNotifier {
   bool _loadingFirst = true;
   bool _loadingMore = false;
   String? _errorMessage;
-  bool _listPollInFlight = false;
-  static const int _listPollMaxSize = 100;
 
   List<ActivityItem> get items => List.unmodifiable(_items);
   /// Sunucudaki toplam bildirim sayısı (sayfalama üst bilgisi).
@@ -131,7 +130,11 @@ class ActivityController extends ChangeNotifier {
     _errorMessage = null;
     _page = 0;
     try {
-      final page = await _notifications.getNotifications(page: 0, size: 20);
+      RemoteNotificationUserListabilityCache.instance.clear();
+      final page = await _notifications.getNotifications(
+        page: 0,
+        size: kStandardListPageSize,
+      );
       final visible = await filterNotificationsHidingUnlistedUsers(
         page.content,
         _auth,
@@ -143,7 +146,7 @@ class ActivityController extends ChangeNotifier {
       _totalPages = page.totalPages;
       _totalElements = page.totalElements;
       _prefetchAvatarsForItems(_items);
-      await _syncFollowStatesForCurrentItems();
+      await _syncFollowStatesForCurrentItems(refetchFollowingSet: true);
     } catch (e) {
       _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
     } finally {
@@ -152,41 +155,17 @@ class ActivityController extends ChangeNotifier {
     }
   }
 
-  /// 5s periyodik: sunucu silinen ürün / kullanıcı satırlarını yansıt.
-  Future<void> pollResyncList() async {
-    if (_listPollInFlight || _loadingMore) return;
-    if (_loadingFirst && _items.isEmpty) return;
-    _listPollInFlight = true;
-    try {
-      final want = _items.isEmpty ? 20 : _items.length.clamp(20, _listPollMaxSize);
-      final page = await _notifications.getNotifications(page: 0, size: want);
-      final visible = await filterNotificationsHidingUnlistedUsers(
-        page.content,
-        _auth,
-      );
-      _items = _deduplicateItems(
-        visible.map(activityItemFromNotification).toList(),
-      );
-      _page = page.number;
-      _totalPages = page.totalPages;
-      _totalElements = page.totalElements;
-      _prefetchAvatarsForItems(_items);
-      await _syncFollowStatesForCurrentItems();
-      notifyListeners();
-    } catch (_) {
-      // Sessiz; mevcut listeyi tut.
-    } finally {
-      _listPollInFlight = false;
-    }
-  }
-
   Future<void> loadMore() async {
     if (_loadingMore || _loadingFirst || !hasMore) return;
     _loadingMore = true;
     notifyListeners();
     try {
-      final next =
-          await _notifications.getNotifications(page: _page + 1, size: 20);
+      final next = await _notifications.getNotifications(
+        page: _page + 1,
+        size: kStandardListPageSize,
+      );
+      RemoteNotificationUserListabilityCache.instance
+          .invalidateForNotificationDtos(next.content);
       final visible = await filterNotificationsHidingUnlistedUsers(
         next.content,
         _auth,
@@ -197,7 +176,7 @@ class ActivityController extends ChangeNotifier {
       _page = next.number;
       _totalPages = next.totalPages;
       _prefetchAvatarsForItems(appended);
-      await _syncFollowStatesForCurrentItems();
+      await _syncFollowStatesForCurrentItems(refetchFollowingSet: true);
     } catch (_) {
       // Ignore; user can pull to refresh or scroll again
     } finally {
@@ -217,7 +196,10 @@ class ActivityController extends ChangeNotifier {
     );
   }
 
-  Future<void> _syncFollowStatesForCurrentItems() async {
+  /// [refetchFollowingSet]: liste API’den yeni geldiyede takip seti eski kaldığında Follow/Following hatası olmasın.
+  Future<void> _syncFollowStatesForCurrentItems({
+    bool refetchFollowingSet = false,
+  }) async {
     final token = await _sessionHelper.ensureSession();
     if (token == null) {
       _writeActivitySnapshot();
@@ -240,6 +222,7 @@ class ActivityController extends ChangeNotifier {
         _interactions,
         _auth,
         _sessionHelper,
+        force: refetchFollowingSet,
       );
       final myFollowing = FollowingIdSetCache.instance.snapshot;
       for (final id in ids) {
@@ -349,7 +332,7 @@ class ActivityController extends ChangeNotifier {
         ];
         _prefetchAvatarsForItems([mapped]);
         notifyListeners();
-        unawaited(_syncFollowStatesForCurrentItems());
+        unawaited(_syncFollowStatesForCurrentItems(refetchFollowingSet: true));
         return;
       }
     }
@@ -358,6 +341,6 @@ class ActivityController extends ChangeNotifier {
     if (_totalElements > 0) _totalElements += 1;
     _prefetchAvatarsForItems([mapped]);
     notifyListeners();
-    unawaited(_syncFollowStatesForCurrentItems());
+    unawaited(_syncFollowStatesForCurrentItems(refetchFollowingSet: true));
   }
 }

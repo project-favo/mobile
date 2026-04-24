@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../../../../core/cache/app_session_cache.dart';
+import '../../../../../core/config/app_background_timers.dart';
 import '../../../../../core/cache/product_memory_cache.dart';
 import '../../../../../core/cache/review_memory_cache.dart';
 import '../../../../../core/cache/profile_warm_cache.dart';
@@ -199,7 +200,7 @@ class _ProfilePageState extends State<ProfilePage>
       _loadMyReviews();
     }
     _profilePollTimer = Timer.periodic(
-      const Duration(seconds: 5),
+      AppBackgroundTimers.standardListPoll,
       (_) => unawaited(_pollProfileData()),
     );
     _tabController.addListener(() {

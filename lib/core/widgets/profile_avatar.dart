@@ -89,7 +89,10 @@ class _ProfileAvatarState extends State<ProfileAvatar> {
 
     // Show placeholder immediately while network bytes load,
     // instead of shimmer delay that feels like UI lag.
-    return _placeholderCircle(widget.radius, widget.fallbackInitial);
+    return Opacity(
+      opacity: _loading ? 0.72 : 1.0,
+      child: _placeholderCircle(widget.radius, widget.fallbackInitial),
+    );
   }
 
   Widget _placeholderCircle(double radius, String fallbackInitial) {
@@ -213,7 +216,10 @@ class _ProfileAvatarImageState extends State<ProfileAvatarImage> {
       );
     }
 
-    return _initials(widget.size, radius);
+    return Opacity(
+      opacity: _loading ? 0.72 : 1.0,
+      child: _initials(widget.size, radius),
+    );
   }
 
   Widget _initials(double size, double radius) {

@@ -38,7 +38,6 @@ class _TransferIconPainter extends CustomPainter {
     final cx = w / 2;
     const pad = 3.0;
     const gap = 2.0;
-    final halfLen = (w / 2 - pad - gap).clamp(4.0, 18.0);
     final leftTip = pad;
     final leftLineEnd = cx - gap;
     final rightLineStart = cx + gap;

@@ -18,8 +18,10 @@ import '../../../core/utils/in_flight_id_lock.dart';
 import '../../../core/cache/following_id_set_cache.dart';
 import '../../../core/cache/home_feed_cache.dart';
 import '../../../core/cache/home_top_picks_cache.dart';
+import '../../../core/config/app_background_timers.dart';
 import '../../../core/cache/search_warm_cache.dart';
 import '../../../core/cache/friend_feed_memory_cache.dart';
+import '../../../features/activity/domain/activity_models.dart';
 import '../../../features/activity/domain/activity_type.dart';
 import '../../../features/activity/data/friends_feed_repository.dart';
 import '../../../features/activity/data/friends_feed_activity_mapper.dart';
@@ -85,7 +87,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   final ScrollController _scrollController = ScrollController();
   bool _notificationSvcAttached = false;
 
-  // --- Friend likers (from friend feed cache) ---
+  // --- Friend likers: yalnızca son friends-feed API cevabı; önbirleşik cache’deki eski satırlar kullanılmaz ---
+  List<ActivityItem> _friendFeedItemsForLikers = const [];
   Map<String, List<String>> _friendLikersMap = {};
 
   /// [ProductCard] key parçası — ürün detayından dönünce like sayısı tazelensin.
@@ -227,7 +230,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       setState(() {});
     });
     _homeFeedPollTimer = Timer.periodic(
-      const Duration(seconds: 10),
+      AppBackgroundTimers.homeFeedBackgroundPoll,
       (_) {
         unawaited(_pollHomeFeedForUpdates());
         _friendFeedRefreshPollTick++;
@@ -273,8 +276,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       if (!mounted) return;
 
       final items = activityItemsFromFriendsFeedDtos(page.content);
+      _friendFeedItemsForLikers = items;
 
-      // Merge with existing cache: prepend fresh items, deduplicate by id.
+      // Merge with existing cache: friend feed ekranı için — ana sayfa baloncuğu buna bakmaz.
       final existing = FriendFeedMemoryCache.instance.peek();
       final merged = <String, dynamic>{};
       for (final item in [...items, ...?existing?.items]) {
@@ -288,26 +292,26 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
       if (mounted) {
         setState(() {
-          _friendLikersMap = _buildFriendLikersMap();
+          _friendLikersMap = _buildFriendLikersMapForItems(items);
         });
       }
     } catch (_) {
       // Friend likers are optional — silent fail.
       if (mounted && _friendLikersMap.isEmpty) {
         setState(() {
-          _friendLikersMap = _buildFriendLikersMap();
+          _friendLikersMap = _buildFriendLikersMapForItems(_friendFeedItemsForLikers);
         });
       }
     }
   }
 
-  /// Build productId → [avatarUrl, ...] map from the cached friend feed.
-  /// Includes both LIKE and REVIEW activities that reference a productId.
-  Map<String, List<String>> _buildFriendLikersMap() {
-    final snapshot = FriendFeedMemoryCache.instance.peek();
-    if (snapshot == null) return {};
+  /// Ürün kartı baloncuğu: sadece [source] satırları. Askı/deaktif aktör yok, eski cache yok.
+  Map<String, List<String>> _buildFriendLikersMapForItems(
+    Iterable<ActivityItem> source,
+  ) {
     final map = <String, List<String>>{};
-    for (final item in snapshot.items) {
+    for (final item in source) {
+      if (item.isActorInactive) continue;
       if (item.type != ActivityType.review && item.type != ActivityType.like) {
         continue;
       }
@@ -1566,14 +1570,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _friendLikersMap = _buildFriendLikersMap();
+          _friendLikersMap = _buildFriendLikersMapForItems(_friendFeedItemsForLikers);
         });
       }
     } catch (e) {
       if (mounted) {
         if (background && _filteredProducts.isNotEmpty) {
           _isLoading = false;
-          _friendLikersMap = _buildFriendLikersMap();
+          _friendLikersMap =
+              _buildFriendLikersMapForItems(_friendFeedItemsForLikers);
           return;
         }
         setState(() {
@@ -2324,7 +2329,7 @@ class _BannerCarouselState extends State<_BannerCarousel> {
 
   void _startAutoScroll() {
     _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 4), (_) {
+    _timer = Timer.periodic(AppBackgroundTimers.homePromoBannerStep, (_) {
       if (!mounted) return;
       final next = (_currentPage + 1) % _banners.length;
       _controller.animateToPage(

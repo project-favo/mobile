@@ -165,6 +165,12 @@ class _ProductCardState extends State<ProductCard> {
 
   @override
   Widget build(BuildContext context) {
+    // Backend [averageRating] tüm yorumları sayabilir; [filterVisibleReviews] ile gelen
+    // yorum yoksa kartta puan + baloncuğu da gösterme (askıdaki yorum yıldızı kalmasın).
+    final int? visibleReviewCount = widget.loadReviewCount ? _reviewCount : null;
+    final bool noVisibleReviews = visibleReviewCount != null && visibleReviewCount == 0;
+    final bool showFriendBubbles = widget.friendAvatarUrls.isNotEmpty && !noVisibleReviews;
+
     final dpr = MediaQuery.devicePixelRatioOf(context);
     final screenW = MediaQuery.sizeOf(context).width;
     // 2 sütunlu grid: her kart (screenW - 2×16 dış padding - 16 ara boşluk) / 2
@@ -218,7 +224,7 @@ class _ProductCardState extends State<ProductCard> {
                         ),
                       ),
                     ),
-                    if (widget.friendAvatarUrls.isNotEmpty)
+                    if (showFriendBubbles)
                       Positioned(
                         left: 7,
                         bottom: 7,
@@ -254,6 +260,19 @@ class _ProductCardState extends State<ProductCard> {
               height: _metaRowHeight,
               child: Builder(
                 builder: (context) {
+                  if (noVisibleReviews) {
+                    return Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'No rating yet',
+                        style: AppTextStyles.bodySmall.copyWith(
+                          color: AppColors.textSecondary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    );
+                  }
                   final raw = widget.rating;
                   if (!productHasMeaningfulRating(raw)) {
                     return Align(

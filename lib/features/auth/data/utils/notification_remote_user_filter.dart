@@ -12,8 +12,8 @@ class _CacheEntry {
   final DateTime expires;
 }
 
-/// [getUserById] önbelleği. Gizleme yalnızca **açık [isAccountInactive]**: 404 id uyumsuzluğunda
-/// tüm listeyi boşaltmayı engellemek için tutulmaz.
+/// [getUserById] / 404 önbelleği. [getUserById] dolu ve profil engelli değilse listable; yalnızca
+/// `u == null` iken profil resmi 404 ile doğrulanır.
 final class RemoteNotificationUserListabilityCache {
   RemoteNotificationUserListabilityCache._();
   static final RemoteNotificationUserListabilityCache instance =
@@ -29,7 +29,15 @@ final class RemoteNotificationUserListabilityCache {
 
   void invalidateUser(int id) => _byUserId.remove(id);
 
-  /// `true` = satır kalsın; `false` = sadece [UserResponseDto.isAccountInactive] ile.
+  /// [getUserById] sonrası bu satırlar tekrar değerlendirilsin (tek yenileme).
+  void invalidateForNotificationDtos(Iterable<NotificationDto> list) {
+    for (final n in list) {
+      final id = n.resolvedUserIdForVisibilityCheck;
+      if (id != null && id > 0) invalidateUser(id);
+    }
+  }
+
+  /// `true` = satır kalsın. [getUserById] yeterliyse resim istenmez; yalnızca `u == null` iken 404 kontrolü.
   Future<bool> isUserListableForNotificationRow(
     AuthService auth,
     int id,
@@ -50,6 +58,11 @@ final class RemoteNotificationUserListabilityCache {
         _byUserId[id] = _CacheEntry(true, now.add(_ttlListable));
         return true;
       }
+      final imgOnly = await auth.fetchUserProfileImage(id.toString());
+      if (imgOnly != null && imgOnly.isNotFound) {
+        _byUserId[id] = _CacheEntry(false, now.add(_ttlUnlisted));
+        return false;
+      }
       _byUserId[id] = _CacheEntry(true, now.add(_ttlUnknown));
       return true;
     } on TargetUserNotAvailableException {
@@ -68,7 +81,7 @@ Future<List<NotificationDto>> filterNotificationsHidingUnlistedUsers(
   RemoteNotificationUserListabilityCache? cache,
 }) async {
   final c = cache ?? RemoteNotificationUserListabilityCache.instance;
-  final pre = list.where(isNotificationListEntryVisible).toList();
+  final pre = list.where(isNotificationListEntryVisibleForRemoteList).toList();
   final ids = <int>{};
   for (final n in pre) {
     final id = n.resolvedUserIdForVisibilityCheck;

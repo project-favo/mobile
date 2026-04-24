@@ -32,6 +32,15 @@ bool isNotificationListEntryVisible(NotificationDto n) {
   return !p.isProductNotListed;
 }
 
+/// Liste + yenileme: gömülü [NotificationActorDto.isAccountInactive] **kullanılmaz** — API
+/// hesabı tekrar aktif etse embed eski kalabilir; actor görünürlüğü
+/// [filterNotificationsHidingUnlistedUsers] ile [getUserById] / profil resmi denetlenir.
+bool isNotificationListEntryVisibleForRemoteList(NotificationDto n) {
+  final p = n.product;
+  if (p == null) return true;
+  return !p.isProductNotListed;
+}
+
 List<NotificationDto> filterVisibleNotifications(
   Iterable<NotificationDto> list,
 ) =>

@@ -5,6 +5,7 @@ import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
+import '../../../../../core/config/app_background_timers.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/utils/user_profile_navigation.dart';
 import '../../../data/models/conversation_dto.dart';
@@ -45,7 +46,7 @@ class _FollowListPageState extends State<FollowListPage> {
     _loadPage();
     _scrollController.addListener(_onScroll);
     _pollTimer = Timer.periodic(
-      const Duration(seconds: 5),
+      AppBackgroundTimers.standardListPoll,
       (_) => unawaited(_resyncListSilently()),
     );
   }

@@ -1,13 +1,18 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/cache/activity_memory_cache.dart';
 import '../../../core/cache/following_id_set_cache.dart';
+import '../../../core/navigation/app_route_observer.dart';
 import '../../../core/notifications/notification_realtime_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/utils/error_handler.dart';
+import '../../../core/config/list_paging.dart';
+import '../../../core/widgets/paged_navigation_bar.dart';
 import '../../../core/utils/session_helper.dart';
 import '../../../core/utils/user_profile_navigation.dart';
 import '../../../core/widgets/main_bottom_nav_items.dart';
@@ -36,13 +41,13 @@ class ActivityPage extends StatefulWidget {
 }
 
 class _ActivityPageState extends State<ActivityPage>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, RouteAware {
   late final ActivityController _controller;
   late final TabController _tabController;
   final ScrollController _scrollController = ScrollController();
+  /// Her sekme için ayrı sayfa (her sayfada en fazla [kStandardListPageSize] satır).
+  final List<int> _pageInTab = [0, 0, 0, 0];
   StreamSubscription<NotificationPushEvent>? _pushSub;
-  Timer? _activityPollTimer;
-  static const _activityPollInterval = Duration(seconds: 5);
 
   Route<T> _instantRoute<T>(Widget page) {
     return PageRouteBuilder<T>(
@@ -101,7 +106,6 @@ class _ActivityPageState extends State<ActivityPage>
     _pushSub = NotificationRealtimeService.instance.pushStream.listen(
       _onRealtimePush,
     );
-    _scrollController.addListener(_onScroll);
     unawaited(
       FollowingIdSetCache.instance.ensureLoaded(
         InteractionRepository(),
@@ -109,11 +113,25 @@ class _ActivityPageState extends State<ActivityPage>
         SessionHelper(),
       ),
     );
-    _controller.hydrateFromCache();
     unawaited(_bootstrapActivity());
-    _activityPollTimer = Timer.periodic(_activityPollInterval, (_) {
-      unawaited(_controller.pollResyncList());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final route = ModalRoute.of(context);
+      if (route is PageRoute<dynamic>) {
+        appRouteObserver.subscribe(this, route);
+      }
     });
+  }
+
+  @override
+  void didPopNext() {
+    unawaited(_refreshOnReturn());
+  }
+
+  Future<void> _refreshOnReturn() async {
+    await _controller.loadFirstPage();
+    if (!mounted) return;
+    await NotificationRealtimeService.instance.refreshUnread();
   }
 
   Future<void> _bootstrapActivity() async {
@@ -132,25 +150,36 @@ class _ActivityPageState extends State<ActivityPage>
     if (_scrollController.hasClients) {
       _scrollController.jumpTo(0);
     }
-    setState(() {});
+    setState(() {
+      _pageInTab[_tabController.index] = 0;
+    });
   }
 
   @override
   void dispose() {
-    _activityPollTimer?.cancel();
+    appRouteObserver.unsubscribe(this);
+    ActivityMemoryCache.instance.clear();
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _pushSub?.cancel();
-    _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     NotificationRealtimeService.instance.detach();
     _controller.dispose();
     super.dispose();
   }
 
-  List<ActivityItem> _filteredItems() {
-    final all = _controller.items;
-    switch (_tabController.index) {
+  List<ActivityItem> _filteredItems() =>
+      _filterForTabIndex(_controller.items, _tabController.index);
+
+  void _onRealtimePush(NotificationPushEvent e) {
+    final n = e.notification;
+    if (n == null || !mounted) return;
+    unawaited(_controller.prependFromPush(n));
+    unawaited(NotificationRealtimeService.instance.refreshUnread());
+  }
+
+  List<ActivityItem> _filterForTabIndex(List<ActivityItem> all, int tab) {
+    switch (tab) {
       case 1:
         return all.where((e) {
           final t = e.lineText.toLowerCase();
@@ -171,23 +200,74 @@ class _ActivityPageState extends State<ActivityPage>
     }
   }
 
-  void _onRealtimePush(NotificationPushEvent e) {
-    final n = e.notification;
-    if (n == null || !mounted) return;
-    unawaited(_controller.prependFromPush(n));
-    unawaited(NotificationRealtimeService.instance.refreshUnread());
+  List<ActivityItem> _visiblePageForCurrentTab() {
+    final filtered = _filteredItems();
+    if (filtered.isEmpty) return const [];
+    final tab = _tabController.index;
+    var p = _pageInTab[tab];
+    final maxP = math.max(0, ((filtered.length - 1) ~/ kStandardListPageSize));
+    if (p > maxP) p = maxP;
+    final start = p * kStandardListPageSize;
+    if (start >= filtered.length) return const [];
+    final end = math.min(start + kStandardListPageSize, filtered.length);
+    return filtered.sublist(start, end);
   }
 
-  void _onScroll() {
-    if (_controller.loadingMore ||
-        _controller.loadingFirst ||
-        !_controller.hasMore) {
+  int _tabDisplayPage1Based() {
+    final filtered = _filteredItems();
+    if (filtered.isEmpty) return 1;
+    final tab = _tabController.index;
+    var p = _pageInTab[tab];
+    final maxP = math.max(0, ((filtered.length - 1) ~/ kStandardListPageSize));
+    if (p > maxP) p = maxP;
+    return p + 1;
+  }
+
+  int _tabTotalPages() {
+    final n = _filteredItems().length;
+    if (n == 0) return 1;
+    return ((n - 1) ~/ kStandardListPageSize) + 1;
+  }
+
+  bool _canGoNextActivity() {
+    final tab = _tabController.index;
+    final f = _filterForTabIndex(_controller.items, tab);
+    if (f.isEmpty) return false;
+    final p = _pageInTab[tab];
+    if ((p + 1) * kStandardListPageSize < f.length) return true;
+    return _controller.hasMore;
+  }
+
+  bool _canGoPrevActivity() => _pageInTab[_tabController.index] > 0;
+
+  Future<void> _goNextActivity() async {
+    if (!_canGoNextActivity()) return;
+    final tab = _tabController.index;
+    var p = _pageInTab[tab];
+    var f = _filterForTabIndex(_controller.items, tab);
+    if ((p + 1) * kStandardListPageSize < f.length) {
+      setState(() => _pageInTab[tab] = p + 1);
       return;
     }
-    final pos = _scrollController.position;
-    if (pos.pixels >= pos.maxScrollExtent - 200) {
-      unawaited(_controller.loadMore());
+    if (!_controller.hasMore) return;
+    var guard = 40;
+    while (_controller.hasMore && guard-- > 0) {
+      final beforeLen = _controller.items.length;
+      await _controller.loadMore();
+      if (!mounted) return;
+      f = _filterForTabIndex(_controller.items, tab);
+      if ((p + 1) * kStandardListPageSize < f.length) {
+        setState(() => _pageInTab[tab] = p + 1);
+        return;
+      }
+      if (_controller.items.length == beforeLen) break;
     }
+  }
+
+  void _goPrevActivity() {
+    final t = _tabController.index;
+    if (_pageInTab[t] <= 0) return;
+    setState(() => _pageInTab[t]--);
   }
 
   Future<void> _onOpenItem(BuildContext context, ActivityItem item) async {
@@ -386,7 +466,7 @@ class _ActivityPageState extends State<ActivityPage>
             );
           }
 
-          final visible = _filteredItems();
+          final filtered = _filteredItems();
           if (_controller.items.isEmpty) {
             return RefreshIndicator(
               color: AppColors.primary,
@@ -413,7 +493,7 @@ class _ActivityPageState extends State<ActivityPage>
             );
           }
 
-          if (visible.isEmpty) {
+          if (filtered.isEmpty) {
             return RefreshIndicator(
               color: AppColors.primary,
               onRefresh: _onRefresh,
@@ -439,20 +519,21 @@ class _ActivityPageState extends State<ActivityPage>
             );
           }
 
-          return RefreshIndicator(
+          final pageItems = _visiblePageForCurrentTab();
+          return Column(
+            children: [
+              Expanded(
+                child: RefreshIndicator(
             color: AppColors.primary,
             onRefresh: _onRefresh,
             child: ListView.separated(
               controller: _scrollController,
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 20),
-              itemCount: visible.length + (_controller.loadingMore ? 1 : 0),
+              itemCount: pageItems.length,
               separatorBuilder: (_, __) => const SizedBox(height: 10),
               itemBuilder: (context, index) {
-                if (index >= visible.length) {
-                  return const ActivityFeedLoadMoreSkeleton();
-                }
-                final item = visible[index];
+                final item = pageItems[index];
                 return Container(
                   key: ValueKey(item.id),
                   decoration: BoxDecoration(
@@ -480,6 +561,22 @@ class _ActivityPageState extends State<ActivityPage>
                 );
               },
             ),
+                ),
+              ),
+              if (filtered.isNotEmpty)
+                PagedNavigationBar(
+                  currentPage1Based: _tabDisplayPage1Based(),
+                  totalPages: _tabTotalPages(),
+                  canGoPrevious: _canGoPrevActivity(),
+                  canGoNext: _canGoNextActivity(),
+                  isLoadingNext: _controller.loadingMore,
+                  onPrevious: _goPrevActivity,
+                  onNext: () {
+                    unawaited(_goNextActivity());
+                  },
+                  showTopDivider: true,
+                ),
+            ],
           );
         },
       ),

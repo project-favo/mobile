@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../config/app_background_timers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_text_styles.dart';
@@ -53,7 +54,7 @@ class _HomeHeroCarouselState extends State<HomeHeroCarousel> {
   void initState() {
     super.initState();
     _pageController = PageController(viewportFraction: 1);
-    _autoTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    _autoTimer = Timer.periodic(AppBackgroundTimers.homeHeroCarousel, (_) {
       if (!mounted || !_pageController.hasClients) return;
       final next = (_page + 1) % _slides.length;
       _pageController.animateToPage(

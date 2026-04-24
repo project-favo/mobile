@@ -13,6 +13,7 @@ import '../../../../core/utils/error_handler.dart';
 import '../../../../core/utils/exceptions.dart';
 import '../../../../core/utils/session_helper.dart';
 import '../../../../core/config/api_config.dart';
+import '../../../../core/config/app_background_timers.dart';
 import '../../../../core/utils/resolve_media_url.dart';
 import '../../data/repositories/message_repository.dart';
 import '../../data/models/conversation_dto.dart';
@@ -451,7 +452,7 @@ class _ChatDetailPageState extends State<ChatDetailPage>
 
   void _startPolling() {
     _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+    _pollTimer = Timer.periodic(AppBackgroundTimers.chatThreadPoll, (_) {
       _refreshMessagesSilently();
     });
   }

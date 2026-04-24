@@ -65,14 +65,14 @@ void main() {
   });
 
   group('isFriendsFeedItemForUi', () {
-    test('hides when actor inactive', () {
+    test('hides when actor account deactivated (API flag)', () {
       final fromJson = FriendsFeedItemDto.fromJson({
         'id': '1',
         'type': 'REVIEW',
         'actorUserId': '2',
         'actorUserName': 'U',
         'productId': 'p1',
-        'isActive': false,
+        'actorAccountDeactivated': true,
       });
       expect(isFriendsFeedItemForUi(fromJson), isFalse);
     });

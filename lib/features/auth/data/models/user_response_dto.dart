@@ -179,6 +179,26 @@ class UserResponseDto {
   factory UserResponseDto.fromJson(Map<String, dynamic> json) {
     final m = _asUserMap(json);
     final inactive = isUserAccountInactiveInMap(m);
+    final firstName = _firstString(m, ['name', 'firstName', 'first_name', 'givenName']);
+    final lastName = _firstString(m, ['surname', 'lastName', 'last_name', 'familyName']);
+    final fullNameRaw = _firstString(m, ['fullName', 'full_name', 'displayName']);
+    String? normalizedName = firstName;
+    String? normalizedSurname = lastName;
+    if ((normalizedName == null || normalizedName.isEmpty) &&
+        (normalizedSurname == null || normalizedSurname.isEmpty) &&
+        fullNameRaw != null &&
+        fullNameRaw.isNotEmpty) {
+      final parts = fullNameRaw
+          .split(RegExp(r'\s+'))
+          .where((p) => p.trim().isNotEmpty)
+          .toList();
+      if (parts.isNotEmpty) {
+        normalizedName = parts.first;
+        if (parts.length > 1) {
+          normalizedSurname = parts.sublist(1).join(' ');
+        }
+      }
+    }
 
     String? imageUrl = _firstString(m, [
       'profileImageUrl',
@@ -209,8 +229,8 @@ class UserResponseDto {
       id: _coerceUserId(m),
       email: m['email']?.toString() ?? '',
       userName: _firstString(m, ['userName', 'username', 'user_name']) ?? '',
-      name: m['name']?.toString(),
-      surname: m['surname']?.toString(),
+      name: normalizedName,
+      surname: normalizedSurname,
       birthdate: m['birthdate']?.toString(),
       profileImageUrl: imageUrl,
       profilePhotoData: photoData,

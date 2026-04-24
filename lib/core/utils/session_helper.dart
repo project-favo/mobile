@@ -9,6 +9,8 @@ import '../config/api_config.dart';
 import 'exceptions.dart';
 import 'review_report_storage.dart';
 import '../cache/app_session_cache.dart';
+import '../config/app_background_timers.dart';
+import 'app_logger.dart';
 
 /// Session management helper
 /// Handles backend session establishment and token management
@@ -20,7 +22,6 @@ class SessionHelper {
   bool _sessionEstablished = false;
   DateTime? _lastLoginTime;
   static const Duration _sessionValidDuration = Duration(minutes: 30);
-  static const Duration _accountStatusCheckInterval = Duration(seconds: 60);
   static const String _deactivatedTitle = 'Account Deactivated';
   static const String _deactivatedNotice =
       'Your account has been deactivated by admin.\n\n'
@@ -28,16 +29,18 @@ class SessionHelper {
   Timer? _accountStatusTimer;
   bool _isHandlingDeactivatedState = false;
 
-  /// Ensures backend session is established
-  /// Firebase token is always refreshed with [getIdToken(true)]; backend login
-  /// is only repeated when the local session window expired.
-  Future<String?> ensureSession() async {
+  /// Gerekirse backend oturumu kurar.
+  ///
+  /// Firebase: [getIdToken] varsayılan olarak geçerli ID token döner, süresi dolmuşsa
+  /// SDK yeniler. [getIdToken(true)] yalnızca [forceIdTokenRefresh] veya 401/özel
+  /// kurtarma yollarında kullanılır; her çağrıda zorunlu tazelik pil ve ağ israfıdır.
+  Future<String?> ensureSession({bool forceIdTokenRefresh = false}) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       return null;
     }
 
-    final freshToken = await user.getIdToken(true);
+    final freshToken = await user.getIdToken(forceIdTokenRefresh);
     if (freshToken == null) {
       return null;
     }
@@ -89,27 +92,32 @@ class SessionHelper {
             startAccountStatusMonitoring();
             return refreshedToken;
           }
-        } catch (_) {
-          // Ignore refresh errors
+        } catch (e, st) {
+          AppLogger.warnSilencedError(
+            'ensureSession 401 retry',
+            e,
+            st,
+          );
         }
       }
       _sessionEstablished = true;
       _lastLoginTime = DateTime.now();
       return freshToken;
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.warnSilencedError('ensureSession outer catch', e, st);
       ApiClient().setAuthToken(freshToken);
       return freshToken;
     }
   }
 
-  /// Gets Firebase ID token and sets it in API client
-  Future<String?> getTokenAndSetHeader() async {
+  /// API istemcisi için ID token. Varsayılan [forceRefresh] yok; [ensureSession] ile aynı ilke.
+  Future<String?> getTokenAndSetHeader({bool forceRefresh = false}) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       return null;
     }
 
-    final token = await user.getIdToken(true);
+    final token = await user.getIdToken(forceRefresh);
     if (token != null) {
       ApiClient().setAuthToken(token);
       startAccountStatusMonitoring();
@@ -139,13 +147,13 @@ class SessionHelper {
   Future<String?> refreshSession() async {
     _sessionEstablished = false;
     _lastLoginTime = null;
-    return await ensureSession();
+    return ensureSession(forceIdTokenRefresh: true);
   }
 
   void startAccountStatusMonitoring() {
     _accountStatusTimer?.cancel();
     _accountStatusTimer = Timer.periodic(
-      _accountStatusCheckInterval,
+      AppBackgroundTimers.accountStatusCheck,
       (_) => unawaited(_checkAccountStatus()),
     );
   }
@@ -158,7 +166,7 @@ class SessionHelper {
       return;
     }
     try {
-      final token = await user.getIdToken(true);
+      final token = await user.getIdToken(false);
       if (token == null) return;
       ApiClient().setAuthToken(token);
       final response = await ApiClient().dio.get(ApiConfig.mePath);
@@ -169,7 +177,9 @@ class SessionHelper {
       if (_looksLikeDeactivatedAccountFromDio(e)) {
         await _handleAccountDeactivated();
       }
-    } catch (_) {}
+    } catch (e, st) {
+      AppLogger.warnSilencedError('SessionHelper._checkAccountStatus', e, st);
+    }
   }
 
   bool _looksLikeDeactivatedAccountFromMe(dynamic data) {

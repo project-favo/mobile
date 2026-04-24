@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../../../core/cache/following_id_set_cache.dart';
 import '../../../core/cache/friend_feed_memory_cache.dart';
+import '../../../core/navigation/app_route_observer.dart';
 import '../../../core/cache/product_memory_cache.dart';
 import '../data/models/product_dto.dart';
 import '../data/models/tag_dto.dart';
@@ -11,6 +13,9 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/utils/load_profile_image_bytes.dart';
+import '../../../core/config/list_paging.dart';
+import '../data/utils/notification_remote_user_filter.dart';
+import '../../../core/widgets/paged_navigation_bar.dart';
 import '../../../core/utils/user_profile_navigation.dart';
 import '../../../core/widgets/main_bottom_nav_items.dart';
 import '../../../features/activity/data/friends_feed_activity_mapper.dart';
@@ -36,7 +41,11 @@ class FriendFeedPage extends StatefulWidget {
   State<FriendFeedPage> createState() => _FriendFeedPageState();
 }
 
-class _FriendFeedPageState extends State<FriendFeedPage> {
+class _FriendFeedPageState extends State<FriendFeedPage>
+    with SingleTickerProviderStateMixin, RouteAware {
+  late final TabController _tabController;
+  final List<int> _pageInTab = [0, 0, 0];
+  int _lastTabIndex = 0;
   final FriendsFeedRepository _repository = FriendsFeedRepository();
   final InteractionRepository _interactions = InteractionRepository();
   final SessionHelper _sessionHelper = SessionHelper();
@@ -49,9 +58,7 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
   bool _loadingFirst = true;
   bool _loadingMore = false;
   String? _error;
-  Timer? _feedPollTimer;
   bool _loadFirstInFlight = false;
-  static const _feedPollInterval = Duration(seconds: 5);
 
   Route<T> _instantRoute<T>(Widget page) {
     return PageRouteBuilder<T>(
@@ -64,6 +71,15 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(() {
+      if (_tabController.indexIsChanging) return;
+      final i = _tabController.index;
+      if (i != _lastTabIndex) {
+        _lastTabIndex = i;
+        setState(() => _pageInTab[i] = 0);
+      }
+    });
     final warm = FriendFeedMemoryCache.instance.peek();
     if (warm != null && warm.items.isNotEmpty) {
       _items
@@ -74,7 +90,7 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
       _loadingFirst = false;
       _prefetchItemVisuals(_items);
       _mergeFollowFromGlobalCache();
-      unawaited(_syncFollowingForCurrentItems());
+      unawaited(_syncFollowingForCurrentItems(refetchFollowingSet: true));
       unawaited(_loadFirst(background: true));
     } else {
       unawaited(
@@ -86,14 +102,28 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
       );
       unawaited(_loadFirst());
     }
-    _feedPollTimer = Timer.periodic(_feedPollInterval, (_) {
-      unawaited(_loadFirst(background: true));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final route = ModalRoute.of(context);
+      if (route is PageRoute<dynamic>) {
+        appRouteObserver.subscribe(this, route);
+      }
     });
   }
 
   @override
+  void didPopNext() {
+    unawaited(_loadFirst(
+      background: _items.isNotEmpty,
+      refreshUserListability: true,
+    ));
+  }
+
+  @override
   void dispose() {
-    _feedPollTimer?.cancel();
+    appRouteObserver.unsubscribe(this);
+    FriendFeedMemoryCache.instance.clear();
+    _tabController.dispose();
     super.dispose();
   }
 
@@ -110,7 +140,9 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
     }
   }
 
-  Future<void> _syncFollowingForCurrentItems() async {
+  Future<void> _syncFollowingForCurrentItems({
+    bool refetchFollowingSet = false,
+  }) async {
     final token = await _sessionHelper.ensureSession();
     if (token == null) return;
     final ids = _items.map((e) => e.user.id).where((id) => id.isNotEmpty).toSet();
@@ -120,6 +152,7 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
         _interactions,
         AuthService(),
         _sessionHelper,
+        force: refetchFollowingSet,
       );
       final my = FollowingIdSetCache.instance.snapshot;
       for (final id in ids) {
@@ -163,7 +196,10 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
     }
   }
 
-  Future<void> _loadFirst({bool background = false}) async {
+  Future<void> _loadFirst({
+    bool background = false,
+    bool refreshUserListability = false,
+  }) async {
     if (_loadFirstInFlight) return;
     _loadFirstInFlight = true;
     if (!background) {
@@ -175,11 +211,14 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
       _error = null;
     }
     try {
+      if (refreshUserListability) {
+        RemoteNotificationUserListabilityCache.instance.clear();
+      }
       final pageSize = background
           ? (_items.isEmpty
-              ? 20
-              : _items.length.clamp(20, 50))
-          : 20;
+              ? kStandardListPageSize
+              : _items.length.clamp(kStandardListPageSize, 50))
+          : kStandardListPageSize;
       final res = await _repository.getFriendsFeed(page: 0, size: pageSize);
       final mapped = activityItemsFromFriendsFeedDtos(res.content);
       if (!mounted) return;
@@ -197,7 +236,7 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
         totalPages: _totalPages,
       );
       _prefetchItemVisuals(_items);
-      await _syncFollowingForCurrentItems();
+      await _syncFollowingForCurrentItems(refetchFollowingSet: true);
     } catch (e) {
       if (background && _items.isNotEmpty) {
         // keep stale list
@@ -214,7 +253,10 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
   Future<void> _loadMore() async {
     setState(() => _loadingMore = true);
     try {
-      final res = await _repository.getFriendsFeed(page: _page + 1, size: 20);
+      final res = await _repository.getFriendsFeed(
+        page: _page + 1,
+        size: kStandardListPageSize,
+      );
       if (!mounted) return;
       setState(() {
         final mapped = activityItemsFromFriendsFeedDtos(res.content);
@@ -228,7 +270,7 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
         totalPages: _totalPages,
       );
       _prefetchItemVisuals(_items);
-      await _syncFollowingForCurrentItems();
+      await _syncFollowingForCurrentItems(refetchFollowingSet: true);
     } catch (_) {
       // best effort pagination
     } finally {
@@ -321,11 +363,85 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
   List<ActivityItem> get _likes =>
       _items.where((e) => e.type == ActivityType.like).toList();
 
+  List<ActivityItem> _tabSource(int tab) {
+    switch (tab) {
+      case 1:
+        return _reviews;
+      case 2:
+        return _likes;
+      default:
+        return _items;
+    }
+  }
+
+  int _displayPage1Based(int tab) {
+    final s = _tabSource(tab);
+    if (s.isEmpty) return 1;
+    var p = _pageInTab[tab];
+    final maxP = math.max(0, ((s.length - 1) ~/ kStandardListPageSize));
+    if (p > maxP) p = maxP;
+    return p + 1;
+  }
+
+  int _totalTabPages(int tab) {
+    final n = _tabSource(tab).length;
+    if (n == 0) return 1;
+    return ((n - 1) ~/ kStandardListPageSize) + 1;
+  }
+
+  bool _canGoPrevFd(int tab) => _pageInTab[tab] > 0;
+
+  bool _canGoNextFd(int tab) {
+    final s = _tabSource(tab);
+    if (s.isEmpty) return false;
+    final p = _pageInTab[tab];
+    if ((p + 1) * kStandardListPageSize < s.length) return true;
+    return _page + 1 < _totalPages;
+  }
+
+  List<ActivityItem> _slicedForTab(int tab) {
+    final s = _tabSource(tab);
+    if (s.isEmpty) return const [];
+    var p = _pageInTab[tab];
+    final maxP = math.max(0, ((s.length - 1) ~/ kStandardListPageSize));
+    if (p > maxP) p = maxP;
+    final start = p * kStandardListPageSize;
+    if (start >= s.length) return const [];
+    final end = math.min(start + kStandardListPageSize, s.length);
+    return s.sublist(start, end);
+  }
+
+  Future<void> _goNextFd(int tab) async {
+    if (!_canGoNextFd(tab)) return;
+    var p = _pageInTab[tab];
+    var s = _tabSource(tab);
+    if ((p + 1) * kStandardListPageSize < s.length) {
+      setState(() => _pageInTab[tab] = p + 1);
+      return;
+    }
+    if (_page + 1 >= _totalPages) return;
+    var guard = 40;
+    while (_page + 1 < _totalPages && guard-- > 0) {
+      final before = _items.length;
+      await _loadMore();
+      if (!mounted) return;
+      s = _tabSource(tab);
+      if ((p + 1) * kStandardListPageSize < s.length) {
+        setState(() => _pageInTab[tab] = p + 1);
+        return;
+      }
+      if (_items.length == before) break;
+    }
+  }
+
+  void _goPrevFd(int tab) {
+    if (_pageInTab[tab] <= 0) return;
+    setState(() => _pageInTab[tab]--);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 3,
-      child: Scaffold(
+    return Scaffold(
         backgroundColor: AppColors.background.withValues(alpha: 0.96),
         appBar: AppBar(
           backgroundColor: AppColors.surface,
@@ -350,6 +466,7 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                   child: TabBar(
+                    controller: _tabController,
                     isScrollable: false,
                     indicator: BoxDecoration(
                       color: AppColors.primary,
@@ -393,22 +510,26 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
                     ),
                   )
                 : TabBarView(
+                    controller: _tabController,
                     children: [
-                      _buildList(_items),
-                      _buildList(_reviews),
-                      _buildList(_likes),
+                      _buildList(0),
+                      _buildList(1),
+                      _buildList(2),
                     ],
                   ),
         bottomNavigationBar: _buildBottomNav(),
-      ),
     );
   }
 
-  Widget _buildList(List<ActivityItem> list) {
+  Widget _buildList(int tabIndex) {
+    final list = _tabSource(tabIndex);
     if (list.isEmpty) {
       return RefreshIndicator(
         color: AppColors.primary,
-        onRefresh: () => _loadFirst(background: _items.isNotEmpty),
+        onRefresh: () => _loadFirst(
+              background: _items.isNotEmpty,
+              refreshUserListability: true,
+            ),
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(AppSpacing.xLarge),
@@ -419,29 +540,23 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
         ),
       );
     }
-    return NotificationListener<ScrollNotification>(
-      onNotification: (notification) {
-        if (notification.metrics.pixels >=
-            notification.metrics.maxScrollExtent - 200) {
-          if (!_loadingMore && !_loadingFirst && _page + 1 < _totalPages) {
-            unawaited(_loadMore());
-          }
-        }
-        return false;
-      },
-      child: RefreshIndicator(
+    final slice = _slicedForTab(tabIndex);
+    return Column(
+      children: [
+        Expanded(
+          child: RefreshIndicator(
         color: AppColors.primary,
-        onRefresh: () => _loadFirst(background: _items.isNotEmpty),
+        onRefresh: () => _loadFirst(
+              background: _items.isNotEmpty,
+              refreshUserListability: true,
+            ),
         child: ListView.separated(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 20),
-          itemCount: list.length + (_loadingMore ? 1 : 0),
+          itemCount: slice.length,
           separatorBuilder: (_, __) => const SizedBox(height: 10),
           itemBuilder: (context, index) {
-            if (index >= list.length) {
-              return const ActivityFeedLoadMoreSkeleton();
-            }
-            final item = list[index];
+            final item = slice[index];
             return Container(
               key: ValueKey(item.id),
               decoration: BoxDecoration(
@@ -478,6 +593,21 @@ class _FriendFeedPageState extends State<FriendFeedPage> {
           },
         ),
       ),
+        ),
+        if (list.isNotEmpty)
+          PagedNavigationBar(
+            currentPage1Based: _displayPage1Based(tabIndex),
+            totalPages: _totalTabPages(tabIndex),
+            canGoPrevious: _canGoPrevFd(tabIndex),
+            canGoNext: _canGoNextFd(tabIndex),
+            isLoadingNext: _loadingMore,
+            onPrevious: () => _goPrevFd(tabIndex),
+            onNext: () {
+              unawaited(_goNextFd(tabIndex));
+            },
+            showTopDivider: true,
+          ),
+      ],
     );
   }
 }

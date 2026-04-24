@@ -249,6 +249,35 @@ class AuthService {
     }
   }
 
+  Future<List<UserResponseDto>> searchUsers(String query, {int size = 20}) async {
+    final user = _firebaseAuth.currentUser;
+    if (user == null) return const [];
+    try {
+      final idToken = await _getFreshIdToken(user);
+      return _authRepository.searchUsers(idToken, query, size: size);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<List<UserResponseDto>> fetchUserDirectory({
+    int maxPages = 10,
+    int pageSize = 100,
+  }) async {
+    final user = _firebaseAuth.currentUser;
+    if (user == null) return const [];
+    try {
+      final idToken = await _getFreshIdToken(user);
+      return _authRepository.fetchUserDirectory(
+        idToken,
+        maxPages: maxPages,
+        pageSize: pageSize,
+      );
+    } catch (_) {
+      return const [];
+    }
+  }
+
   /// [GET /api/users/{userId}/profile-image] — pasif **404**; genel [getUserById] JSON’undaki
   /// profil URL’si sızıntısını UI’da bununla baskıla.
   Future<UserProfileImageFetch?> fetchUserProfileImage(String userId) async {
