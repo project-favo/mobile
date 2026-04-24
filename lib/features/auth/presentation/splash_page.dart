@@ -96,7 +96,7 @@ class _SplashPageState extends State<SplashPage>
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: AppColors.primary.withOpacity(0.3),
+                              color: AppColors.primary.withValues(alpha: 0.3),
                               blurRadius: 30,
                               spreadRadius: 5,
                             ),
@@ -106,7 +106,7 @@ class _SplashPageState extends State<SplashPage>
                           child: Container(
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: AppColors.primary.withOpacity(0.05),
+                              color: AppColors.primary.withValues(alpha: 0.05),
                             ),
                             child: Image.asset(
                               'assets/images/circle_logo2.png',
@@ -145,19 +145,8 @@ class _SplashPageState extends State<SplashPage>
                           ),
                         ),
                       ),
-                      const SizedBox(height: AppSpacing.xLarge),
-                      
-                      // App name with animation
-                      Text(
-                        'FAVO',
-                        style: AppTextStyles.heading1.copyWith(
-                          fontSize: 48,
-                          color: AppColors.primary,
-                          letterSpacing: 2,
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.medium),
-                      
+                      const SizedBox(height: AppSpacing.large),
+
                       // Tagline
                       Text(
                         'Discover. Review. Share.',

@@ -65,6 +65,17 @@ class ReviewDto {
     return isProductNotListedFromJsonMap(json);
   }
 
+  /// Backend farklı anahtarlar kullanabildiği için metin alanlarını sırayla okur.
+  static String? _firstNonEmptyString(Map<String, dynamic> json, List<String> keys) {
+    for (final k in keys) {
+      final v = json[k];
+      if (v == null) continue;
+      final s = v.toString().trim();
+      if (s.isNotEmpty) return s;
+    }
+    return null;
+  }
+
   factory ReviewDto.fromJson(Map<String, dynamic> json) {
     var ownerInactive = false;
     final o = json['owner'];
@@ -74,10 +85,24 @@ class ReviewDto {
     if (!ownerInactive) {
       ownerInactive = isReviewOwnerAccountInactiveSignalsOutsideOwnerBlock(json);
     }
+    final title = _firstNonEmptyString(json, const [
+          'title',
+          'reviewTitle',
+          'subject',
+        ]) ??
+        '';
+    final description = _firstNonEmptyString(json, const [
+      'description',
+      'reviewText',
+      'content',
+      'body',
+      'text',
+      'comment',
+    ]);
     return ReviewDto(
       id: json['id']?.toString() ?? '',
-      title: json['title']?.toString() ?? '',
-      description: json['description']?.toString(),
+      title: title,
+      description: description,
       isCollaborative: json['isCollaborative'] as bool? ?? false,
       rating: (json['rating'] as num?)?.toInt() ?? 0,
       createdAt: json['createdAt']?.toString() ?? '',
@@ -135,12 +160,29 @@ class ReviewMediaDto {
   });
 
   factory ReviewMediaDto.fromJson(Map<String, dynamic> json) {
+    final id = ReviewDto._firstNonEmptyString(json, const [
+          'id',
+          'mediaId',
+          'reviewMediaId',
+          'fileId',
+          'attachmentId',
+        ]) ??
+        '';
     return ReviewMediaDto(
-      id: json['id']?.toString() ?? '',
+      id: id,
       mimeType: json['mimeType']?.toString() ?? '',
       uploadDate: json['uploadDate']?.toString() ?? '',
-      url: json['url']?.toString(),
-      imageUrl: json['imageUrl']?.toString(),
+      url: ReviewDto._firstNonEmptyString(json, const [
+        'url',
+        'mediaUrl',
+        'src',
+        'fileUrl',
+      ]),
+      imageUrl: ReviewDto._firstNonEmptyString(json, const [
+        'imageUrl',
+        'thumbnailUrl',
+        'previewUrl',
+      ]),
     );
   }
 
@@ -197,18 +239,28 @@ class CreateReviewRequestDto {
 }
 
 class ReviewMediaRequestDto {
-  final List<int> imageData; // Base64 veya binary data
-  final String mimeType;
+  /// PUT ile korunacak mevcut medya (sunucu `id` bekler).
+  final String? existingMediaId;
+  final List<int>? imageData;
+  final String? mimeType;
 
-  ReviewMediaRequestDto({
-    required this.imageData,
-    required this.mimeType,
-  });
+  const ReviewMediaRequestDto.upload({
+    required List<int> this.imageData,
+    required String this.mimeType,
+  }) : existingMediaId = null;
+
+  const ReviewMediaRequestDto.retain({required String this.existingMediaId})
+      : imageData = null,
+        mimeType = null;
 
   Map<String, dynamic> toJson() {
+    final id = existingMediaId?.trim();
+    if (id != null && id.isNotEmpty) {
+      return {'id': id};
+    }
     return {
-      'imageData': imageData,
-      'mimeType': mimeType,
+      'imageData': imageData!,
+      'mimeType': mimeType ?? 'image/jpeg',
     };
   }
 }

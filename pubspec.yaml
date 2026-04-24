@@ -48,6 +48,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   firebase_messaging: ^15.2.10
   app_badge_plus: ^1.2.9
+  slide_to_act: ^2.0.2
 
 
 
