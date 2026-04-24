@@ -41,6 +41,20 @@ class _LikeCountCache {
   }
 }
 
+class _RatingCache {
+  static final Map<String, double> _cache = {};
+
+  static double? get(String productId) => _cache[productId];
+
+  static void set(String productId, double rating) {
+    _cache[productId] = rating;
+  }
+
+  static void remove(String productId) {
+    _cache.remove(productId);
+  }
+}
+
 class ProductCard extends StatefulWidget {
   final String imageUrl;
   final String title;
@@ -55,6 +69,7 @@ class ProductCard extends StatefulWidget {
 
   /// Grid/listelerde `false` bırakın: her kart için review API çağrısı yapılmaz (çok daha hızlı).
   final bool loadReviewCount;
+  final bool fetchSocialCounts;
 
   /// Avatar URL'leri — bu ürünü beğenen takip edilen kullanıcılar.
   /// Boş liste ise hiç gösterilmez.
@@ -71,6 +86,7 @@ class ProductCard extends StatefulWidget {
     required this.productId,
     this.isFavorite = false,
     this.loadReviewCount = false,
+    this.fetchSocialCounts = true,
     this.friendAvatarUrls = const [],
     this.onTap,
     this.onFavoriteTap,
@@ -83,6 +99,7 @@ class ProductCard extends StatefulWidget {
 class _ProductCardState extends State<ProductCard> {
   int? _reviewCount;
   int? _likeCount;
+  double? _resolvedRating;
   static const double _titleBlockHeight = 56;
   static const double _metaRowHeight = 18;
 
@@ -92,7 +109,10 @@ class _ProductCardState extends State<ProductCard> {
     if (widget.loadReviewCount) {
       _reviewCount = _ReviewCountCache.get(widget.productId);
       _likeCount = _LikeCountCache.get(widget.productId);
-      _loadSocialCounts();
+      _resolvedRating = _RatingCache.get(widget.productId);
+      if (widget.fetchSocialCounts) {
+        _loadSocialCounts();
+      }
     }
   }
 
@@ -109,9 +129,13 @@ class _ProductCardState extends State<ProductCard> {
       }
       return;
     }
+    if (!oldWidget.fetchSocialCounts && widget.fetchSocialCounts) {
+      _loadSocialCounts();
+    }
     // Ana sayfa: [seedProductCardSocialCaches] / parent [setState] sonrası önbellekten oku
     final rc = _ReviewCountCache.get(widget.productId);
     final lc = _LikeCountCache.get(widget.productId);
+    final rr = _RatingCache.get(widget.productId);
     var needBuild = false;
     if (rc != null && rc != _reviewCount) {
       _reviewCount = rc;
@@ -119,6 +143,10 @@ class _ProductCardState extends State<ProductCard> {
     }
     if (lc != null && lc != _likeCount) {
       _likeCount = lc;
+      needBuild = true;
+    }
+    if (rr != null && rr != _resolvedRating) {
+      _resolvedRating = rr;
       needBuild = true;
     }
     if (oldWidget.isFavorite != widget.isFavorite) {
@@ -148,11 +176,15 @@ class _ProductCardState extends State<ProductCard> {
       );
       final likeCount = futures[1] as int;
       final count = reviews.length;
+      final sumRating = reviews.fold<int>(0, (sum, r) => sum + r.rating);
+      final computedRating = count > 0 ? (sumRating / count) : 0.0;
       _ReviewCountCache.set(widget.productId, count);
       _LikeCountCache.set(widget.productId, likeCount);
+      _RatingCache.set(widget.productId, computedRating);
       setState(() {
         _reviewCount = count;
         _likeCount = likeCount;
+        _resolvedRating = computedRating;
       });
     } catch (_) {
       if (!mounted) return;
@@ -273,7 +305,7 @@ class _ProductCardState extends State<ProductCard> {
                       ),
                     );
                   }
-                  final raw = widget.rating;
+                  final raw = _resolvedRating ?? widget.rating;
                   if (!productHasMeaningfulRating(raw)) {
                     return Align(
                       alignment: Alignment.centerLeft,
@@ -458,6 +490,7 @@ void invalidateProductCardSocialCaches(String productId) {
   if (productId.isEmpty) return;
   _ReviewCountCache.remove(productId);
   _LikeCountCache.remove(productId);
+  _RatingCache.remove(productId);
 }
 
 /// Detay ekranından dönmeden hemen (sunucu refetch yok) grid sayılarını doldurur; flash yapmaz.
@@ -465,10 +498,14 @@ void seedProductCardSocialCaches(
   String productId, {
   required int likeCount,
   required int reviewCount,
+  double? rating,
 }) {
   if (productId.isEmpty) return;
   _LikeCountCache.set(productId, likeCount);
   _ReviewCountCache.set(productId, reviewCount);
+  if (rating != null) {
+    _RatingCache.set(productId, rating);
+  }
 }
 
 /// Sunucudan gelen sayaçlarla in-memory cache’i günceller; kartı söküp [invalidate] etmez
@@ -477,10 +514,14 @@ void setProductCardSocialCaches(
   String productId, {
   required int likeCount,
   required int reviewCount,
+  double? rating,
 }) {
   if (productId.isEmpty) return;
   _LikeCountCache.set(productId, likeCount);
   _ReviewCountCache.set(productId, reviewCount);
+  if (rating != null) {
+    _RatingCache.set(productId, rating);
+  }
 }
 
 /// Ana sayfa grid’de like toggler; in-memory like sayacını [seed] değerinin üstüne tekrar +1 eklemesin.

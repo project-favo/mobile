@@ -1,12 +1,15 @@
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
+import '../../../core/cache/current_user_cache.dart';
 import '../../../core/cache/following_id_set_cache.dart';
 import '../../../core/cache/search_warm_cache.dart';
 import '../../../core/utils/error_handler.dart';
+import '../../../core/utils/app_logger.dart';
 import '../../../core/utils/session_helper.dart';
 import '../../../core/utils/user_profile_navigation.dart';
 import '../../../core/utils/entity_active.dart';
@@ -67,7 +70,10 @@ class _SearchPageState extends State<SearchPage> {
   String? _firebaseIdToken;
   bool _notificationSvcAttached = false;
   Timer? _topReviewersRefreshTimer;
+  Timer? _searchDebounce;
   String? _currentUserId;
+  final Set<String> _productLikeInFlight = <String>{};
+  final Set<String> _socialCountsInFlight = <String>{};
 
   /// GET /api/reviews/top-reviewers — giriş yapmışken dolar
   List<TopReviewerDto> _topReviewers = [];
@@ -90,6 +96,10 @@ class _SearchPageState extends State<SearchPage> {
   @override
   void initState() {
     super.initState();
+    final warmUserId = CurrentUserCache.instance.userId?.trim();
+    if (warmUserId != null && warmUserId.isNotEmpty) {
+      _currentUserId = warmUserId;
+    }
     unawaited(
       FollowingIdSetCache.instance.ensureLoaded(
         _interactionRepository,
@@ -103,6 +113,7 @@ class _SearchPageState extends State<SearchPage> {
     _searchFocusNode.addListener(() {
       setState(() {});
     });
+    unawaited(_loadTopReviewers());
     _loadInitialData();
     unawaited(_loadCurrentUserIdentity());
     unawaited(_loadSocialGraphForSearch());
@@ -111,6 +122,12 @@ class _SearchPageState extends State<SearchPage> {
 
   Future<void> _loadCurrentUserIdentity() async {
     try {
+      final warm = CurrentUserCache.instance.userId?.trim();
+      if (warm != null && warm.isNotEmpty && mounted) {
+        setState(() {
+          _currentUserId = warm;
+        });
+      }
       final token = await _sessionHelper.ensureSession();
       if (token == null || !mounted) return;
       final me = await _authService.getMe();
@@ -118,7 +135,9 @@ class _SearchPageState extends State<SearchPage> {
       setState(() {
         _currentUserId = me.id.trim();
       });
-    } catch (_) {}
+    } catch (e, s) {
+      AppLogger.warnSilencedError('SearchPage._loadCurrentUserIdentity', e, s);
+    }
   }
 
   /// Profil adına göre yerel eşleşme: top reviewers + takip edilen / takipçi.
@@ -228,7 +247,9 @@ class _SearchPageState extends State<SearchPage> {
         _socialSearchUsers = byId.values.toList();
       });
       _recomputeProfileMatchesIfNeeded();
-    } catch (_) {}
+    } catch (e, s) {
+      AppLogger.warnSilencedError('SearchPage._loadSocialGraphForSearch', e, s);
+    }
   }
 
   void _scheduleTopReviewerRefresh() {
@@ -249,6 +270,7 @@ class _SearchPageState extends State<SearchPage> {
     bool silentLoading = false,
   }) async {
     if (!mounted) return;
+    if (_loadingTopReviewers && !force) return;
     final cachedReviewers = SearchWarmCache.instance.peekTopReviewers();
     final cachedAt = SearchWarmCache.instance.peekTopReviewersFetchedAt();
     final cacheIsFresh = !force &&
@@ -290,7 +312,8 @@ class _SearchPageState extends State<SearchPage> {
         _loadingTopReviewers = false;
       });
       _recomputeProfileMatchesIfNeeded();
-    } catch (_) {
+    } catch (e, s) {
+      AppLogger.warnSilencedError('SearchPage._loadTopReviewers', e, s);
       if (mounted) {
         setState(() {
           _topReviewers = [];
@@ -306,6 +329,7 @@ class _SearchPageState extends State<SearchPage> {
       id,
       likeCount: r.likeCount,
       reviewCount: r.reviewCount,
+      rating: r.product.averageRating ?? 0.0,
     );
     if (!mounted) return;
     setState(() {
@@ -340,6 +364,7 @@ class _SearchPageState extends State<SearchPage> {
         productId,
         likeCount: like,
         reviewCount: filterVisibleReviews(reviews).length,
+        rating: updated.averageRating ?? 0.0,
       );
       if (!mounted) return;
       setState(() {
@@ -353,7 +378,150 @@ class _SearchPageState extends State<SearchPage> {
           _allProducts[ai] = updated;
         }
       });
-    } catch (_) {}
+    } catch (e, s) {
+      AppLogger.warnSilencedError('SearchPage._refreshProductAfterReview', e, s);
+    }
+  }
+
+  Future<void> _primeSocialCountsForProducts(
+    List<ProductDto> products, {
+    int maxCount = 8,
+  }) async {
+    final targets = products
+        .map((p) => p.id)
+        .where((id) => id.isNotEmpty && !_socialCountsInFlight.contains(id))
+        .take(maxCount)
+        .toList();
+    if (targets.isEmpty) return;
+    for (final id in targets) {
+      _socialCountsInFlight.add(id);
+    }
+    try {
+      final token = await _sessionHelper.getTokenAndSetHeader();
+      if (token == null) return;
+      final updates = await Future.wait(
+        targets.map((id) async {
+          final pair = await Future.wait([
+            _interactionRepository.getProductLikeCount(id),
+            _reviewRepository.getReviewsByProductId(id, firebaseIdToken: token),
+          ]);
+          final like = pair[0] as int;
+          final visible = filterVisibleReviews(pair[1] as List<ReviewDto>);
+          final reviewCount = visible.length;
+          final sumRating = visible.fold<int>(0, (sum, r) => sum + r.rating);
+          final rating = reviewCount > 0 ? (sumRating / reviewCount) : 0.0;
+          return (id: id, like: like, reviewCount: reviewCount, rating: rating);
+        }),
+      );
+      if (!mounted) return;
+      setState(() {
+        for (final u in updates) {
+          setProductCardSocialCaches(
+            u.id,
+            likeCount: u.like,
+            reviewCount: u.reviewCount,
+            rating: u.rating,
+          );
+          _productCardResync[u.id] = (_productCardResync[u.id] ?? 0) + 1;
+        }
+      });
+    } catch (e, s) {
+      AppLogger.warnSilencedError('SearchPage._primeSocialCountsForProducts', e, s);
+    } finally {
+      for (final id in targets) {
+        _socialCountsInFlight.remove(id);
+      }
+    }
+  }
+
+  void _replaceProductInLocalLists(String productId, ProductDto next) {
+    final si = _searchResults.indexWhere((p) => p.id == productId);
+    if (si != -1) {
+      _searchResults[si] = next;
+    }
+    final ai = _allProducts.indexWhere((p) => p.id == productId);
+    if (ai != -1) {
+      _allProducts[ai] = next;
+    }
+  }
+
+  Future<void> _toggleProductLikeFromSearch(ProductDto product) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Please login to like products'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+    final id = product.id;
+    if (_productLikeInFlight.contains(id)) return;
+    _productLikeInFlight.add(id);
+    try {
+      final currentIndex = _searchResults.indexWhere((p) => p.id == id);
+      final current = currentIndex != -1 ? _searchResults[currentIndex] : product;
+      final beforeLike = current.isLiked ?? false;
+      applyLocalLikeCountDeltaOnToggle(
+        id,
+        wasLiked: beforeLike,
+        isNowLiked: !beforeLike,
+      );
+      if (mounted) {
+        setState(() {
+          _replaceProductInLocalLists(id, current.copyWith(isLiked: !beforeLike));
+        });
+      }
+
+      try {
+        final token = await _sessionHelper.getTokenAndSetHeader();
+        if (token == null) {
+          throw Exception('Failed to get Firebase ID token');
+        }
+        final newLikeStatus = await _interactionRepository.toggleProductLike(
+          token,
+          id,
+        );
+        if (newLikeStatus != !beforeLike) {
+          applyLocalLikeCountDeltaOnToggle(
+            id,
+            wasLiked: !beforeLike,
+            isNowLiked: newLikeStatus,
+          );
+        }
+        if (mounted) {
+          setState(() {
+            final latestIndex = _searchResults.indexWhere((p) => p.id == id);
+            final latest = latestIndex != -1 ? _searchResults[latestIndex] : current;
+            _replaceProductInLocalLists(id, latest.copyWith(isLiked: newLikeStatus));
+          });
+        }
+      } catch (e) {
+        applyLocalLikeCountDeltaOnToggle(
+          id,
+          wasLiked: !beforeLike,
+          isNowLiked: beforeLike,
+        );
+        if (mounted) {
+          setState(() {
+            final latestIndex = _searchResults.indexWhere((p) => p.id == id);
+            final latest = latestIndex != -1 ? _searchResults[latestIndex] : current;
+            _replaceProductInLocalLists(id, latest.copyWith(isLiked: beforeLike));
+          });
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(ErrorHandler.getUserFriendlyMessage(e)),
+              backgroundColor: AppColors.error,
+            ),
+          );
+        }
+      }
+      unawaited(_refreshProductAfterReview(id));
+    } finally {
+      _productLikeInFlight.remove(id);
+    }
   }
 
   Future<void> _hookNotificationsIfSignedIn() async {
@@ -370,6 +538,7 @@ class _SearchPageState extends State<SearchPage> {
       NotificationRealtimeService.instance.detach();
     }
     _topReviewersRefreshTimer?.cancel();
+    _searchDebounce?.cancel();
     _searchController.dispose();
     _searchFocusNode.dispose();
     super.dispose();
@@ -401,18 +570,22 @@ class _SearchPageState extends State<SearchPage> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      final warmTopReviewers = SearchWarmCache.instance.peekTopReviewers();
+      if (warmTopReviewers.isNotEmpty) {
+        _topReviewers = warmTopReviewers;
+        _loadingTopReviewers = false;
+      }
     });
 
     try {
-      // Token opsiyonel: kategoriler ve ürün listesi token olmadan da döner
-      final token = await _sessionHelper.ensureSession();
-      _firebaseIdToken = token;
-
-      // Önce sadece kategorileri yükle → ekran hemen açılsın
+      // Token opsiyonel: kategoriler için beklemeyelim, ilk ekran daha hızlı açılsın.
+      final tokenFuture = _sessionHelper.ensureSession();
       List<TagDto> rootTags = [];
       try {
-        rootTags = await _tagRepository.getRootTags(token);
+        rootTags = await _tagRepository.getRootTags();
       } catch (_) {}
+      final token = await tokenFuture;
+      _firebaseIdToken = token;
 
       if (!mounted) return;
       setState(() {
@@ -430,7 +603,8 @@ class _SearchPageState extends State<SearchPage> {
           _allProducts = products;
         });
         SearchWarmCache.instance.rememberSeedProducts(products);
-      } catch (_) {
+      } catch (e, s) {
+        AppLogger.warnSilencedError('SearchPage._loadInitialData.getAllProductsRaw', e, s);
         // Ürünler yüklenemezse arama boş kalır, kategoriler çalışır
       }
     } catch (e) {
@@ -459,13 +633,20 @@ class _SearchPageState extends State<SearchPage> {
       List<TagDto> rootTags = [];
       try {
         rootTags = await _tagRepository.getRootTags(token);
-      } catch (_) {}
+      } catch (e, s) {
+        AppLogger.warnSilencedError('SearchPage._refreshInitialDataInBackground.getRootTags', e, s);
+      }
       if (rootTags.isNotEmpty) {
         SearchWarmCache.instance.rememberRootTags(rootTags);
         if (mounted) {
+          final keepCurrentCategoryContext =
+              _searchController.text.trim().isEmpty &&
+              (_categoryPath.isNotEmpty || _showCategoryResults);
           setState(() {
             _rootCategories = rootTags;
-            _currentCategories = rootTags;
+            if (!keepCurrentCategoryContext) {
+              _currentCategories = rootTags;
+            }
           });
         }
       }
@@ -478,8 +659,12 @@ class _SearchPageState extends State<SearchPage> {
             _allProducts = products;
           });
         }
-      } catch (_) {}
-    } catch (_) {}
+      } catch (e, s) {
+        AppLogger.warnSilencedError('SearchPage._refreshInitialDataInBackground.getAllProductsRaw', e, s);
+      }
+    } catch (e, s) {
+      AppLogger.warnSilencedError('SearchPage._refreshInitialDataInBackground', e, s);
+    }
   }
 
   Future<void> _refreshSearchPage() async {
@@ -488,6 +673,22 @@ class _SearchPageState extends State<SearchPage> {
       _loadTopReviewers(force: true, silentLoading: true),
       _loadSocialGraphForSearch(),
     ]);
+    if (_searchController.text.trim().isEmpty &&
+        _showCategoryResults &&
+        _activeLeafCategory != null) {
+      try {
+        final products = await _productRepository.getProductsByTagId(
+          _activeLeafCategory!.id,
+          firebaseIdToken: _firebaseIdToken,
+        );
+        if (mounted) {
+          setState(() {
+            _searchResults = products;
+          });
+        }
+        unawaited(_primeSocialCountsForProducts(products));
+      } catch (_) {}
+    }
     final q = _searchController.text.trim();
     if (q.isNotEmpty && mounted) {
       await _onSearchChanged(q);
@@ -500,7 +701,14 @@ class _SearchPageState extends State<SearchPage> {
     });
 
     try {
-      final response = await _tagRepository.getTagChildren(category.id, _firebaseIdToken);
+      final token = _firebaseIdToken ?? await _sessionHelper.ensureSession();
+      _firebaseIdToken = token;
+      TagChildrenResponse response;
+      try {
+        response = await _tagRepository.getTagChildren(category.id, token);
+      } catch (_) {
+        response = await _tagRepository.getTagChildren(category.id, null);
+      }
       if (response.children.isNotEmpty) {
         setState(() {
           _categoryHistory.add(_currentCategories);
@@ -525,6 +733,7 @@ class _SearchPageState extends State<SearchPage> {
         _searchResults = products;
         _isLoadingCategories = false;
       });
+      unawaited(_primeSocialCountsForProducts(products));
       ReviewPrefetchService.instance.prefetchForProducts(
         products,
         maxCount: 6,
@@ -652,6 +861,7 @@ class _SearchPageState extends State<SearchPage> {
                       desc: product.description ?? '',
                       isFavorite: product.isLiked ?? false,
                       loadReviewCount: true,
+                      fetchSocialCounts: false,
                       onTap: () async {
                         final r = await Navigator.push<ReviewPagePopResult?>(
                           context,
@@ -666,6 +876,9 @@ class _SearchPageState extends State<SearchPage> {
                           unawaited(_refreshProductAfterReview(product.id));
                         }
                       },
+                      onFavoriteTap: () => unawaited(
+                        _toggleProductLikeFromSearch(product),
+                      ),
                     );
                   },
                 )
@@ -733,6 +946,7 @@ class _SearchPageState extends State<SearchPage> {
         _profileSearchMatches = _computeProfileMatches(normalizedQuery);
         _isSearching = false;
       });
+      unawaited(_primeSocialCountsForProducts(results));
       ReviewPrefetchService.instance.prefetchForProducts(
         results,
         maxCount: 6,
@@ -751,6 +965,18 @@ class _SearchPageState extends State<SearchPage> {
     }
   }
 
+  void _handleSearchInputChanged(String query) {
+    _searchDebounce?.cancel();
+    final q = query.trim();
+    if (q.isEmpty) {
+      unawaited(_onSearchChanged(query));
+      return;
+    }
+    _searchDebounce = Timer(const Duration(milliseconds: 180), () {
+      unawaited(_onSearchChanged(query));
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -767,13 +993,6 @@ class _SearchPageState extends State<SearchPage> {
           ),
         ),
         centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded, color: AppColors.primary),
-            tooltip: 'Refresh',
-            onPressed: () => unawaited(_refreshSearchPage()),
-          ),
-        ],
       ),
       body: _isLoading
           ? const SearchPageBodySkeleton()
@@ -788,32 +1007,31 @@ class _SearchPageState extends State<SearchPage> {
                     ),
                   ),
                 )
-              : Padding(
-                  padding: const EdgeInsets.all(AppSpacing.xLarge),
-                  child: Column(
-                    children: [
-                      Container(
-                        decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: _searchFocusNode.hasFocus
-                                ? AppColors.primary
-                                : AppColors.border,
-                            width: _searchFocusNode.hasFocus ? 1.5 : 1.0,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.04),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
+              : LayoutBuilder(
+                  builder: (context, constraints) => RefreshIndicator(
+                    color: AppColors.primary,
+                    onRefresh: _refreshSearchPage,
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      child: SizedBox(
+                        height: constraints.maxHeight,
+                        child: Padding(
+                          padding: const EdgeInsets.all(AppSpacing.xLarge),
+                          child: Column(
+                            children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 140),
+                        curve: Curves.easeOut,
+                        decoration: _premiumSurface(
+                          radius: 18,
+                          borderColor: _searchFocusNode.hasFocus
+                              ? AppColors.primary
+                              : AppColors.border,
                         ),
                         child: TextField(
                           controller: _searchController,
                           focusNode: _searchFocusNode,
-                          onChanged: _onSearchChanged,
+                          onChanged: _handleSearchInputChanged,
                           style: const TextStyle(
                             fontSize: 15,
                             color: AppColors.textPrimary,
@@ -837,7 +1055,7 @@ class _SearchPageState extends State<SearchPage> {
                                 ? GestureDetector(
                                     onTap: () {
                                       _searchController.clear();
-                                      _onSearchChanged('');
+                                      _handleSearchInputChanged('');
                                       _searchFocusNode.unfocus();
                                     },
                                     child: const Icon(
@@ -849,79 +1067,132 @@ class _SearchPageState extends State<SearchPage> {
                                 : null,
                             border: InputBorder.none,
                             contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 14,
+                              horizontal: 18,
+                              vertical: 15,
                             ),
                           ),
                         ),
                       ),
-                      if (_searchController.text.trim().isEmpty && !_showCategoryResults) ...[
-                        if (_loadingTopReviewers)
-                          const Padding(
-                            padding: EdgeInsets.only(bottom: AppSpacing.medium),
-                            child: Center(
-                              child: SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: AppColors.primary,
+                      if (_searchController.text.trim().isEmpty) ...[
+                        if (_loadingTopReviewers && _topReviewers.isEmpty)
+                          Container(
+                            margin: const EdgeInsets.only(top: 10),
+                            padding: const EdgeInsets.fromLTRB(10, 12, 10, 10),
+                            decoration: _premiumSurface(radius: 18),
+                            child: Column(
+                              children: [
+                                const Padding(
+                                  padding: EdgeInsets.only(bottom: 10),
+                                  child: Text(
+                                    'Top 5 Reviewers',
+                                    style: TextStyle(
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppColors.textPrimary,
+                                      letterSpacing: 0.2,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
                                 ),
-                              ),
+                                SizedBox(
+                                  height: 106,
+                                  child: Row(
+                                    children: List.generate(
+                                      5,
+                                      (index) => Expanded(
+                                        child: Padding(
+                                          padding: EdgeInsets.only(
+                                            left: index == 0 ? 0 : 4,
+                                            right: index == 4 ? 0 : 4,
+                                          ),
+                                          child: const _TopReviewerRow(
+                                            data: null,
+                                            isCurrentUser: false,
+                                            onTap: null,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           )
                         else if (_topReviewers.isNotEmpty) ...[
-                          const Padding(
-                            padding: EdgeInsets.only(top: 8, bottom: 10),
-                            child: Text(
-                              'Top 5 Reviewers',
-                              style: TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.textPrimary,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                          SizedBox(
-                            height: 106,
-                            child: Row(
-                              children: List.generate(5, (index) {
-                                final hasData = index < _topReviewers.length;
-                                final t = hasData ? _topReviewers[index] : null;
-                                return Expanded(
-                                  child: Padding(
-                                    padding: EdgeInsets.only(
-                                      left: index == 0 ? 0 : 4,
-                                      right: index == 4 ? 0 : 4,
+                          Container(
+                            margin: const EdgeInsets.only(top: 10),
+                            padding: const EdgeInsets.fromLTRB(10, 12, 10, 10),
+                            decoration: _premiumSurface(radius: 18),
+                            child: Column(
+                              children: [
+                                const Padding(
+                                  padding: EdgeInsets.only(bottom: 10),
+                                  child: Text(
+                                    'Top 5 Reviewers',
+                                    style: TextStyle(
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppColors.textPrimary,
+                                      letterSpacing: 0.2,
                                     ),
-                                    child: _TopReviewerRow(
-                                      data: t,
-                                      isCurrentUser:
-                                          hasData &&
-                                          _currentUserId != null &&
-                                          t!.userId.trim() ==
-                                              _currentUserId!.trim(),
-                                      onTap: hasData
-                                          ? () {
-                                              if (t!.userId.isEmpty) return;
-                                              openUserProfileIfActive(
-                                                context,
-                                                userId: t.userId,
-                                                userName: t.userName,
-                                                profileImageUrl: t.profileImageUrl,
-                                              );
-                                            }
-                                          : null,
-                                    ),
+                                    textAlign: TextAlign.center,
                                   ),
-                                );
-                              }),
+                                ),
+                                SizedBox(
+                                  height: 106,
+                                  child: Row(
+                                    children: List.generate(5, (index) {
+                                      final hasData = index < _topReviewers.length;
+                                      final t = hasData ? _topReviewers[index] : null;
+                                      return Expanded(
+                                        child: Padding(
+                                          padding: EdgeInsets.only(
+                                            left: index == 0 ? 0 : 4,
+                                            right: index == 4 ? 0 : 4,
+                                          ),
+                                          child: _TopReviewerRow(
+                                            data: t,
+                                            isCurrentUser:
+                                                hasData &&
+                                                _currentUserId != null &&
+                                                t!.userId.trim() ==
+                                                    _currentUserId!.trim(),
+                                            onTap: hasData
+                                                ? () {
+                                                    if (t!.userId.isEmpty) return;
+                                                    final meId = _currentUserId?.trim();
+                                                    final tappedId = t.userId.trim();
+                                                    if (meId != null &&
+                                                        meId.isNotEmpty &&
+                                                        tappedId == meId) {
+                                                      Navigator.pushReplacement(
+                                                        context,
+                                                        _noAnimationRoute(
+                                                          const ProfilePage(),
+                                                        ),
+                                                      );
+                                                      return;
+                                                    }
+                                                    openUserProfileIfActive(
+                                                      context,
+                                                      userId: t.userId,
+                                                      userName: t.userName,
+                                                      profileImageUrl: t.profileImageUrl,
+                                                    );
+                                                  }
+                                                : null,
+                                          ),
+                                        ),
+                                      );
+                                    }),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
                       ],
-                      if ((_searchController.text.trim().isEmpty && !_showCategoryResults) &&
+                      if ((_searchController.text.trim().isEmpty) &&
                           (_loadingTopReviewers || _topReviewers.isNotEmpty))
                         const SizedBox(height: AppSpacing.small),
                       const SizedBox(height: AppSpacing.xLarge),
@@ -936,18 +1207,26 @@ class _SearchPageState extends State<SearchPage> {
                                         children: [
                                           Row(
                                             children: [
-                                              TextButton.icon(
+                                              IconButton(
                                                 onPressed: _goBackCategoryLevel,
-                                                style: TextButton.styleFrom(
-                                                  foregroundColor: AppColors.primary,
+                                                icon: const Icon(
+                                                  Icons.arrow_back_ios_new,
+                                                  size: 16,
+                                                  color: AppColors.primary,
                                                 ),
-                                                icon: const Icon(Icons.arrow_back_ios_new, size: 14),
-                                                label: const Text('Back'),
+                                                padding: EdgeInsets.zero,
+                                                constraints: const BoxConstraints(
+                                                  minWidth: 22,
+                                                  minHeight: 22,
+                                                ),
                                               ),
                                               const SizedBox(width: 8),
                                               Expanded(
                                                 child: Text(
-                                                  _activeLeafCategory?.name ?? 'Category',
+                                                  _buildCategoryBreadcrumb(
+                                                    _categoryPath,
+                                                    leaf: _activeLeafCategory,
+                                                  ),
                                                   style: AppTextStyles.bodySecondary,
                                                   maxLines: 1,
                                                   overflow: TextOverflow.ellipsis,
@@ -985,6 +1264,7 @@ class _SearchPageState extends State<SearchPage> {
                                                         desc: product.description ?? '',
                                                         isFavorite: product.isLiked ?? false,
                                                         loadReviewCount: true,
+                                                        fetchSocialCounts: false,
                                                         onTap: () async {
                                                           final r = await Navigator.push<ReviewPagePopResult?>(
                                                             context,
@@ -999,6 +1279,9 @@ class _SearchPageState extends State<SearchPage> {
                                                             unawaited(_refreshProductAfterReview(product.id));
                                                           }
                                                         },
+                                                        onFavoriteTap: () => unawaited(
+                                                          _toggleProductLikeFromSearch(product),
+                                                        ),
                                                       );
                                                     },
                                                   ),
@@ -1020,102 +1303,145 @@ class _SearchPageState extends State<SearchPage> {
                                     : Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          if (_categoryPath.isNotEmpty)
-                                            Row(
-                                              children: [
-                                                TextButton.icon(
-                                                  onPressed: _goBackCategoryLevel,
-                                                  style: TextButton.styleFrom(
-                                                    foregroundColor: AppColors.primary,
-                                                  ),
-                                                  icon: const Icon(Icons.arrow_back_ios_new, size: 14),
-                                                  label: const Text('Back'),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                Expanded(
-                                                  child: Text(
-                                                    _categoryPath.map((e) => e.name).join(' > '),
-                                                    style: AppTextStyles.bodySecondary,
-                                                    maxLines: 1,
-                                                    overflow: TextOverflow.ellipsis,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          if (_categoryPath.isEmpty) ...[
-                                            Padding(
-                                              padding: const EdgeInsets.only(bottom: 10, left: 2),
-                                              child: Text(
-                                                'Browse Categories',
-                                                style: TextStyle(
-                                                  fontSize: 13,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: AppColors.textSecondary,
-                                                  letterSpacing: 0.4,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
                                           Expanded(
-                                            child: ListView.separated(
-                                              padding: EdgeInsets.zero,
-                                              itemCount: _currentCategories.length,
-                                              separatorBuilder: (_, __) => const SizedBox(height: 8),
-                                              itemBuilder: (context, index) {
-                                                final category = _currentCategories[index];
-                                                return Material(
-                                                  color: AppColors.surface,
-                                                  borderRadius: BorderRadius.circular(12),
-                                                  child: InkWell(
-                                                    onTap: () => _openCategory(category),
-                                                    borderRadius: BorderRadius.circular(12),
-                                                    child: Container(
-                                                      decoration: BoxDecoration(
-                                                        borderRadius: BorderRadius.circular(12),
-                                                        border: Border.all(color: AppColors.border, width: 1),
-                                                      ),
-                                                      padding: const EdgeInsets.symmetric(
-                                                        horizontal: 14,
-                                                        vertical: 13,
-                                                      ),
-                                                      child: Row(
-                                                        children: [
-                                                          Container(
-                                                            width: 6,
-                                                            height: 6,
-                                                            decoration: const BoxDecoration(
-                                                              color: AppColors.primary,
-                                                              shape: BoxShape.circle,
-                                                            ),
+                                            child: Container(
+                                              decoration: _premiumSurface(radius: 18),
+                                              padding: const EdgeInsets.fromLTRB(10, 12, 10, 10),
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  if (_categoryPath.isEmpty)
+                                                    const Padding(
+                                                      padding: EdgeInsets.only(bottom: 10),
+                                                      child: Center(
+                                                        child: Text(
+                                                          'Categories',
+                                                          style: TextStyle(
+                                                            fontSize: 22,
+                                                            fontWeight: FontWeight.w800,
+                                                            color: AppColors.textPrimary,
+                                                            letterSpacing: 0.2,
                                                           ),
-                                                          const SizedBox(width: 12),
-                                                          Expanded(
-                                                            child: Text(
-                                                              category.name,
-                                                              style: const TextStyle(
-                                                                fontSize: 15,
-                                                                fontWeight: FontWeight.w500,
-                                                                color: AppColors.textPrimary,
+                                                        ),
+                                                      ),
+                                                    )
+                                                  else ...[
+                                                    Row(
+                                                      children: [
+                                                        IconButton(
+                                                          onPressed: _goBackCategoryLevel,
+                                                          icon: const Icon(
+                                                            Icons.arrow_back_ios_new,
+                                                            size: 14,
+                                                            color: AppColors.primary,
+                                                          ),
+                                                          padding: EdgeInsets.zero,
+                                                          constraints: const BoxConstraints(
+                                                            minWidth: 18,
+                                                            minHeight: 18,
+                                                          ),
+                                                        ),
+                                                        const SizedBox(width: 6),
+                                                        Expanded(
+                                                          child: Text(
+                                                            _categoryPath
+                                                                .map((e) => _formatCategoryLabel(e.name))
+                                                                .join(' > '),
+                                                            style: AppTextStyles.bodySecondary.copyWith(
+                                                              fontWeight: FontWeight.w600,
+                                                            ),
+                                                            maxLines: 1,
+                                                            overflow: TextOverflow.ellipsis,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    const SizedBox(height: 12),
+                                                  ],
+                                                  Expanded(
+                                                    child: ListView.separated(
+                                                      padding: EdgeInsets.zero,
+                                                      itemCount: _currentCategories.length,
+                                                      separatorBuilder: (_, __) => const SizedBox(height: 9),
+                                                      itemBuilder: (context, index) {
+                                                        final category = _currentCategories[index];
+                                                        return Material(
+                                                          color: Colors.transparent,
+                                                          borderRadius: BorderRadius.circular(14),
+                                                          child: InkWell(
+                                                            onTap: () => _openCategory(category),
+                                                            borderRadius: BorderRadius.circular(14),
+                                                            child: Container(
+                                                              decoration: _premiumSurface(radius: 14),
+                                                              padding: const EdgeInsets.symmetric(
+                                                                horizontal: 14,
+                                                                vertical: 13,
+                                                              ),
+                                                              child: Row(
+                                                                crossAxisAlignment: CrossAxisAlignment.center,
+                                                                children: [
+                                                                  Container(
+                                                                    width: 17,
+                                                                    height: 17,
+                                                                    decoration: BoxDecoration(
+                                                                      shape: BoxShape.circle,
+                                                                      color: AppColors.primary.withValues(alpha: 0.08),
+                                                                      border: Border.all(
+                                                                        color: AppColors.primary.withValues(alpha: 0.35),
+                                                                        width: 1,
+                                                                      ),
+                                                                    ),
+                                                                    child: Center(
+                                                                      child: Container(
+                                                                        width: 5,
+                                                                        height: 5,
+                                                                        decoration: const BoxDecoration(
+                                                                          color: AppColors.primary,
+                                                                          shape: BoxShape.circle,
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                                  const SizedBox(width: 12),
+                                                                  Expanded(
+                                                                    child: Align(
+                                                                      alignment: Alignment.centerLeft,
+                                                                      child: Text(
+                                                                        _formatCategoryLabel(category.name),
+                                                                        style: const TextStyle(
+                                                                          fontSize: 15,
+                                                                          fontWeight: FontWeight.w500,
+                                                                          color: AppColors.textPrimary,
+                                                                          height: 1.1,
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                                  const Icon(
+                                                                    Icons.chevron_right_rounded,
+                                                                    size: 18,
+                                                                    color: AppColors.textSecondary,
+                                                                  ),
+                                                                ],
                                                               ),
                                                             ),
                                                           ),
-                                                          const Icon(
-                                                            Icons.chevron_right_rounded,
-                                                            size: 18,
-                                                            color: AppColors.textSecondary,
-                                                          ),
-                                                        ],
-                                                      ),
+                                                        );
+                                                      },
                                                     ),
                                                   ),
-                                                );
-                                              },
+                                                ],
+                                              ),
                                             ),
                                           ),
                                         ],
                                       ),
                       ),
-                    ],
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
       bottomNavigationBar: BottomNavigationBar(
@@ -1179,6 +1505,53 @@ class _ProfileSearchEntry {
   final String? subtitle;
 }
 
+String _formatCategoryLabel(String raw) {
+  final cleaned = raw.trim().replaceAll('_', ' ').replaceAll('-', ' ');
+  if (cleaned.isEmpty) return raw;
+  return cleaned
+      .replaceAllMapped(
+        RegExp(r'([a-z])([A-Z])'),
+        (m) => '${m.group(1)} ${m.group(2)}',
+      )
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+}
+
+String _buildCategoryBreadcrumb(
+  List<TagDto> path, {
+  TagDto? leaf,
+}) {
+  final items = <String>[
+    ...path.map((e) => _formatCategoryLabel(e.name)),
+    if (leaf != null) _formatCategoryLabel(leaf.name),
+  ];
+  return items.join(' > ');
+}
+
+BoxDecoration _premiumSurface({
+  Color color = AppColors.surface,
+  double radius = 16,
+  Color borderColor = AppColors.border,
+}) {
+  return BoxDecoration(
+    color: color,
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: borderColor.withValues(alpha: 0.65), width: 1),
+    boxShadow: [
+      BoxShadow(
+        color: Colors.black.withValues(alpha: 0.03),
+        blurRadius: 14,
+        offset: const Offset(0, 6),
+      ),
+      BoxShadow(
+        color: AppColors.primary.withValues(alpha: 0.02),
+        blurRadius: 10,
+        offset: const Offset(0, 2),
+      ),
+    ],
+  );
+}
+
 class _ProfileSearchHitRow extends StatelessWidget {
   const _ProfileSearchHitRow({
     required this.entry,
@@ -1191,17 +1564,28 @@ class _ProfileSearchHitRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: AppColors.surface,
-      borderRadius: BorderRadius.circular(10),
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
         child: Container(
           width: 172,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.border, width: 1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: AppColors.border.withValues(alpha: 0.75),
+              width: 1,
+            ),
+            color: AppColors.surface,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.025),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
           child: Row(
             children: [
@@ -1267,33 +1651,41 @@ class _TopReviewerRow extends StatelessWidget {
         ? ' '
         : '${data!.reviewCount} ${data!.reviewCount == 1 ? 'review' : 'reviews'}';
     return Material(
-      color: AppColors.surface,
+      color: Colors.transparent,
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(14),
         child: Container(
           width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(4, 6, 4, 4),
+          padding: const EdgeInsets.fromLTRB(4, 6, 4, 5),
           decoration: BoxDecoration(
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: isCurrentUser
                   ? AppColors.primary.withValues(alpha: 0.85)
-                  : AppColors.border,
+                  : AppColors.border.withValues(alpha: 0.7),
               width: isCurrentUser ? 1.4 : 1,
             ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.02),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
+              ),
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(11),
                 child: SizedBox(
-                  width: 40,
-                  height: 40,
+                  width: 42,
+                  height: 42,
                   child: ProfileAvatarImage(
-                    size: 40,
+                    size: 42,
                     imageUrl: data?.profileImageUrl,
                     fallbackInitial: username.isNotEmpty ? username : '?',
                   ),

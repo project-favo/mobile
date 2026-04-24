@@ -38,6 +38,14 @@ class TagChildrenResponse {
 class TagRepository {
   final ApiClient _apiClient = ApiClient();
 
+  List<TagDto> _parseTagList(dynamic raw) {
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((json) => TagDto.fromJson(Map<String, dynamic>.from(json)))
+        .toList();
+  }
+
   /// Fetches root tags from GET /api/tags/roots
   /// Token optional: backend may allow public access
   Future<List<TagDto>> getRootTags([String? firebaseIdToken]) async {
@@ -158,7 +166,35 @@ class TagRepository {
       );
       
       if (response.data is Map) {
-        return TagChildrenResponse.fromJson(response.data as Map<String, dynamic>);
+        final data = Map<String, dynamic>.from(response.data as Map);
+        if (data['children'] is List) {
+          return TagChildrenResponse.fromJson(data);
+        }
+        final nested = data['data'];
+        if (nested is List) {
+          final children = _parseTagList(nested);
+          return TagChildrenResponse(
+            id: parentId,
+            name: data['name']?.toString() ?? '',
+            categoryPath: data['categoryPath']?.toString(),
+            parentId: data['parentId']?.toString(),
+            children: children,
+            isLeaf: children.isEmpty,
+          );
+        }
+        return TagChildrenResponse.fromJson(data);
+      }
+
+      if (response.data is List) {
+        final children = _parseTagList(response.data);
+        return TagChildrenResponse(
+          id: parentId,
+          name: '',
+          categoryPath: null,
+          parentId: null,
+          children: children,
+          isLeaf: children.isEmpty,
+        );
       }
       
       throw Exception('Invalid response format');
