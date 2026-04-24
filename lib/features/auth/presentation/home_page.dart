@@ -312,7 +312,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final map = <String, List<String>>{};
     for (final item in source) {
       if (item.isActorInactive) continue;
-      if (item.type != ActivityType.review && item.type != ActivityType.like) {
+      // Baloncuklar yalnızca gerçekten review bırakan kullanıcıları göstersin.
+      if (item.type != ActivityType.review) {
         continue;
       }
       final productId = item.targetContent?.productId;
@@ -638,33 +639,36 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _isLoadingSubTags = true;
       _isFiltering = true;
       _activeCategoryPathPrefix = rootTag.categoryPath;
+      _isBannerCollapsed = true;
     });
 
-    // Önce ürünleri yükle (kullanıcı hemen sonuç görsün), alt kategoriler arka planda gelsin
-    final token = await _sessionHelper.ensureSession();
-    unawaited(
-      Future(() async {
-        try {
-          final childrenResponse = await _tagRepository.getTagChildren(
-            rootTag.id,
-            token,
-          );
-          if (!mounted) return;
-          setState(() {
-            _subTags = childrenResponse.children;
-            _isLoadingSubTags = false;
-          });
-        } catch (_) {
-          if (!mounted) return;
-          setState(() {
-            _isLoadingSubTags = false;
-            _subTags = [];
-          });
-        }
-      }),
-    );
+    // Alt kategorileri arka planda getir; ürün listesi bloklanmasın.
+    unawaited(_loadSubTagsForRoot(rootTag));
 
     await _loadProductsPage(0);
+  }
+
+  Future<void> _loadSubTagsForRoot(TagDto rootTag) async {
+    try {
+      final token = await _sessionHelper.ensureSession();
+      TagChildrenResponse childrenResponse;
+      try {
+        childrenResponse = await _tagRepository.getTagChildren(rootTag.id, token);
+      } catch (_) {
+        childrenResponse = await _tagRepository.getTagChildren(rootTag.id, null);
+      }
+      if (!mounted) return;
+      setState(() {
+        _subTags = childrenResponse.children;
+        _isLoadingSubTags = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingSubTags = false;
+        _subTags = [];
+      });
+    }
   }
 
   Widget _buildProductGrid() {
@@ -1274,7 +1278,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 fontWeight: FontWeight.w400,
               ),
               decoration: InputDecoration(
-                hintText: 'Search products, brands...',
+                hintText: 'Search products, categories, or brands',
                 hintStyle: TextStyle(
                   fontSize: 14,
                   color: AppColors.textSecondary,
@@ -1534,6 +1538,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   Future<void> _loadData({bool background = false}) async {
+    final wasInCategoryMode =
+        _activeCategoryPathPrefix != null && _selectedCategoryIndex != -1;
+    final previousActivePrefix = _activeCategoryPathPrefix;
+    final previousRootPath =
+        (_selectedCategoryIndex >= 0 && _selectedCategoryIndex < _tags.length)
+            ? _tags[_selectedCategoryIndex].categoryPath
+            : null;
     if (!background) {
       setState(() {
         _isLoading = true;
@@ -1557,14 +1568,41 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       if (!mounted) return;
       setState(() {
         _tags = tags;
-        _activeCategoryPathPrefix = null;
-        _selectedCategoryIndex = -1;
+        if (wasInCategoryMode && previousActivePrefix != null) {
+          final restoredRootIndex = tags.indexWhere((t) {
+            final path = t.categoryPath?.trim();
+            if (path == null || path.isEmpty) return false;
+            if (previousRootPath != null && previousRootPath == path) return true;
+            return previousActivePrefix.startsWith(path);
+          });
+          if (restoredRootIndex != -1) {
+            _selectedCategoryIndex = restoredRootIndex;
+            _activeCategoryPathPrefix = previousActivePrefix;
+            _isBannerCollapsed = true;
+            _isLoadingSubTags = true;
+            _subTags = [];
+          } else {
+            _activeCategoryPathPrefix = null;
+            _selectedCategoryIndex = -1;
+            _isBannerCollapsed = false;
+          }
+        } else {
+          _activeCategoryPathPrefix = null;
+          _selectedCategoryIndex = -1;
+          _isBannerCollapsed = false;
+        }
       });
       SearchWarmCache.instance.rememberRootTags(tags);
+      if (wasInCategoryMode && _selectedCategoryIndex != -1) {
+        final rootTag = _tags[_selectedCategoryIndex];
+        unawaited(_loadSubTagsForRoot(rootTag));
+      }
       await Future.wait([
         _loadProductsPage(0),
-        _loadTopPicksForTab(HomeTopPicksTab.weeklyLikes),
-        _loadTopPicksForTab(HomeTopPicksTab.forYou),
+        if (!wasInCategoryMode) ...[
+          _loadTopPicksForTab(HomeTopPicksTab.weeklyLikes),
+          _loadTopPicksForTab(HomeTopPicksTab.forYou),
+        ],
       ]);
 
       if (mounted) {
@@ -1863,6 +1901,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         },
         child: SingleChildScrollView(
           controller: _scrollController,
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: ClampingScrollPhysics(),
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1880,7 +1921,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               _buildSubCategoryRow(),
 
               // BANNER — always visible when not searching, collapses when category is selected
-              if (_searchQuery.isEmpty) ...[
+              if (_searchQuery.isEmpty && _selectedCategoryIndex == -1) ...[
                 const SizedBox(height: 14),
                 _buildAnimatedBanner(),
               ],

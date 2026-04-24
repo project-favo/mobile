@@ -20,7 +20,21 @@ class CustomRefreshIndicator extends StatelessWidget {
       backgroundColor: AppColors.surface,
       strokeWidth: 3.0,
       displacement: 40.0,
-      child: child, // Custom refresh indicator with brand styling
+      child: ScrollConfiguration(
+        behavior: const _ClampedScrollBehavior(),
+        child: child,
+      ), // Custom refresh indicator with brand styling
+    );
+  }
+}
+
+class _ClampedScrollBehavior extends ScrollBehavior {
+  const _ClampedScrollBehavior();
+
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) {
+    return const AlwaysScrollableScrollPhysics(
+      parent: ClampingScrollPhysics(),
     );
   }
 }

@@ -33,7 +33,7 @@ class PagedNavigationBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final disabled = AppColors.textSecondary.withValues(alpha: 0.35);
-    final fill = backgroundColor ?? AppColors.background;
+    final fill = backgroundColor ?? AppColors.surface;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -47,26 +47,26 @@ class PagedNavigationBar extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.medium,
-            AppSpacing.small,
+            4,
             AppSpacing.medium,
-            AppSpacing.medium,
+            8,
           ),
           child: Center(
             child: Semantics(
               label: 'Pagination, page $currentPage1Based of $totalPages',
               child: Container(
-                padding: const EdgeInsets.all(4),
+                padding: const EdgeInsets.all(3),
                 decoration: BoxDecoration(
                   color: fill,
-                  borderRadius: BorderRadius.circular(22),
+                  borderRadius: BorderRadius.circular(18),
                   border: Border.all(
                     color: AppColors.border.withValues(alpha: 0.55),
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.06),
-                      blurRadius: 10,
-                      offset: const Offset(0, 3),
+                      color: Colors.black.withValues(alpha: 0.03),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
                     ),
                   ],
                 ),
@@ -93,7 +93,7 @@ class PagedNavigationBar extends StatelessWidget {
                         constraints: const BoxConstraints(minWidth: 56),
                         padding: const EdgeInsets.symmetric(
                           horizontal: AppSpacing.small,
-                          vertical: 6,
+                          vertical: 5,
                         ),
                         decoration: BoxDecoration(
                           color: AppColors.surface,
@@ -173,7 +173,7 @@ class _NavIconButton extends StatelessWidget {
           message: tooltip,
           child: SizedBox(
             width: 40,
-            height: 40,
+            height: 36,
             child: Center(
               child: isLoading
                   ? SizedBox(

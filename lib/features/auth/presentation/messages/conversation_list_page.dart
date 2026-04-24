@@ -280,6 +280,9 @@ class _ConversationListPageState extends State<ConversationListPage> {
           padding: const EdgeInsets.all(AppSpacing.xLarge),
           child: _isLoading
               ? ListView.separated(
+                  physics: const AlwaysScrollableScrollPhysics(
+                    parent: ClampingScrollPhysics(),
+                  ),
                   itemCount: 6,
                   separatorBuilder: (_, __) =>
                       const SizedBox(height: AppSpacing.medium),
@@ -361,6 +364,9 @@ class _ConversationListPageState extends State<ConversationListPage> {
                           ),
                         )
                       : ListView.separated(
+                          physics: const AlwaysScrollableScrollPhysics(
+                            parent: ClampingScrollPhysics(),
+                          ),
                           itemCount: _conversations.length,
                           separatorBuilder: (_, __) =>
                               const SizedBox(height: AppSpacing.medium),

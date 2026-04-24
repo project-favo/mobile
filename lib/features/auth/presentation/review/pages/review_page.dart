@@ -261,48 +261,92 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       context: context,
       showDragHandle: true,
       backgroundColor: AppColors.surface,
+      isScrollControlled: true,
       builder: (ctx) {
+        String tempSort = _selectedSort;
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                title: const Text('Newest'),
-                trailing: _selectedSort == _sortNewest
-                    ? const Icon(Icons.check_rounded, color: AppColors.primary)
-                    : null,
-                onTap: () => Navigator.of(ctx).pop(_sortNewest),
+          child: StatefulBuilder(
+            builder: (context, setSheetState) => ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(ctx).size.height * 0.8,
               ),
-              ListTile(
-                title: const Text('Most liked'),
-                trailing: _selectedSort == _sortMostLiked
-                    ? const Icon(Icons.check_rounded, color: AppColors.primary)
-                    : null,
-                onTap: () => Navigator.of(ctx).pop(_sortMostLiked),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 8),
+                  Text('Sort Reviews', style: AppTextStyles.heading3),
+                  const SizedBox(height: 10),
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: [
+                        ListTile(
+                          title: const Text('Newest'),
+                          trailing: tempSort == _sortNewest
+                              ? const Icon(Icons.check_rounded, color: AppColors.primary)
+                              : null,
+                          onTap: () => setSheetState(() => tempSort = _sortNewest),
+                        ),
+                        ListTile(
+                          title: const Text('Most liked'),
+                          trailing: tempSort == _sortMostLiked
+                              ? const Icon(Icons.check_rounded, color: AppColors.primary)
+                              : null,
+                          onTap: () => setSheetState(() => tempSort = _sortMostLiked),
+                        ),
+                        ListTile(
+                          title: const Text('Top follower author'),
+                          trailing: tempSort == _sortTopFollowerAuthor
+                              ? const Icon(Icons.check_rounded, color: AppColors.primary)
+                              : null,
+                          onTap: () => setSheetState(() => tempSort = _sortTopFollowerAuthor),
+                        ),
+                        ListTile(
+                          title: const Text('Highest rating'),
+                          trailing: tempSort == _sortRatingHigh
+                              ? const Icon(Icons.check_rounded, color: AppColors.primary)
+                              : null,
+                          onTap: () => setSheetState(() => tempSort = _sortRatingHigh),
+                        ),
+                        ListTile(
+                          title: const Text('Lowest rating'),
+                          trailing: tempSort == _sortRatingLow
+                              ? const Icon(Icons.check_rounded, color: AppColors.primary)
+                              : null,
+                          onTap: () => setSheetState(() => tempSort = _sortRatingLow),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.xLarge,
+                      AppSpacing.small,
+                      AppSpacing.xLarge,
+                      AppSpacing.large,
+                    ),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        top: BorderSide(color: AppColors.border.withValues(alpha: 0.6)),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        TextButton(
+                          onPressed: () => setSheetState(() => tempSort = _sortNewest),
+                          child: const Text('Reset'),
+                        ),
+                        const Spacer(),
+                        FilledButton(
+                          onPressed: () => Navigator.of(ctx).pop(tempSort),
+                          child: const Text('Apply'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              ListTile(
-                title: const Text('Top follower author'),
-                trailing: _selectedSort == _sortTopFollowerAuthor
-                    ? const Icon(Icons.check_rounded, color: AppColors.primary)
-                    : null,
-                onTap: () => Navigator.of(ctx).pop(_sortTopFollowerAuthor),
-              ),
-              ListTile(
-                title: const Text('Highest rating'),
-                trailing: _selectedSort == _sortRatingHigh
-                    ? const Icon(Icons.check_rounded, color: AppColors.primary)
-                    : null,
-                onTap: () => Navigator.of(ctx).pop(_sortRatingHigh),
-              ),
-              ListTile(
-                title: const Text('Lowest rating'),
-                trailing: _selectedSort == _sortRatingLow
-                    ? const Icon(Icons.check_rounded, color: AppColors.primary)
-                    : null,
-                onTap: () => Navigator.of(ctx).pop(_sortRatingLow),
-              ),
-              const SizedBox(height: 6),
-            ],
+            ),
           ),
         );
       },
@@ -317,6 +361,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       context: context,
       showDragHandle: true,
       backgroundColor: AppColors.surface,
+      isScrollControlled: true,
       builder: (ctx) {
         bool? media = _hasMediaFilter;
         bool? sponsored = _isCollaborativeFilter;
@@ -341,11 +386,21 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
             }
 
             return SafeArea(
-              child: SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(ctx).size.height * 0.84,
+                ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    const SizedBox(height: 8),
+                    Center(child: Text('Filter Reviews', style: AppTextStyles.heading3)),
+                    const SizedBox(height: 8),
+                    Flexible(
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: [
                     Padding(
                       padding: const EdgeInsets.symmetric(
                         horizontal: AppSpacing.xLarge,
@@ -396,6 +451,9 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                       value: false,
                       selected: sponsored,
                       onChanged: (v) => sponsored = v,
+                    ),
+                        ],
+                      ),
                     ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(
@@ -471,7 +529,19 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
         !tags.any((e) => e.toLowerCase() == fallbackTag.toLowerCase())) {
       tags.add(fallbackTag);
     }
-    return tags;
+    return tags.map(_formatCategoryLabel).toList();
+  }
+
+  String _formatCategoryLabel(String raw) {
+    final cleaned = raw.trim().replaceAll('_', ' ').replaceAll('-', ' ');
+    if (cleaned.isEmpty) return raw;
+    return cleaned
+        .replaceAllMapped(
+          RegExp(r'([a-z])([A-Z])'),
+          (m) => '${m.group(1)} ${m.group(2)}',
+        )
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
   }
 
   bool _shouldShowDescriptionToggle({
@@ -1331,7 +1401,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                             (context, error, stackTrace) => Container(
                               width: 240,
                               height: 240,
-                              color: AppColors.textSecondary.withOpacity(0.1),
+                              color: AppColors.textSecondary.withValues(alpha: 0.1),
                               child: const Icon(
                                 Icons.image_not_supported,
                                 size: 42,
@@ -1465,8 +1535,8 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                                     return Container(
                                       height: 210,
                                       width: 210,
-                                      color: AppColors.textSecondary.withOpacity(
-                                        0.1,
+                                      color: AppColors.textSecondary.withValues(
+                                        alpha: 0.1,
                                       ),
                                       child: const Icon(
                                         Icons.image_not_supported,
@@ -1870,25 +1940,9 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                 Padding(
                   padding: _contentHorizontalPadding,
                   child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text("Reviews", style: AppTextStyles.heading2),
-                      if (_reviews.isNotEmpty)
-                        Text(
-                          '${_reviews.length} review${_reviews.length > 1 ? 's' : ''}',
-                          style: AppTextStyles.bodySecondary.copyWith(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xLarge),
-                Padding(
-                  padding: _contentHorizontalPadding,
-                  child: Row(
-                    children: [
+                      const Spacer(),
                       _buildControlIconButton(
                         icon: Icons.swap_vert_rounded,
                         isActive: _selectedSort != _sortNewest,
@@ -1933,7 +1987,15 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                             ),
                         ],
                       ),
-                      const Spacer(),
+                      const SizedBox(width: 12),
+                      if (_reviews.isNotEmpty)
+                        Text(
+                          '${_reviews.length} review${_reviews.length > 1 ? 's' : ''}',
+                          style: AppTextStyles.bodySecondary.copyWith(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                     ],
                   ),
                 ),

@@ -99,6 +99,7 @@ class _UserProfilePageState extends State<UserProfilePage>
   String _profileUsername = '';
   String? _profileFullName;
   bool _profileAnonymous = false;
+  bool _identityReady = false;
 
   @override
   void initState() {
@@ -108,6 +109,20 @@ class _UserProfilePageState extends State<UserProfilePage>
     _tabController = TabController(length: 1, vsync: this);
     _avatarImageUrl = widget.profileImageUrl;
     _profileUsername = widget.userName.trim();
+    final prefill = widget.prefillUser;
+    if (prefill != null) {
+      _profileUsername = prefill.userName.trim().isNotEmpty
+          ? prefill.userName.trim()
+          : _profileUsername;
+      final first = (prefill.name ?? '').trim();
+      final last = (prefill.surname ?? '').trim();
+      final full = [first, last].where((e) => e.isNotEmpty).join(' ').trim();
+      if (full.isNotEmpty) {
+        _profileFullName = full;
+      }
+      _profileAnonymous = prefill.profileAnonymous;
+      _identityReady = true;
+    }
     _start();
   }
 
@@ -122,6 +137,7 @@ class _UserProfilePageState extends State<UserProfilePage>
       }
       _profileAnonymous = u.profileAnonymous;
       _profileFullName = fullName.isNotEmpty ? fullName : null;
+      _identityReady = true;
     });
   }
 
@@ -899,7 +915,7 @@ class _UserProfilePageState extends State<UserProfilePage>
     final handle = '@${_profileUsername.toLowerCase().replaceAll(' ', '')}';
     final displayName = _profileAnonymous
         ? _maskedProfileFullName()
-        : (_profileFullName ?? _profileUsername);
+        : (_profileFullName ?? (_identityReady ? _profileUsername : ''));
     final canOpenMessage = !_profileUnavailable && int.tryParse(widget.userId) != null;
 
     return Scaffold(
@@ -928,7 +944,9 @@ class _UserProfilePageState extends State<UserProfilePage>
         onRefresh: _refreshProfile,
         child: _profileUnavailable
             ? ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: ClampingScrollPhysics(),
+                ),
                 children: [
                   const SizedBox(height: 80),
                   const Icon(
@@ -950,7 +968,9 @@ class _UserProfilePageState extends State<UserProfilePage>
                 ],
               )
             : SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: ClampingScrollPhysics(),
+          ),
           child: Column(
             children: [
               const SizedBox(height: AppSpacing.xxLarge),
@@ -961,9 +981,20 @@ class _UserProfilePageState extends State<UserProfilePage>
                 fallbackInitial: _profileUsername,
               ),
               const SizedBox(height: AppSpacing.large),
-              Text(
-                displayName,
-                style: AppTextStyles.titleMedium,
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 160),
+                child: displayName.trim().isEmpty
+                    ? SkeletonLoader(
+                        key: const ValueKey('profile_name_skeleton'),
+                        width: 170,
+                        height: 22,
+                        borderRadius: BorderRadius.circular(8),
+                      )
+                    : Text(
+                        displayName,
+                        key: const ValueKey('profile_name_text'),
+                        style: AppTextStyles.titleMedium,
+                      ),
               ),
               const SizedBox(height: AppSpacing.small),
               Text(

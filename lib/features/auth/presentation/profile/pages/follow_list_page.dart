@@ -170,6 +170,9 @@ class _FollowListPageState extends State<FollowListPage> {
                   onRefresh: _loadPage,
                   child: ListView.builder(
                     controller: _scrollController,
+                    physics: const AlwaysScrollableScrollPhysics(
+                      parent: ClampingScrollPhysics(),
+                    ),
                     padding: const EdgeInsets.symmetric(
                       horizontal: AppSpacing.xLarge,
                       vertical: AppSpacing.large,

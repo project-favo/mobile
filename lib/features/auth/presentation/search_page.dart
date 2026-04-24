@@ -1012,7 +1012,9 @@ class _SearchPageState extends State<SearchPage> {
                     color: AppColors.primary,
                     onRefresh: _refreshSearchPage,
                     child: SingleChildScrollView(
-                      physics: const AlwaysScrollableScrollPhysics(),
+                      physics: const AlwaysScrollableScrollPhysics(
+                        parent: ClampingScrollPhysics(),
+                      ),
                       child: SizedBox(
                         height: constraints.maxHeight,
                         child: Padding(

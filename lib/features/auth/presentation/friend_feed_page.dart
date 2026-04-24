@@ -531,7 +531,9 @@ class _FriendFeedPageState extends State<FriendFeedPage>
               refreshUserListability: true,
             ),
         child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: ClampingScrollPhysics(),
+          ),
           padding: const EdgeInsets.all(AppSpacing.xLarge),
           children: const [
             SizedBox(height: 120),
@@ -551,25 +553,27 @@ class _FriendFeedPageState extends State<FriendFeedPage>
               refreshUserListability: true,
             ),
         child: ListView.separated(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 20),
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: ClampingScrollPhysics(),
+          ),
+          padding: const EdgeInsets.fromLTRB(10, 8, 10, 12),
           itemCount: slice.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 10),
+          separatorBuilder: (_, __) => const SizedBox(height: 8),
           itemBuilder: (context, index) {
             final item = slice[index];
             return Container(
               key: ValueKey(item.id),
               decoration: BoxDecoration(
                 color: AppColors.surface,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: AppColors.border.withValues(alpha: 0.7),
                 ),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.03),
-                    blurRadius: 8,
-                    offset: const Offset(0, 3),
+                    blurRadius: 7,
+                    offset: const Offset(0, 2),
                   ),
                 ],
               ),

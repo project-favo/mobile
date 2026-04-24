@@ -443,7 +443,9 @@ class _ActivityPageState extends State<ActivityPage>
               onRefresh: _onRefresh,
               child: ListView(
                 controller: _scrollController,
-                physics: const AlwaysScrollableScrollPhysics(),
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: ClampingScrollPhysics(),
+                ),
                 padding: const EdgeInsets.all(AppSpacing.xLarge),
                 children: [
                   const SizedBox(height: 80),
@@ -473,7 +475,9 @@ class _ActivityPageState extends State<ActivityPage>
               onRefresh: _onRefresh,
               child: ListView(
                 controller: _scrollController,
-                physics: const AlwaysScrollableScrollPhysics(),
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: ClampingScrollPhysics(),
+                ),
                 padding: const EdgeInsets.all(AppSpacing.xLarge),
                 children: [
                   const SizedBox(height: 100),
@@ -499,7 +503,9 @@ class _ActivityPageState extends State<ActivityPage>
               onRefresh: _onRefresh,
               child: ListView(
                 controller: _scrollController,
-                physics: const AlwaysScrollableScrollPhysics(),
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: ClampingScrollPhysics(),
+                ),
                 padding: const EdgeInsets.all(AppSpacing.xLarge),
                 children: [
                   const SizedBox(height: 100),
@@ -528,7 +534,9 @@ class _ActivityPageState extends State<ActivityPage>
             onRefresh: _onRefresh,
             child: ListView.separated(
               controller: _scrollController,
-              physics: const AlwaysScrollableScrollPhysics(),
+              physics: const AlwaysScrollableScrollPhysics(
+                parent: ClampingScrollPhysics(),
+              ),
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 20),
               itemCount: pageItems.length,
               separatorBuilder: (_, __) => const SizedBox(height: 10),

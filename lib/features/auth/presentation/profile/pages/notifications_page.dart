@@ -442,7 +442,9 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
   Widget _buildBody() {
     if (_loadingFirst) {
       return ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: ClampingScrollPhysics(),
+        ),
         padding: const EdgeInsets.only(top: AppSpacing.large),
         children: [
           for (var i = 0; i < 8; i++) const NotificationTileSkeleton(),
@@ -451,7 +453,9 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
     }
     if (_errorMessage != null) {
       return ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: ClampingScrollPhysics(),
+        ),
         padding: const EdgeInsets.all(AppSpacing.xLarge),
         children: [
           const SizedBox(height: 80),
@@ -474,7 +478,9 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
     }
     if (_allVisible.isEmpty) {
       return ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: ClampingScrollPhysics(),
+        ),
         padding: const EdgeInsets.all(AppSpacing.xLarge),
         children: [
           const SizedBox(height: 100),
@@ -592,7 +598,9 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
     sectionWidgets.add(const SizedBox(height: AppSpacing.large));
 
     return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: ClampingScrollPhysics(),
+      ),
       padding: const EdgeInsets.only(top: AppSpacing.small),
       children: sectionWidgets,
     );
@@ -656,16 +664,16 @@ class _NotificationTile extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.large,
-            AppSpacing.medium,
             AppSpacing.small,
-            AppSpacing.medium,
+            AppSpacing.small,
+            AppSpacing.small,
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (n.actor != null) ...[
                 ProfileAvatar(
-                  radius: 22,
+                  radius: 20,
                   imageUrl: n.actor!.profileImageUrl.trim().isEmpty
                       ? null
                       : n.actor!.profileImageUrl,
@@ -719,7 +727,7 @@ class _NotificationTile extends StatelessWidget {
                         style: AppTextStyles.bodySecondary,
                       ),
                     ],
-                    const SizedBox(height: AppSpacing.small),
+                    const SizedBox(height: 6),
                     Text(
                       timestamp,
                       style: AppTextStyles.bodySmall.copyWith(
