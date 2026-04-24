@@ -317,15 +317,27 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         continue;
       }
       final productId = item.targetContent?.productId;
-      final avatarUrl = item.user.avatarUrl;
+      final avatarKey = _friendAvatarKeyFor(item.user);
       if (productId == null || productId.isEmpty) continue;
-      if (avatarUrl == null || avatarUrl.trim().isEmpty) continue;
       map.putIfAbsent(productId, () => []);
-      if (!map[productId]!.contains(avatarUrl)) {
-        map[productId]!.add(avatarUrl);
+      if (!map[productId]!.contains(avatarKey)) {
+        map[productId]!.add(avatarKey);
       }
     }
     return map;
+  }
+
+  /// ProductCard'e avatar verisini taşır:
+  /// - `url:<raw>`: normal profil resmi
+  /// - `fallback:<userId>:<initial>`: resim yoksa placeholder ikonu/harfi
+  String _friendAvatarKeyFor(ActivityUser user) {
+    final raw = user.avatarUrl?.trim();
+    if (raw != null && raw.isNotEmpty) {
+      return 'url:$raw';
+    }
+    final trimmed = user.username.trim();
+    final initial = trimmed.isEmpty ? '?' : trimmed[0].toUpperCase();
+    return 'fallback:${user.id}:$initial';
   }
 
   /// Search sayfasıyla aynı: GET /api/products tüm ürün listesi (önbellek + arka planda ısıtma).

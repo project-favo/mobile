@@ -69,11 +69,19 @@ class AuthService {
   }
 
   Future<UserResponseDto> _finalizeUserResponse(UserResponseDto u) async {
+    if (u.isSuspended) {
+      await _sessionHelper.handleSuspendedAccount();
+      throw const SuspendedAccountException();
+    }
     if (u.isAccountDeactivated) {
       await _sessionHelper.handleDeactivatedAccount();
       throw const DeactivatedAccountException();
     }
     final merged = await UserDisplayNamePrefs.instance.mergeInto(u);
+    if (merged.isSuspended) {
+      await _sessionHelper.handleSuspendedAccount();
+      throw const SuspendedAccountException();
+    }
     if (merged.isAccountDeactivated) {
       await _sessionHelper.handleDeactivatedAccount();
       throw const DeactivatedAccountException();
@@ -139,9 +147,15 @@ class AuthService {
         );
         return out;
       } on DioException catch (e) {
-        if (looksLikeDeactivatedAccountMessage(
-          dioResponseDataAsSearchString(e.response?.data),
-        )) {
+        final body = dioResponseDataAsSearchString(e.response?.data);
+        final combined =
+            '$body ${e.message ?? ''} ${e.response?.statusCode ?? ''}'.toLowerCase();
+        if (looksLikeSuspendedAccountMessage(combined)) {
+          await _firebaseAuth.signOut();
+          _sessionHelper.clearSession();
+          throw const SuspendedAccountException();
+        }
+        if (looksLikeDeactivatedAccountMessage(combined)) {
           await _firebaseAuth.signOut();
           _sessionHelper.clearSession();
           throw const DeactivatedAccountException();

@@ -180,9 +180,8 @@ class AuthRepository {
         
         String errorMessage;
         if (errorData is Map) {
-          errorMessage = errorData['message'] ?? 
-                        errorData['error'] ?? 
-                        'Registration failed';
+          errorMessage = backendResponsePrimaryErrorText(errorData) ??
+              'Registration failed';
         } else if (errorData != null) {
           errorMessage = errorData.toString();
         } else {
@@ -420,7 +419,8 @@ class AuthRepository {
       if (e.response != null) {
         final errorData = e.response?.data;
         final errorMessage = errorData is Map
-            ? (errorData['message'] ?? errorData['error'] ?? 'Failed to get user info')
+            ? (backendResponsePrimaryErrorText(errorData) ??
+                'Failed to get user info')
             : errorData?.toString() ?? 'Failed to get user info';
         if (dioResponseDataAsSearchString(errorData)
             .toUpperCase()
@@ -466,7 +466,7 @@ class AuthRepository {
     } on DioException catch (e) {
       final errorData = e.response?.data;
       final errorCode = errorData is Map
-          ? (errorData['error'] ?? errorData['message'] ?? 'VERIFICATION_FAILED')
+          ? (backendResponsePrimaryErrorText(errorData) ?? 'VERIFICATION_FAILED')
           : 'VERIFICATION_FAILED';
       throw Exception(errorCode.toString());
     }
@@ -504,13 +504,13 @@ class AuthRepository {
       final data = e.response?.data;
       if (code == 400) {
         final msg = data is Map
-            ? (data['message'] ?? data['error'] ?? 'Invalid email')
+            ? (backendResponsePrimaryErrorText(data) ?? 'Invalid email')
             : 'Invalid email';
         throw Exception(msg.toString());
       }
       if (e.response != null) {
         final msg = data is Map
-            ? (data['message'] ?? data['error'] ?? 'Request failed')
+            ? (backendResponsePrimaryErrorText(data) ?? 'Request failed')
             : data?.toString() ?? 'Request failed';
         throw Exception(msg.toString());
       }
@@ -544,7 +544,8 @@ class AuthRepository {
       if (e.response != null) {
         final errorData = e.response?.data;
         final errorMessage = errorData is Map
-            ? (errorData['message'] ?? errorData['error'] ?? 'Delete account failed')
+            ? (backendResponsePrimaryErrorText(errorData) ??
+                'Delete account failed')
             : errorData?.toString() ?? 'Delete account failed';
         throw Exception(errorMessage);
       }

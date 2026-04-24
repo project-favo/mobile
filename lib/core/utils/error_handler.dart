@@ -6,9 +6,12 @@ import 'exceptions.dart';
 /// Centralized error handling utility
 /// Converts technical errors to user-friendly messages
 class ErrorHandler {
-  /// Login: shown under email/password ([LoginPage]) when the account is disabled.
+  /// Login: devre dışı / kapatılmış hesap ([LoginPage]).
   static const String deactivatedAccountLoginMessage =
-      'Account deactivated. Contact support.';
+      'Account was suspended.';
+
+  /// Login: askıya alınmış hesap ([LoginPage] — backend bazen 401 + session metni döner).
+  static const String suspendedAccountLoginMessage = 'Account was suspended.';
   /// Backend 503 “mail gönderilemedi” JSON: [code], isteğe bağlı [smtpDetail].
   /// Tanınmazsa null (genel 503 metni kullanılır).
   static String? messageForMailDelivery503Body(dynamic errorData) {
@@ -61,12 +64,19 @@ class ErrorHandler {
       return deactivatedAccountLoginMessage;
     }
 
+    if (error is SuspendedAccountException) {
+      return suspendedAccountLoginMessage;
+    }
+
     if (error is IncompleteBackendRegistrationException) {
       return 'No app profile is linked to this account yet. Register with the '
           'same email, enter the 5-digit code from Favo, then sign in.';
     }
 
     final raw = error.toString().toUpperCase();
+    if (looksLikeSuspendedAccountMessage(raw)) {
+      return suspendedAccountLoginMessage;
+    }
     if (looksLikeDeactivatedAccountMessage(raw)) {
       return deactivatedAccountLoginMessage;
     }
@@ -266,9 +276,10 @@ class ErrorHandler {
       // Extract error message from response
       String? serverMessage;
       if (errorData is Map) {
-        serverMessage = errorData['message'] ?? 
-                       errorData['error'] ?? 
-                       errorData['detail'];
+        serverMessage = backendResponsePrimaryErrorText(errorData) ??
+            errorData['message']?.toString() ??
+            errorData['error']?.toString() ??
+            errorData['detail']?.toString();
       } else if (errorData is String) {
         serverMessage = errorData;
       }
@@ -283,6 +294,24 @@ class ErrorHandler {
       final fullText =
           ('${serverMessage ?? ''} ${dioResponseDataAsSearchString(errorData)}')
               .toLowerCase();
+
+      final pathLower = e.requestOptions.path.toLowerCase();
+      final isPostAuthLogin = e.requestOptions.method.toUpperCase() == 'POST' &&
+          (pathLower.contains('auth/login') || pathLower.endsWith('/login'));
+
+      // Askı / login: backend bazen açık "suspend" göndermez; POST /api/auth/login + session metni → askı
+      if (looksLikeSuspendedAccountMessage(fullText)) {
+        return suspendedAccountLoginMessage;
+      }
+      if (looksLikeDeactivatedAccountMessage(fullText)) {
+        return deactivatedAccountLoginMessage;
+      }
+      if (isPostAuthLogin &&
+          (fullText.contains('session not found') ||
+              fullText.contains('session_not_found') ||
+              fullText.contains('no active session'))) {
+        return suspendedAccountLoginMessage;
+      }
 
       // PUT /api/auth/me: duplicate bazen gövdede; jenerik 401'den önce yakala
       if (_isPutMe(e) &&
@@ -359,6 +388,12 @@ class ErrorHandler {
           return 'Too many requests. Please try again later.';
         case 500:
         case 502:
+          if (looksLikeSuspendedAccountMessage(fullText)) {
+            return suspendedAccountLoginMessage;
+          }
+          if (looksLikeDeactivatedAccountMessage(fullText)) {
+            return deactivatedAccountLoginMessage;
+          }
           return 'Server error. Please try again later.';
         case 503:
           final mail503 = messageForMailDelivery503Body(errorData);

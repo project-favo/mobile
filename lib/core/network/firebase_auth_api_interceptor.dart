@@ -40,6 +40,19 @@ void attachFirebaseIdTokenToAllRequests() {
             final body = dioResponseDataAsSearchString(e.response?.data);
             final message = e.message ?? '';
             final combined = '$body $message';
+            if (looksLikeSuspendedAccountMessage(combined)) {
+              await sessionHelper.handleSuspendedAccount();
+              handler.reject(
+                DioException(
+                  requestOptions: e.requestOptions,
+                  response: e.response,
+                  type: e.type,
+                  error: const SuspendedAccountException(),
+                  message: e.message,
+                ),
+              );
+              return;
+            }
             if (looksLikeDeactivatedAccountMessage(combined)) {
               await sessionHelper.handleDeactivatedAccount();
               handler.reject(

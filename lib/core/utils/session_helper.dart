@@ -7,6 +7,7 @@ import '../../routes/app_routes.dart';
 import '../network/api_client.dart';
 import '../config/api_config.dart';
 import 'exceptions.dart';
+import 'user_account_flags.dart';
 import 'review_report_storage.dart';
 import '../cache/app_session_cache.dart';
 import '../config/app_background_timers.dart';
@@ -25,6 +26,10 @@ class SessionHelper {
   static const String _deactivatedTitle = 'Account Deactivated';
   static const String _deactivatedNotice =
       'Your account has been deactivated by admin.\n\n'
+      'For help, please contact: ctis411.09@gmail.com';
+  static const String _suspendedTitle = 'Account Suspended';
+  static const String _suspendedNotice =
+      'Your account has been suspended.\n\n'
       'For help, please contact: ctis411.09@gmail.com';
   Timer? _accountStatusTimer;
   bool _isHandlingDeactivatedState = false;
@@ -65,8 +70,12 @@ class SessionHelper {
 
       return freshToken;
     } on DioException catch (e) {
+      if (_looksLikeSuspendedAccountFromDio(e)) {
+        await handleSuspendedAccount();
+        throw const SuspendedAccountException();
+      }
       if (_looksLikeDeactivatedAccountFromDio(e)) {
-        await _handleAccountDeactivated();
+        await handleDeactivatedAccount();
         throw const DeactivatedAccountException();
       }
       if (dioExceptionBodyContains(e, 'EMAIL_NOT_VERIFIED')) {
@@ -170,12 +179,20 @@ class SessionHelper {
       if (token == null) return;
       ApiClient().setAuthToken(token);
       final response = await ApiClient().dio.get(ApiConfig.mePath);
+      if (_looksLikeSuspendedAccountFromMe(response.data)) {
+        await handleSuspendedAccount();
+        return;
+      }
       if (_looksLikeDeactivatedAccountFromMe(response.data)) {
-        await _handleAccountDeactivated();
+        await handleDeactivatedAccount();
       }
     } on DioException catch (e) {
+      if (_looksLikeSuspendedAccountFromDio(e)) {
+        await handleSuspendedAccount();
+        return;
+      }
       if (_looksLikeDeactivatedAccountFromDio(e)) {
-        await _handleAccountDeactivated();
+        await handleDeactivatedAccount();
       }
     } catch (e, st) {
       AppLogger.warnSilencedError('SessionHelper._checkAccountStatus', e, st);
@@ -193,13 +210,29 @@ class SessionHelper {
     final active = map['active'];
     final enabled = map['enabled'];
     final isActive = map['isActive'];
-    if (status == 'deactivated' || status == 'inactive' || status == 'suspended') {
+    if (status == 'deactivated' || status == 'inactive') {
       return true;
     }
     if (active is bool && !active) return true;
     if (enabled is bool && !enabled) return true;
     if (isActive is bool && !isActive) return true;
     return false;
+  }
+
+  bool _looksLikeSuspendedAccountFromMe(dynamic data) {
+    if (data is! Map) return false;
+    final m = Map<String, dynamic>.from(data);
+    if (isUserSuspendedSignalInMap(m)) return true;
+    final status = m['status']?.toString().toLowerCase() ?? '';
+    return status == 'suspended';
+  }
+
+  bool _looksLikeSuspendedAccountFromDio(DioException e) {
+    final body = dioResponseDataAsSearchString(e.response?.data);
+    if (looksLikeSuspendedAccountMessage(body)) return true;
+    final code = e.response?.statusCode ?? 0;
+    return (code == 403 || code == 423) &&
+        looksLikeSuspendedAccountMessage(e.message ?? '');
   }
 
   bool _looksLikeDeactivatedAccountFromDio(DioException e) {
@@ -210,7 +243,10 @@ class SessionHelper {
         looksLikeDeactivatedAccountMessage(e.message ?? '');
   }
 
-  Future<void> _handleAccountDeactivated() async {
+  Future<void> _handleAccountLocked({
+    required String title,
+    required String notice,
+  }) async {
     if (_isHandlingDeactivatedState) return;
     _isHandlingDeactivatedState = true;
     try {
@@ -228,8 +264,8 @@ class SessionHelper {
           barrierDismissible: false,
           builder: (dialogContext) {
             return AlertDialog(
-              title: const Text(_deactivatedTitle),
-              content: const Text(_deactivatedNotice),
+              title: Text(title),
+              content: Text(notice),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(dialogContext).pop(),
@@ -246,6 +282,16 @@ class SessionHelper {
   }
 
   Future<void> handleDeactivatedAccount() async {
-    await _handleAccountDeactivated();
+    await _handleAccountLocked(
+      title: _deactivatedTitle,
+      notice: _deactivatedNotice,
+    );
+  }
+
+  Future<void> handleSuspendedAccount() async {
+    await _handleAccountLocked(
+      title: _suspendedTitle,
+      notice: _suspendedNotice,
+    );
   }
 }

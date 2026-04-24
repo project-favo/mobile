@@ -435,6 +435,7 @@ class _FriendAvatarStack extends StatelessWidget {
         child: Stack(
           children: [
             ...List.generate(shown.length, (i) {
+              final parsed = _AvatarPayload.parse(shown[i]);
               return Positioned(
                 left: i * step,
                 child: Container(
@@ -446,10 +447,10 @@ class _FriendAvatarStack extends StatelessWidget {
                   ),
                   child: ClipOval(
                     child: ProfileAvatar(
-                      key: ValueKey('friend_avatar_$i/${shown[i]}'),
+                      key: ValueKey('friend_avatar_$i/${parsed.key}'),
                       radius: (size - border * 2) / 2,
-                      imageUrl: shown[i],
-                      fallbackInitial: '?',
+                      imageUrl: parsed.imageUrl,
+                      fallbackInitial: parsed.fallbackInitial,
                     ),
                   ),
                 ),
@@ -481,6 +482,47 @@ class _FriendAvatarStack extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _AvatarPayload {
+  final String key;
+  final String? imageUrl;
+  final String fallbackInitial;
+
+  const _AvatarPayload({
+    required this.key,
+    required this.imageUrl,
+    required this.fallbackInitial,
+  });
+
+  static _AvatarPayload parse(String raw) {
+    if (raw.startsWith('url:')) {
+      final url = raw.substring(4).trim();
+      return _AvatarPayload(
+        key: raw,
+        imageUrl: url.isEmpty ? null : url,
+        fallbackInitial: '?',
+      );
+    }
+    if (raw.startsWith('fallback:')) {
+      final parts = raw.split(':');
+      final initial = parts.length >= 3 && parts[2].trim().isNotEmpty
+          ? parts[2].trim()[0].toUpperCase()
+          : '?';
+      return _AvatarPayload(
+        key: raw,
+        imageUrl: null,
+        fallbackInitial: initial,
+      );
+    }
+    // Legacy payload: direct URL string.
+    final legacy = raw.trim();
+    return _AvatarPayload(
+      key: raw,
+      imageUrl: legacy.isEmpty ? null : legacy,
+      fallbackInitial: '?',
     );
   }
 }
