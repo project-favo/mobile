@@ -11,11 +11,9 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/exceptions.dart'
     show dioExceptionBodyContains, dioResponseDataAsSearchString;
-import '../../../core/cache/app_session_cache.dart';
 import '../../../core/utils/session_helper.dart';
 import '../../../routes/app_routes.dart';
 import '../data/services/auth_service.dart';
-import 'login_page.dart';
 
 /// Backend `POST /api/auth/verify-email` ile 5 haneli kod doğrulama; başarıdan sonra `login` veya `getMe`.
 class BackendEmailVerificationPage extends StatefulWidget {
@@ -52,98 +50,32 @@ class _BackendEmailVerificationPageState
     extends State<BackendEmailVerificationPage> {
   final _authService = AuthService();
   final _scrollController = ScrollController();
-  final _digitKeys = List.generate(5, (_) => GlobalKey());
 
-  late final List<TextEditingController> _digitControllers;
-  late final List<FocusNode> _digitFocusNodes;
+  /// Tek alan: odak taşınmaz → iOS’ta klavye titremesi olmaz.
+  final _codeController = TextEditingController();
+  final _codeFocus = FocusNode();
 
   bool _busy = false;
   bool _resendBusy = false;
   bool _bootstrapBusy = false;
   bool _initialSendScheduled = false;
-  int _cooldown = 0;
+  final ValueNotifier<int> _cooldownNotifier = ValueNotifier(0);
   String? _statusMessage;
   Timer? _cooldownTimer;
 
   @override
   void initState() {
     super.initState();
-    _digitControllers = List.generate(5, (_) => TextEditingController());
-    _digitFocusNodes = List.generate(
-      5,
-      (i) => FocusNode(onKeyEvent: (node, event) {
-            if (event is! KeyDownEvent) return KeyEventResult.ignored;
-            if (event.logicalKey == LogicalKeyboardKey.backspace &&
-                _digitControllers[i].text.isEmpty &&
-                i > 0) {
-              _digitFocusNodes[i - 1].requestFocus();
-              _digitControllers[i - 1].clear();
-              _scrollToField(i - 1);
-              return KeyEventResult.handled;
-            }
-            return KeyEventResult.ignored;
-          }),
-    );
 
     if (widget.requestVerificationEmailOnOpen) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _requestCodeOnOpen());
     } else {
-      _cooldown = 60;
+      _cooldownNotifier.value = 60;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _startCooldownTimer();
-        _digitFocusNodes.first.requestFocus();
-        _scrollToField(0);
+        _codeFocus.requestFocus();
       });
     }
-  }
-
-  void _scrollToField(int index) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final ctx = _digitKeys[index].currentContext;
-      if (ctx != null) {
-        Scrollable.ensureVisible(
-          ctx,
-          alignment: 0.35,
-          duration: Duration.zero,
-        );
-      }
-    });
-  }
-
-  String _combinedCode() =>
-      _digitControllers.map((c) => c.text.trim()).join();
-
-  void _onDigitChanged(int index, String raw) {
-    final digits = raw.replaceAll(RegExp(r'\D'), '');
-    if (digits.length > 1) {
-      _fillDigitsFromString(digits);
-      return;
-    }
-    if (raw.isEmpty) return;
-
-    final ch = digits.isEmpty ? '' : digits[digits.length - 1];
-    if (ch.isEmpty) return;
-
-    _digitControllers[index].value = TextEditingValue(
-      text: ch,
-      selection: const TextSelection.collapsed(offset: 1),
-    );
-
-    if (index < 4) {
-      _digitFocusNodes[index + 1].requestFocus();
-    }
-  }
-
-  void _fillDigitsFromString(String digits) {
-    final chars = digits.split('');
-    for (var i = 0; i < 5; i++) {
-      _digitControllers[i].text = i < chars.length ? chars[i] : '';
-    }
-    final focusIndex = digits.length >= 5 ? 4 : digits.length.clamp(0, 4);
-    _digitFocusNodes[focusIndex].requestFocus();
-    _scrollToField(focusIndex);
-    setState(() {});
   }
 
   /// Sunucudan kod e-postası iste; hata olursa ekranda göster.
@@ -160,11 +92,10 @@ class _BackendEmailVerificationPageState
       if (!mounted) return;
       setState(() {
         _bootstrapBusy = false;
-        _cooldown = 60;
+        _cooldownNotifier.value = 60;
       });
       _startCooldownTimer();
-      _digitFocusNodes.first.requestFocus();
-      _scrollToField(0);
+      _codeFocus.requestFocus();
     } catch (e) {
       if (!mounted) return;
       final combined =
@@ -187,33 +118,33 @@ class _BackendEmailVerificationPageState
   @override
   void dispose() {
     _cooldownTimer?.cancel();
+    _cooldownNotifier.dispose();
     _scrollController.dispose();
-    for (final c in _digitControllers) {
-      c.dispose();
-    }
-    for (final f in _digitFocusNodes) {
-      f.dispose();
-    }
+    _codeController.dispose();
+    _codeFocus.dispose();
     super.dispose();
   }
 
   void _startCooldownTimer() {
     _cooldownTimer?.cancel();
-    if (_cooldown <= 0) return;
+    if (_cooldownNotifier.value <= 0) return;
     _cooldownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) {
         t.cancel();
         return;
       }
-      setState(() {
-        _cooldown--;
-        if (_cooldown <= 0) t.cancel();
-      });
+      final v = _cooldownNotifier.value;
+      if (v <= 1) {
+        _cooldownNotifier.value = 0;
+        t.cancel();
+      } else {
+        _cooldownNotifier.value = v - 1;
+      }
     });
   }
 
   Future<void> _resend() async {
-    if (_resendBusy || _cooldown > 0) return;
+    if (_resendBusy || _cooldownNotifier.value > 0) return;
     setState(() {
       _resendBusy = true;
       _statusMessage = null;
@@ -222,9 +153,9 @@ class _BackendEmailVerificationPageState
       await _authService.resendVerification();
       if (!mounted) return;
       setState(() {
-        _cooldown = 60;
         _resendBusy = false;
       });
+      _cooldownNotifier.value = 60;
       _startCooldownTimer();
     } catch (e) {
       if (!mounted) return;
@@ -240,6 +171,9 @@ class _BackendEmailVerificationPageState
     final s = seconds % 60;
     return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
+
+  String _combinedCode() =>
+      _codeController.text.replaceAll(RegExp(r'\D'), '').trim();
 
   /// [verify-email] tamamlanana kadar başka ekrana geçiş yok.
   Future<void> _verifyAndContinue() async {
@@ -312,65 +246,103 @@ class _BackendEmailVerificationPageState
     }
   }
 
-  Future<void> _signOut() async {
-    SessionHelper().clearSession();
-    AuthService.clearRegisterFormDraft();
-    clearAllAppCachesOnLogout();
-    await FirebaseAuth.instance.signOut();
-    if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const LoginPage()),
-      (_) => false,
+  static const double _otpHeight = 52;
+
+  /// Görsel kutular (dokunma alttaki [TextField]’a gider); klavye tek odakta kalır.
+  Widget _buildOtpLayer() {
+    return ListenableBuilder(
+      listenable: Listenable.merge([_codeController, _codeFocus]),
+      builder: (context, _) {
+        final digits = _codeController.text.replaceAll(RegExp(r'\D'), '');
+        final len = digits.length;
+        final focused = _codeFocus.hasFocus;
+        final activeIndex = focused ? len.clamp(0, 4) : -1;
+
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: List.generate(5, (i) {
+            final ch = i < len ? digits[i] : '';
+            final isActive = focused && activeIndex == i;
+            return Expanded(
+              child: Padding(
+                padding: EdgeInsets.only(left: i == 0 ? 0 : 5, right: i == 4 ? 0 : 5),
+                child: Container(
+                  height: _otpHeight,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isActive ? AppColors.primary : AppColors.border,
+                      width: isActive ? 2 : 1,
+                    ),
+                  ),
+                  child: Text(
+                    ch,
+                    style: AppTextStyles.heading3.copyWith(
+                      fontSize: 22,
+                      letterSpacing: 0.5,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
+        );
+      },
     );
   }
 
-  Widget _otpField(int index) {
-    return KeyedSubtree(
-      key: _digitKeys[index],
-      child: SizedBox(
-        width: 52,
-        child: TextFormField(
-          controller: _digitControllers[index],
-          focusNode: _digitFocusNodes[index],
-          textAlign: TextAlign.center,
-          keyboardType: TextInputType.number,
-          style: AppTextStyles.heading3.copyWith(
-            fontSize: 22,
-            letterSpacing: 0.5,
+  Widget _buildOtpField() {
+    return SizedBox(
+      height: _otpHeight,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Positioned.fill(
+            child: TextField(
+              controller: _codeController,
+              focusNode: _codeFocus,
+              keyboardType: TextInputType.number,
+              textInputAction: TextInputAction.done,
+              maxLength: 5,
+              showCursor: false,
+              autocorrect: false,
+              enableSuggestions: false,
+              smartDashesType: SmartDashesType.disabled,
+              smartQuotesType: SmartQuotesType.disabled,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              style: const TextStyle(
+                color: Colors.transparent,
+                fontSize: 1,
+                height: 1,
+              ),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                counterText: '',
+                contentPadding: EdgeInsets.zero,
+                isDense: true,
+                filled: false,
+              ),
+              expands: true,
+              maxLines: null,
+              minLines: null,
+              textAlignVertical: TextAlignVertical.center,
+              onTapOutside: (_) => _codeFocus.unfocus(),
+            ),
           ),
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          decoration: InputDecoration(
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
-            filled: true,
-            fillColor: AppColors.surface,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.border),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.primary, width: 2),
-            ),
-          ),
-          onTap: () => _scrollToField(index),
-          onChanged: (v) => _onDigitChanged(index, v),
-        ),
+          IgnorePointer(child: _buildOtpLayer()),
+        ],
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Scaffold(
       backgroundColor: AppColors.background,
-      resizeToAvoidBottomInset: true,
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -394,12 +366,11 @@ class _BackendEmailVerificationPageState
             return SingleChildScrollView(
               controller: _scrollController,
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
-              padding: EdgeInsets.only(
-                left: AppSpacing.xLarge,
-                right: AppSpacing.xLarge,
-                top: AppSpacing.small,
-                bottom:
-                    MediaQuery.of(context).viewInsets.bottom + AppSpacing.large,
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.xLarge,
+                AppSpacing.small,
+                AppSpacing.xLarge,
+                AppSpacing.large,
               ),
               child: ConstrainedBox(
                 constraints: BoxConstraints(minHeight: constraints.maxHeight),
@@ -469,23 +440,30 @@ class _BackendEmailVerificationPageState
                             ),
                           ),
                         ],
-                        if (_cooldown > 0 && !_bootstrapBusy) ...[
-                          const SizedBox(height: 12),
-                          Text(
-                            'New code in ${_formatCountdown(_cooldown)}',
-                            textAlign: TextAlign.center,
-                            style: AppTextStyles.bodySmall.copyWith(
-                              color: AppColors.textSecondary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 20),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children:
-                              List.generate(5, (i) => _otpField(i)),
+                        ValueListenableBuilder<int>(
+                          valueListenable: _cooldownNotifier,
+                          builder: (context, cd, _) {
+                            if (cd <= 0 || _bootstrapBusy) {
+                              return const SizedBox(height: 20);
+                            }
+                            return Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const SizedBox(height: 12),
+                                Text(
+                                  'New code in ${_formatCountdown(cd)}',
+                                  textAlign: TextAlign.center,
+                                  style: AppTextStyles.bodySmall.copyWith(
+                                    color: AppColors.textSecondary,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 20),
+                              ],
+                            );
+                          },
                         ),
+                        _buildOtpField(),
                         if (_statusMessage != null) ...[
                           const SizedBox(height: 14),
                           Container(
@@ -543,48 +521,41 @@ class _BackendEmailVerificationPageState
                           ),
                         ),
                         const SizedBox(height: 10),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 46,
-                          child: OutlinedButton(
-                            onPressed: (_resendBusy || _cooldown > 0)
-                                ? null
-                                : _resend,
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: AppColors.primary,
-                              side: const BorderSide(color: AppColors.border),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                            ),
-                            child: _resendBusy
-                                ? const SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: AppColors.primary,
-                                    ),
-                                  )
-                                : const Text(
-                                    'Resend code',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 14,
-                                    ),
+                        ValueListenableBuilder<int>(
+                          valueListenable: _cooldownNotifier,
+                          builder: (context, cd, _) {
+                            return SizedBox(
+                              width: double.infinity,
+                              height: 46,
+                              child: OutlinedButton(
+                                onPressed:
+                                    (_resendBusy || cd > 0) ? null : _resend,
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: AppColors.primary,
+                                  side: const BorderSide(color: AppColors.border),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
                                   ),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        TextButton(
-                          onPressed: _busy ? null : _signOut,
-                          child: Text(
-                            'Sign out',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: AppColors.textSecondary,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
+                                ),
+                                child: _resendBusy
+                                    ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: AppColors.primary,
+                                        ),
+                                      )
+                                    : const Text(
+                                        'Resend code',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                              ),
+                            );
+                          },
                         ),
                       ],
                     ),

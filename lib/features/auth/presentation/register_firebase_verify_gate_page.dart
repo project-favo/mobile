@@ -262,17 +262,6 @@ class _RegisterFirebaseVerifyGatePageState
                               ),
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    TextButton(
-                      onPressed: _busy ? null : _signOutAndLeave,
-                      child: Text(
-                        'I already have an account — Sign in',
-                        style: AppTextStyles.bodySmall.copyWith(
-                          color: AppColors.textSecondary,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
                   ],
                 ),
               ),

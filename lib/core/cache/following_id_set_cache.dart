@@ -8,9 +8,26 @@ class FollowingIdSetCache {
   static final FollowingIdSetCache instance = FollowingIdSetCache._();
 
   final Set<String> _ids = <String>{};
+  final List<void Function()> _listeners = [];
   bool _loaded = false;
   Future<void>? _inflight;
   String? _lastUserId;
+
+  void addListener(void Function() listener) {
+    _listeners.add(listener);
+  }
+
+  void removeListener(void Function() listener) {
+    _listeners.remove(listener);
+  }
+
+  void _notifyListeners() {
+    for (final l in List<void Function()>.from(_listeners)) {
+      try {
+        l();
+      } catch (_) {}
+    }
+  }
 
   bool get isReady => _loaded;
   bool contains(String id) => _ids.contains(id);
@@ -21,6 +38,7 @@ class FollowingIdSetCache {
     _loaded = false;
     _ids.clear();
     _lastUserId = null;
+    _notifyListeners();
   }
 
   void applyToggle(String userId, bool nowFollowing) {
@@ -30,6 +48,7 @@ class FollowingIdSetCache {
     } else {
       _ids.remove(userId);
     }
+    _notifyListeners();
   }
 
   void replaceFromSet(Set<String> set) {
@@ -37,6 +56,7 @@ class FollowingIdSetCache {
       ..clear()
       ..addAll(set);
     _loaded = true;
+    _notifyListeners();
   }
 
   /// Aynı anda tek istek; Home ve Notifications öncesi çağrılabilir.

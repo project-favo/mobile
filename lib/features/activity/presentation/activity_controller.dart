@@ -275,7 +275,6 @@ class ActivityController extends ChangeNotifier {
       } else {
         _followingUserIds.remove(userId);
       }
-      FollowingIdSetCache.instance.applyToggle(userId, following);
       _writeActivitySnapshot();
       notifyListeners();
     } catch (_) {

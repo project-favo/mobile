@@ -1,6 +1,8 @@
 import 'current_user_cache.dart';
 import 'follow_notification_horizon_prefs.dart';
 import 'product_review_notification_horizon_prefs.dart';
+import 'self_review_like_local_prefs.dart';
+import 'home_friend_liker_prefs.dart';
 import 'activity_memory_cache.dart';
 import 'following_id_set_cache.dart';
 import 'friend_feed_memory_cache.dart';
@@ -27,6 +29,10 @@ void clearAllAppCachesOnLogout() {
     FollowNotificationHorizonPrefs.instance.removeAllForViewer(uid);
     // ignore: discarded_futures
     ProductReviewNotificationHorizonPrefs.instance.removeAllForViewer(uid);
+    // ignore: discarded_futures
+    SelfReviewLikeLocalPrefs.instance.removeAllForViewer(uid);
+    // ignore: discarded_futures
+    HomeFriendLikerPrefs.instance.removeAllForViewer(uid);
   }
   SearchWarmCache.instance.clear();
   HomeFeedCache.instance.clear();

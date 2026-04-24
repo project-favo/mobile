@@ -244,10 +244,6 @@ class _ConversationListPageState extends State<ConversationListPage> {
     }
   }
 
-  String _formatTime(String iso) {
-    return formatShortTimeFromBackend(iso, fallback: '');
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -284,54 +280,8 @@ class _ConversationListPageState extends State<ConversationListPage> {
                     parent: ClampingScrollPhysics(),
                   ),
                   itemCount: 6,
-                  separatorBuilder: (_, __) =>
-                      const SizedBox(height: AppSpacing.medium),
-                  itemBuilder: (context, index) => Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.border),
-                      color: AppColors.surface,
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: AppSpacing.medium,
-                    ),
-                    child: Row(
-                      children: [
-                        const SkeletonLoader(
-                          width: 44,
-                          height: 44,
-                          borderRadius: BorderRadius.all(Radius.circular(22)),
-                        ),
-                        const SizedBox(width: AppSpacing.large),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: const [
-                              SkeletonLoader(width: 140, height: 16),
-                              SizedBox(height: 6),
-                              SkeletonLoader(width: 200, height: 14),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.large),
-                        Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: const [
-                            SkeletonLoader(width: 44, height: 14),
-                            SizedBox(height: 6),
-                            SkeletonLoader(
-                              width: 20,
-                              height: 20,
-                              borderRadius:
-                                  BorderRadius.all(Radius.circular(10)),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
+                  separatorBuilder: (_, __) => const SizedBox(height: 6),
+                  itemBuilder: (context, index) => _ConversationRowSkeleton(),
                 )
               : _errorMessage != null
                   ? Center(
@@ -369,107 +319,56 @@ class _ConversationListPageState extends State<ConversationListPage> {
                           ),
                           itemCount: _conversations.length,
                           separatorBuilder: (_, __) =>
-                              const SizedBox(height: AppSpacing.medium),
+                              const SizedBox(height: 6),
                           itemBuilder: (context, index) {
                             final c = _conversations[index];
                             final extra = _avatarExtras[c.otherParticipant.id];
                             final hasUnread = c.unreadCount > 0;
-                            return Container(
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(12),
-                                color: hasUnread
-                                    ? AppColors.surface
-                                    : Colors.transparent,
-                                border: Border.all(
-                                  color: AppColors.border,
-                                  width: 1,
-                                ),
-                              ),
-                              child: ListTile(
-                                contentPadding:
-                                    const EdgeInsets.symmetric(horizontal: 12),
-                                leading: ProfileAvatar(
-                                  radius: 22,
-                                  imageUrl: extra?.url ??
-                                      c.otherParticipant.profilePhotoUrl,
-                                  memoryBytes: extra?.bytes ??
-                                      decodeProfilePhotoBytes(
-                                        c.otherParticipant.profilePhotoData,
-                                      ),
-                                  fallbackInitial: c.otherParticipant.username,
-                                ),
-                                title: Text(
-                                  c.otherParticipant.username,
-                                  style: AppTextStyles.bodyMedium.copyWith(
-                                    fontWeight: hasUnread
-                                        ? FontWeight.w700
-                                        : FontWeight.w500,
-                                  ),
-                                ),
-                                subtitle: Text(
-                                  c.lastMessage,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: AppTextStyles.bodySmall.copyWith(
-                                    color: AppColors.textSecondary,
-                                  ),
-                                ),
-                              trailing: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Text(
-                                      _formatTime(c.lastMessageAt),
-                                      style: AppTextStyles.bodySecondary,
+                            final timeParts =
+                                conversationPreviewTimePartsFromBackend(
+                              c.lastMessageAt,
+                              fallback: '—',
+                            );
+                            return _ConversationListTile(
+                              username: c.otherParticipant.username,
+                              preview: c.lastMessage,
+                              timeParts: timeParts,
+                              hasUnread: hasUnread,
+                              unreadCount: c.unreadCount,
+                              avatar: ProfileAvatar(
+                                radius: 20,
+                                imageUrl: extra?.url ??
+                                    c.otherParticipant.profilePhotoUrl,
+                                memoryBytes: extra?.bytes ??
+                                    decodeProfilePhotoBytes(
+                                      c.otherParticipant.profilePhotoData,
                                     ),
-                                    if (c.unreadCount > 0) ...[
-                                      const SizedBox(height: 4),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 6,
-                                          vertical: 2,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: AppColors.primary,
-                                          borderRadius:
-                                              BorderRadius.circular(12),
-                                        ),
-                                        child: Text(
-                                          c.unreadCount.toString(),
-                                          style: AppTextStyles.bodySecondary
-                                              .copyWith(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                                onTap: () async {
-                                  if (!isConversationDtoVisible(c)) {
-                                    unawaited(_loadConversations());
-                                    return;
-                                  }
-                                  if (_openingConversationIds.contains(c.id)) {
-                                    return;
-                                  }
-                                  _openingConversationIds.add(c.id);
-                                  if (!mounted) return;
-                                  try {
-                                    final result = await Navigator.push(
-                                      context,
-                                      SlideRightRoute(
-                                        page: ChatDetailPage(conversation: c),
-                                      ),
-                                    );
-                                    if (result == true && mounted) {
-                                      await _loadConversations();
-                                    }
-                                  } finally {
-                                    _openingConversationIds.remove(c.id);
-                                  }
-                                },
+                                fallbackInitial: c.otherParticipant.username,
                               ),
+                              onTap: () async {
+                                if (!isConversationDtoVisible(c)) {
+                                  unawaited(_loadConversations());
+                                  return;
+                                }
+                                if (_openingConversationIds.contains(c.id)) {
+                                  return;
+                                }
+                                _openingConversationIds.add(c.id);
+                                if (!mounted) return;
+                                try {
+                                  final result = await Navigator.push(
+                                    context,
+                                    SlideRightRoute(
+                                      page: ChatDetailPage(conversation: c),
+                                    ),
+                                  );
+                                  if (result == true && mounted) {
+                                    await _loadConversations();
+                                  }
+                                } finally {
+                                  _openingConversationIds.remove(c.id);
+                                }
+                              },
                             );
                           },
                         ),
@@ -481,3 +380,226 @@ class _ConversationListPageState extends State<ConversationListPage> {
   }
 }
 
+class _ConversationListTile extends StatelessWidget {
+  const _ConversationListTile({
+    required this.username,
+    required this.preview,
+    required this.timeParts,
+    required this.hasUnread,
+    required this.unreadCount,
+    required this.avatar,
+    required this.onTap,
+  });
+
+  final String username;
+  final String preview;
+  final ConversationPreviewTimeParts timeParts;
+  final bool hasUnread;
+  final int unreadCount;
+  final Widget avatar;
+  final Future<void> Function() onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => unawaited(onTap()),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: AppColors.surface,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.06),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+              if (hasUnread)
+                BoxShadow(
+                  color: AppColors.primary.withValues(alpha: 0.1),
+                  blurRadius: 14,
+                  offset: const Offset(0, 2),
+                ),
+            ],
+            border: Border.all(
+              color: hasUnread
+                  ? AppColors.primary.withValues(alpha: 0.2)
+                  : AppColors.border.withValues(alpha: 0.45),
+              width: 1,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                avatar,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              username,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTextStyles.bodyMedium.copyWith(
+                                fontSize: 15,
+                                fontWeight: hasUnread
+                                    ? FontWeight.w700
+                                    : FontWeight.w600,
+                                color: AppColors.textPrimary,
+                                letterSpacing: -0.15,
+                                height: 1.15,
+                              ),
+                            ),
+                          ),
+                          if (unreadCount > 0) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              constraints: const BoxConstraints(
+                                minWidth: 20,
+                                minHeight: 20,
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary,
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                unreadCount > 99 ? '99+' : '$unreadCount',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        preview,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodySmall.copyWith(
+                          color: AppColors.textSecondary,
+                          fontSize: 13,
+                          height: 1.25,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      timeParts.dateLine,
+                      textAlign: TextAlign.end,
+                      style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.textSecondary,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 10,
+                        letterSpacing: 0.15,
+                        height: 1.1,
+                      ),
+                    ),
+                    if (timeParts.timeLine.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        timeParts.timeLine,
+                        textAlign: TextAlign.end,
+                        style: TextStyle(
+                          color: hasUnread
+                              ? AppColors.primary
+                              : AppColors.textPrimary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          height: 1.05,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ConversationRowSkeleton extends StatelessWidget {
+  const _ConversationRowSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: AppColors.surface,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+        border: Border.all(
+          color: AppColors.border.withValues(alpha: 0.45),
+          width: 1,
+        ),
+      ),
+      child: const Padding(
+        padding: EdgeInsets.fromLTRB(12, 10, 12, 10),
+        child: Row(
+          children: [
+            SkeletonLoader(
+              width: 40,
+              height: 40,
+              borderRadius: BorderRadius.all(Radius.circular(20)),
+            ),
+            SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SkeletonLoader(width: 110, height: 14),
+                  SizedBox(height: 5),
+                  SkeletonLoader(width: 160, height: 12),
+                ],
+              ),
+            ),
+            SizedBox(width: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                SkeletonLoader(width: 40, height: 10),
+                SizedBox(height: 3),
+                SkeletonLoader(width: 34, height: 12),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

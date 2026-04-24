@@ -376,7 +376,16 @@ class _RegisterPageState extends State<RegisterPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            FocusManager.instance.primaryFocus?.unfocus();
+          });
+        }
+      },
+      child: Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
@@ -678,16 +687,22 @@ class _RegisterPageState extends State<RegisterPage> {
                         style: AppTextStyles.bodySecondary,
                         children: [
                           const TextSpan(text: "Already have an account? "),
-                          WidgetSpan(
-                            child: GestureDetector(
-                              onTap: () => Navigator.pushNamed(
-                                  context, AppRoutes.login),
-                              child: const Text(
-                                "Login now",
-                                style: AppTextStyles.link,
-                              ),
-                            ),
-                          ),
+                                  WidgetSpan(
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        FocusManager.instance.primaryFocus
+                                            ?.unfocus();
+                                        Navigator.pushNamed(
+                                          context,
+                                          AppRoutes.login,
+                                        );
+                                      },
+                                      child: const Text(
+                                        "Login now",
+                                        style: AppTextStyles.link,
+                                      ),
+                                    ),
+                                  ),
                         ],
                       ),
                     ),
@@ -698,6 +713,7 @@ class _RegisterPageState extends State<RegisterPage> {
           ),
         ),
       ),
+    ),
     );
   }
 }

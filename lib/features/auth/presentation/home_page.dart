@@ -21,6 +21,8 @@ import '../../../core/cache/home_top_picks_cache.dart';
 import '../../../core/config/app_background_timers.dart';
 import '../../../core/cache/search_warm_cache.dart';
 import '../../../core/cache/friend_feed_memory_cache.dart';
+import '../../../core/cache/home_friend_liker_prefs.dart';
+import '../../../core/cache/current_user_cache.dart';
 import '../../../features/activity/domain/activity_models.dart';
 import '../../../features/activity/domain/activity_type.dart';
 import '../../../features/activity/data/friends_feed_repository.dart';
@@ -87,7 +89,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   final ScrollController _scrollController = ScrollController();
   bool _notificationSvcAttached = false;
 
-  // --- Friend likers: yalnızca son friends-feed API cevabı; önbirleşik cache’deki eski satırlar kullanılmaz ---
+  // --- Friend likers: API + [FriendFeedMemoryCache] + disk; pushReplacement sonrası da toparlanır.
   List<ActivityItem> _friendFeedItemsForLikers = const [];
   Map<String, List<String>> _friendLikersMap = {};
 
@@ -221,6 +223,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       ),
     );
     _scrollController.addListener(_onScroll);
+    unawaited(_hydrateFriendLikersFromDisk());
+    FollowingIdSetCache.instance.addListener(_onFollowingChangedForFriendLikers);
     unawaited(_loadFriendLikers());
     unawaited(_warmSearchCatalogInBackground());
     _searchController.addListener(() {
@@ -251,6 +255,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   @override
   void dispose() {
+    FollowingIdSetCache.instance.removeListener(_onFollowingChangedForFriendLikers);
     MessageUnreadService.instance.detach();
     if (_notificationSvcAttached) {
       NotificationRealtimeService.instance.detach();
@@ -265,6 +270,62 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
 
+  Future<void> _hydrateFriendLikersFromDisk() async {
+    final uid = CurrentUserCache.instance.userId?.trim() ?? '';
+    if (uid.isEmpty) return;
+    final disk = await HomeFriendLikerPrefs.instance.loadMap(uid);
+    if (!mounted || disk.isEmpty) return;
+    setState(() {
+      _friendLikersMap = _mergeFriendLikersMapsPreserve(_friendLikersMap, disk);
+    });
+  }
+
+  Future<void> _persistFriendLikersMap() async {
+    final uid = CurrentUserCache.instance.userId?.trim() ?? '';
+    if (uid.isEmpty) return;
+    if (_friendLikersMap.isEmpty) return;
+    await HomeFriendLikerPrefs.instance.saveMap(uid, _friendLikersMap);
+  }
+
+  void _onFollowingChangedForFriendLikers() {
+    if (!mounted) return;
+    if (FollowingIdSetCache.instance.isReady) {
+      setState(() {
+        _friendLikersMap = _pruneFriendLikersMapByFollowing(_friendLikersMap);
+      });
+      unawaited(_persistFriendLikersMap());
+    }
+    unawaited(_loadFriendLikers());
+  }
+
+  /// [fallback:…] anahtarından userId; url anahtarında takip bilgisi yok → budanmaz.
+  String? _userIdFromFriendAvatarBubbleKey(String key) {
+    if (!key.startsWith('fallback:')) return null;
+    final parts = key.split(':');
+    if (parts.length < 2) return null;
+    final id = parts[1].trim();
+    return id.isEmpty ? null : id;
+  }
+
+  Map<String, List<String>> _pruneFriendLikersMapByFollowing(
+    Map<String, List<String>> input,
+  ) {
+    if (!FollowingIdSetCache.instance.isReady) return input;
+    final following = FollowingIdSetCache.instance.snapshot;
+    final out = <String, List<String>>{};
+    for (final e in input.entries) {
+      final kept = e.value.where((bubbleKey) {
+        final uid = _userIdFromFriendAvatarBubbleKey(bubbleKey);
+        if (uid == null) return true;
+        return following.contains(uid);
+      }).toList();
+      if (kept.isNotEmpty) {
+        out[e.key] = kept;
+      }
+    }
+    return out;
+  }
+
   /// Loads friend feed from backend, populates the memory cache and
   /// immediately rebuilds [_friendLikersMap] so avatars show on first open.
   Future<void> _loadFriendLikers() async {
@@ -278,29 +339,45 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final items = activityItemsFromFriendsFeedDtos(page.content);
       _friendFeedItemsForLikers = items;
 
-      // Merge with existing cache: friend feed ekranı için — ana sayfa baloncuğu buna bakmaz.
+      // Merge with existing cache — tek tip [ActivityItem] listesi (cast yok).
       final existing = FriendFeedMemoryCache.instance.peek();
-      final merged = <String, dynamic>{};
-      for (final item in [...items, ...?existing?.items]) {
-        merged.putIfAbsent(item.id, () => item);
+      final byId = <String, ActivityItem>{};
+      for (final item in items) {
+        byId[item.id] = item;
       }
+      if (existing != null) {
+        for (final item in existing.items) {
+          byId.putIfAbsent(item.id, () => item);
+        }
+      }
+      final mergedItems = byId.values.toList();
       FriendFeedMemoryCache.instance.remember(
-        items: merged.values.cast<dynamic>().toList().cast(),
+        items: mergedItems,
         page: page.number,
         totalPages: page.totalPages,
       );
 
-      if (mounted) {
-        setState(() {
-          _friendLikersMap = _buildFriendLikersMapForItems(items);
-        });
-      }
+      if (!mounted) return;
+
+      final fresh = _buildFriendLikersMapForItems(mergedItems);
+      setState(() {
+        var next = _mergeFriendLikersMapsPreserve(_friendLikersMap, fresh);
+        next = _pruneFriendLikersMapByFollowing(next);
+        _friendLikersMap = next;
+      });
+      unawaited(_persistFriendLikersMap());
     } catch (_) {
       // Friend likers are optional — silent fail.
-      if (mounted && _friendLikersMap.isEmpty) {
+      if (!mounted) return;
+      if (_friendLikersMap.isEmpty) {
         setState(() {
-          _friendLikersMap = _buildFriendLikersMapForItems(_friendFeedItemsForLikers);
+          final fresh =
+              _buildFriendLikersMapForItems(_friendFeedItemsForLikers);
+          var next = _mergeFriendLikersMapsPreserve(_friendLikersMap, fresh);
+          next = _pruneFriendLikersMapByFollowing(next);
+          _friendLikersMap = next;
         });
+        unawaited(_persistFriendLikersMap());
       }
     }
   }
@@ -329,6 +406,41 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
   }
 
+  static const int _kMaxFriendLikerKeysPerProduct = 8;
+
+  /// API sayfa 0 yenilendiğinde eski ürün→avatar eşlemesini korur (sıra değişince kaybolmayı önler).
+  Map<String, List<String>> _mergeFriendLikersMapsPreserve(
+    Map<String, List<String>> previous,
+    Map<String, List<String>> fresh,
+  ) {
+    final ids = <String>{...previous.keys, ...fresh.keys};
+    final out = <String, List<String>>{};
+    for (final id in ids) {
+      final merged = _mergeOrderedFriendAvatarKeys(fresh[id], previous[id]);
+      if (merged.isNotEmpty) {
+        out[id] = merged;
+      }
+    }
+    return out;
+  }
+
+  List<String> _mergeOrderedFriendAvatarKeys(
+    List<String>? primary,
+    List<String>? fallback,
+  ) {
+    final seen = <String>{};
+    final out = <String>[];
+    for (final k in [...?primary, ...?fallback]) {
+      if (seen.add(k)) {
+        out.add(k);
+      }
+      if (out.length >= _kMaxFriendLikerKeysPerProduct) {
+        break;
+      }
+    }
+    return out;
+  }
+
   /// Ürün kartı baloncuğu: sadece [source] satırları. Askı/deaktif aktör yok, eski cache yok.
   Map<String, List<String>> _buildFriendLikersMapForItems(
     Iterable<ActivityItem> source,
@@ -336,8 +448,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final map = <String, List<String>>{};
     for (final item in source) {
       if (item.isActorInactive) continue;
-      // Baloncuklar yalnızca gerçekten review bırakan kullanıcıları göstersin.
-      if (item.type != ActivityType.review) {
+      // Review veya ürün beğenisi: arkadaş feed’inde tip farklı gelebiliyor; ikisini de göster.
+      if (item.type != ActivityType.review && item.type != ActivityType.like) {
         continue;
       }
       final productId = item.targetContent?.productId;
@@ -1515,6 +1627,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     });
     // beklemeden: ortalama puan + review sayısı API ile tutarlı olsun (yarış azalır)
     unawaited(_refreshProductLikeStatus(id));
+    unawaited(_loadFriendLikers());
   }
 
   void _mergeProductFromDetail(
@@ -1651,15 +1764,34 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         setState(() {
           _isLoading = false;
           _bumpProductCardCachesForListedProductIds();
-          _friendLikersMap = _buildFriendLikersMapForItems(_friendFeedItemsForLikers);
+          final merged = FriendFeedMemoryCache.instance.peek()?.items;
+          final source =
+              (merged != null && merged.isNotEmpty)
+                  ? merged
+                  : _friendFeedItemsForLikers;
+          var fresh = _buildFriendLikersMapForItems(source);
+          var next = _mergeFriendLikersMapsPreserve(_friendLikersMap, fresh);
+          next = _pruneFriendLikersMapByFollowing(next);
+          _friendLikersMap = next;
         });
+        unawaited(_persistFriendLikersMap());
       }
     } catch (e) {
       if (mounted) {
         if (background && _filteredProducts.isNotEmpty) {
           _isLoading = false;
-          _friendLikersMap =
-              _buildFriendLikersMapForItems(_friendFeedItemsForLikers);
+          final merged = FriendFeedMemoryCache.instance.peek()?.items;
+          final source =
+              (merged != null && merged.isNotEmpty)
+                  ? merged
+                  : _friendFeedItemsForLikers;
+          final fresh = _buildFriendLikersMapForItems(source);
+          setState(() {
+            var next = _mergeFriendLikersMapsPreserve(_friendLikersMap, fresh);
+            next = _pruneFriendLikersMapByFollowing(next);
+            _friendLikersMap = next;
+          });
+          unawaited(_persistFriendLikersMap());
           return;
         }
         setState(() {

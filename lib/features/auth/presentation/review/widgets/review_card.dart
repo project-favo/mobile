@@ -46,19 +46,23 @@ class ReviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(AppSpacing.large),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          border: isSponsored
-              ? Border.all(color: AppColors.primary, width: 2)
-              : Border.all(color: AppColors.border, width: 1),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.large),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: isSponsored
+            ? Border.all(color: AppColors.primary, width: 2)
+            : Border.all(color: AppColors.border, width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onTap,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
             /// USER + TAG
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -143,8 +147,11 @@ class ReviewCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: AppSpacing.medium),
+              ],
+            ),
+          ),
 
-            /// ACTION ROW: grouped actions + detail arrow
+            /// ACTION ROW: üstteki [onTap] ile çakışmasın — kendi yorumunu beğenmek dahil.
             Row(
               children: [
                 const Spacer(),
@@ -165,6 +172,7 @@ class ReviewCard extends StatelessWidget {
                     children: [
                       GestureDetector(
                         onTap: onLikeTap,
+                        behavior: HitTestBehavior.opaque,
                         child: Row(
                           children: [
                             Icon(
@@ -253,15 +261,21 @@ class ReviewCard extends StatelessWidget {
                 ),
                 const SizedBox(width: AppSpacing.small),
                 // Detail arrow (bottom-right)
-                const Icon(
-                  Icons.arrow_forward_ios,
-                  size: 18,
-                  color: AppColors.textSecondary,
+                GestureDetector(
+                  onTap: onTap,
+                  behavior: HitTestBehavior.opaque,
+                  child: const Padding(
+                    padding: EdgeInsets.all(4),
+                    child: Icon(
+                      Icons.arrow_forward_ios,
+                      size: 18,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
                 ),
               ],
             ),
-          ],
-        ),
+        ],
       ),
     );
   }

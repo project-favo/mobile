@@ -203,7 +203,9 @@ class _ProductCardState extends State<ProductCard> {
     // yorum yoksa kartta puan + baloncuğu da gösterme (askıdaki yorum yıldızı kalmasın).
     final int? visibleReviewCount = widget.loadReviewCount ? _reviewCount : null;
     final bool noVisibleReviews = visibleReviewCount != null && visibleReviewCount == 0;
-    final bool showFriendBubbles = widget.friendAvatarUrls.isNotEmpty && !noVisibleReviews;
+    // Arkadaş baloncukları friends-feed verisinden gelir; karttaki görünür yorum sayısı
+    // (yenileme yarışı / filtre) ile bağlama — aksi halde review sonrası baloncuk kayboluyordu.
+    final bool showFriendBubbles = widget.friendAvatarUrls.isNotEmpty;
 
     final dpr = MediaQuery.devicePixelRatioOf(context);
     final screenW = MediaQuery.sizeOf(context).width;

@@ -16,6 +16,7 @@ import '../../../../../core/utils/product_rating_display.dart';
 import '../../../../../core/utils/app_datetime.dart';
 import '../../../../../core/widgets/new_product_badge.dart';
 import '../../../../../core/cache/current_user_cache.dart';
+import '../../../../../core/cache/self_review_like_local_prefs.dart';
 import '../../../../../core/cache/product_memory_cache.dart';
 import '../../../../../core/cache/review_memory_cache.dart';
 import '../../../../../core/utils/in_flight_id_lock.dart';
@@ -89,6 +90,8 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
   /// GET /users/{id} — review JSON’unda askı yoksa bile vitrin dışı yazarları ele.
   final Map<String, ({bool blocked, DateTime checkedAt})> _ownerGateById = {};
   static const Duration _ownerGateRecheckTtl = Duration(seconds: 12);
+  /// Backend kendi yorumunu beğenmeyi reddederse [SelfReviewLikeLocalPrefs] ile gösterim.
+  Map<String, bool> _selfLikeBoostByReviewId = {};
   /// Review detail ile aynı: home ilk 50 dışı + önceki tur vitrin = askı sinyali.
   bool? _lastProductOnHomeFirstPage;
   static const EdgeInsets _contentHorizontalPadding = EdgeInsets.symmetric(
@@ -696,6 +699,97 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
     return review.ownerId.trim() == id.trim();
   }
 
+  Future<void> _syncSelfLikeBoostFromPrefsAndServer() async {
+    final uid =
+        _currentUserId?.trim() ?? CurrentUserCache.instance.userId?.trim() ?? '';
+    if (uid.isEmpty) {
+      if (mounted) setState(() => _selfLikeBoostByReviewId = {});
+      return;
+    }
+    final disk = await SelfReviewLikeLocalPrefs.instance.loadBoostMap(uid);
+    final next = <String, bool>{};
+    for (final e in disk.entries) {
+      if (e.value != true) continue;
+      final rid = e.key;
+      ReviewDto? row;
+      for (final r in _reviews) {
+        if (r.id == rid) {
+          row = r;
+          break;
+        }
+      }
+      if (row != null && _isMyReview(row)) {
+        if (row.isLikedByCurrentUser) {
+          await SelfReviewLikeLocalPrefs.instance.setBoost(uid, rid, false);
+          continue;
+        }
+        next[rid] = true;
+      }
+    }
+    if (!mounted) return;
+    setState(() => _selfLikeBoostByReviewId = next);
+  }
+
+  /// Liste cevabında likeCount gecikmeli / eksik geliyorsa kısa paralel GET ile doldurur.
+  Future<void> _hydrateReviewRowLikeCounts() async {
+    if (_reviews.isEmpty || !mounted) return;
+    const cap = 36;
+    const concurrency = 12;
+    final slice = _reviews.take(cap).toList();
+    final updates = <String, int>{};
+    for (var i = 0; i < slice.length; i += concurrency) {
+      final part = slice.skip(i).take(concurrency).toList();
+      await Future.wait(
+        part.map((r) async {
+          try {
+            updates[r.id] = await _interactionRepository.getReviewLikeCount(
+              r.id,
+            );
+          } catch (_) {}
+        }),
+      );
+      if (!mounted) return;
+    }
+    if (!mounted) return;
+    setState(() {
+      var changed = false;
+      for (var j = 0; j < _reviews.length; j++) {
+        final id = _reviews[j].id;
+        final c = updates[id];
+        if (c == null) continue;
+        if (_reviews[j].likeCount == c) continue;
+        changed = true;
+        final o = _reviews[j];
+        _reviews[j] = ReviewDto(
+          id: o.id,
+          title: o.title,
+          description: o.description,
+          isCollaborative: o.isCollaborative,
+          rating: o.rating,
+          createdAt: o.createdAt,
+          productId: o.productId,
+          productName: o.productName,
+          ownerId: o.ownerId,
+          ownerUserName: o.ownerUserName,
+          ownerProfilePhotoUrl: o.ownerProfilePhotoUrl,
+          mediaList: o.mediaList,
+          likeCount: c,
+          isLikedByCurrentUser: o.isLikedByCurrentUser,
+          isProductNotListed: o.isProductNotListed,
+          isReviewInactive: o.isReviewInactive,
+        );
+      }
+      if (changed && _isUsingDefaultReviewQuery) {
+        ReviewMemoryCache.instance.remember(_currentProduct.id, _reviews);
+      }
+    });
+  }
+
+  Future<void> _afterReviewsRefreshed() async {
+    await _hydrateReviewRowLikeCounts();
+    await _syncSelfLikeBoostFromPrefsAndServer();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1291,6 +1385,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
           _isLoadingReviews = false;
           _errorMessage = null;
         });
+        unawaited(_afterReviewsRefreshed());
         shouldFetchInBackground = true;
       } else {
         setState(() {
@@ -1324,6 +1419,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
             _errorMessage = null;
           });
           ProductMemoryCache.instance.remember(_currentProduct);
+          unawaited(_afterReviewsRefreshed());
           return;
         } catch (e) {
           setState(() {
@@ -1378,6 +1474,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
         _errorMessage = null;
       });
       ProductMemoryCache.instance.remember(_currentProduct);
+      unawaited(_afterReviewsRefreshed());
     } catch (e, st) {
       if (shouldFetchInBackground && _reviews.isNotEmpty) return;
       final isLoggedIn = FirebaseAuth.instance.currentUser != null;
@@ -2156,7 +2253,13 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                   )
                 else
                   ..._reviews.map(
-                    (review) => Padding(
+                    (review) {
+                      final displayReview =
+                          SelfReviewLikeDisplay.mergeServerRowWithBoostMap(
+                        review,
+                        _selfLikeBoostByReviewId,
+                      );
+                      return Padding(
                       padding: const EdgeInsets.only(
                         left: AppSpacing.xxLarge,
                         right: AppSpacing.xxLarge,
@@ -2170,8 +2273,8 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                           review.createdAt,
                         ),
                         isSponsored: review.isCollaborative,
-                        likeCount: review.likeCount,
-                        isLiked: review.isLikedByCurrentUser,
+                        likeCount: displayReview.likeCount,
+                        isLiked: displayReview.isLikedByCurrentUser,
                         isCurrentUser: _isMyReview(review),
                         showChatIcon:
                             _currentUsername != null &&
@@ -2240,12 +2343,43 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                           if (!_reviewListLikeLock.tryEnter(review.id)) {
                             return;
                           }
-                          try {
-                          // Optimistic update - UI'ı hemen güncelle
-                          final reviewIndex = _reviews.indexWhere(
+                          final boostBeforeTap =
+                              _selfLikeBoostByReviewId[review.id] == true;
+                          int reviewIndex = _reviews.indexWhere(
                             (r) => r.id == review.id,
                           );
+                          try {
+                          // Optimistic update - UI'ı hemen güncelle
                           if (reviewIndex != -1) {
+                            if (_isMyReview(review)) {
+                              final displayLiked =
+                                  review.isLikedByCurrentUser ||
+                                  boostBeforeTap;
+                              final target = !displayLiked;
+                              setState(() {
+                                if (target &&
+                                    !review.isLikedByCurrentUser) {
+                                  _selfLikeBoostByReviewId[review.id] = true;
+                                } else {
+                                  _selfLikeBoostByReviewId.remove(review.id);
+                                }
+                              });
+                              final uidOptimistic =
+                                  _currentUserId?.trim() ??
+                                  CurrentUserCache.instance.userId
+                                      ?.trim() ??
+                                  '';
+                              if (uidOptimistic.isNotEmpty) {
+                                unawaited(
+                                  SelfReviewLikeLocalPrefs.instance.setBoost(
+                                    uidOptimistic,
+                                    review.id,
+                                    _selfLikeBoostByReviewId[review.id] ==
+                                        true,
+                                  ),
+                                );
+                              }
+                            } else {
                             final previousLikeStatus =
                                 _reviews[reviewIndex].isLikedByCurrentUser;
                             final previousLikeCount =
@@ -2276,6 +2410,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                                 isReviewInactive: review.isReviewInactive,
                               );
                             });
+                            }
                           }
 
                           try {
@@ -2291,6 +2426,23 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                             // Upvote toggle yap
                             final newLikeStatus = await _interactionRepository
                                 .toggleReviewLike(token, review.id);
+
+                            final uid =
+                                _currentUserId?.trim() ??
+                                CurrentUserCache.instance.userId?.trim() ??
+                                '';
+                            if (uid.isNotEmpty && _isMyReview(review)) {
+                              await SelfReviewLikeLocalPrefs.instance.setBoost(
+                                uid,
+                                review.id,
+                                false,
+                              );
+                              if (mounted) {
+                                setState(() {
+                                  _selfLikeBoostByReviewId.remove(review.id);
+                                });
+                              }
+                            }
 
                             // Review'ı backend'den yeniden çek (güncel like durumu için)
                             try {
@@ -2382,21 +2534,60 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                               }
                             }
                           } catch (e) {
-                            // Hata durumunda optimistic update'i geri al
-                            if (reviewIndex != -1) {
-                              setState(() {
-                                _reviews[reviewIndex] = review;
-                              });
-                            }
-                            if (context.mounted) {
-                              final errorMessage =
-                                  ErrorHandler.getUserFriendlyMessage(e);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(errorMessage),
-                                  backgroundColor: AppColors.error,
-                                ),
-                              );
+                            if (_isMyReview(review) &&
+                                interactionErrorLooksLikeCannotLikeOwnReview(
+                                  e,
+                                )) {
+                              final uid =
+                                  _currentUserId?.trim() ??
+                                  CurrentUserCache.instance.userId
+                                      ?.trim() ??
+                                  '';
+                              if (uid.isNotEmpty && mounted) {
+                                final bNow =
+                                    _selfLikeBoostByReviewId[review.id] ==
+                                    true;
+                                await SelfReviewLikeLocalPrefs.instance
+                                    .setBoost(uid, review.id, bNow);
+                              }
+                            } else {
+                              if (_isMyReview(review)) {
+                                final uid =
+                                    _currentUserId?.trim() ??
+                                    CurrentUserCache.instance.userId
+                                        ?.trim() ??
+                                    '';
+                                if (uid.isNotEmpty) {
+                                  await SelfReviewLikeLocalPrefs.instance
+                                      .setBoost(uid, review.id, boostBeforeTap);
+                                }
+                                if (mounted) {
+                                  setState(() {
+                                    if (boostBeforeTap) {
+                                      _selfLikeBoostByReviewId[review.id] =
+                                          true;
+                                    } else {
+                                      _selfLikeBoostByReviewId.remove(
+                                        review.id,
+                                      );
+                                    }
+                                  });
+                                }
+                              } else if (reviewIndex != -1) {
+                                setState(() {
+                                  _reviews[reviewIndex] = review;
+                                });
+                              }
+                              if (context.mounted) {
+                                final errorMessage =
+                                    ErrorHandler.getUserFriendlyMessage(e);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(errorMessage),
+                                    backgroundColor: AppColors.error,
+                                  ),
+                                );
+                              }
                             }
                           }
                           } finally {
@@ -2404,7 +2595,8 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                           }
                         },
                       ),
-                    ),
+                    );
+                    },
                   ),
 
                 const SizedBox(height: AppSpacing.xxLarge),
