@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/cache/activity_memory_cache.dart';
@@ -10,7 +11,11 @@ import '../../../core/notifications/notification_realtime_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
+import '../../../core/routes/custom_page_transitions.dart';
+import '../../../core/utils/content_availability_messages.dart';
+import '../../../core/utils/content_unavailable_dialog.dart';
 import '../../../core/utils/error_handler.dart';
+import '../../../core/utils/exceptions.dart';
 import '../../../core/config/list_paging.dart';
 import '../../../core/widgets/paged_navigation_bar.dart';
 import '../../../core/utils/session_helper.dart';
@@ -21,8 +26,11 @@ import '../domain/activity_type.dart';
 import '../../auth/presentation/home_page.dart';
 import '../../auth/presentation/friend_feed_page.dart';
 import '../../auth/presentation/profile/pages/profile_page.dart';
+import '../../auth/presentation/review/pages/review_detail_page.dart';
 import '../../auth/presentation/review/pages/review_page.dart';
 import '../../auth/data/repositories/interaction_repository.dart';
+import '../../auth/data/repositories/product_repository.dart';
+import '../../auth/data/repositories/review_repository.dart';
 import '../../auth/data/services/auth_service.dart';
 import '../../auth/presentation/search_page.dart';
 import '../../../core/cache/product_memory_cache.dart';
@@ -31,6 +39,25 @@ import '../../auth/data/models/tag_dto.dart';
 import 'activity_controller.dart';
 import 'widgets/activity_feed_list_skeleton.dart';
 import 'widgets/activity_feed_row.dart';
+
+bool _activitySuggestProductOrReviewGone(Object e) {
+  if (e is ReviewNotAvailableException || e is ProductNotAvailableException) {
+    return true;
+  }
+  if (e is DioException) {
+    final c = e.response?.statusCode;
+    if (c != null && c >= 400 && c < 500 && c != 429) {
+      return true;
+    }
+  }
+  final s = e.toString().toLowerCase();
+  return s.contains('reviewnotavailable') ||
+      s.contains('productnotavailable') ||
+      s.contains('not available') ||
+      s.contains('no longer') ||
+      s.contains('unavailable') ||
+      s.contains('removed from');
+}
 
 /// Activity feed backed by the notifications API (app color palette).
 class ActivityPage extends StatefulWidget {
@@ -47,6 +74,7 @@ class _ActivityPageState extends State<ActivityPage>
   final ScrollController _scrollController = ScrollController();
   /// Her sekme için ayrı sayfa (her sayfada en fazla [kStandardListPageSize] satır).
   final List<int> _pageInTab = [0, 0, 0, 0];
+  final List<bool> _activityTabPrefetchFailed = [false, false, false, false];
   StreamSubscription<NotificationPushEvent>? _pushSub;
 
   Route<T> _instantRoute<T>(Widget page) {
@@ -131,12 +159,14 @@ class _ActivityPageState extends State<ActivityPage>
   Future<void> _refreshOnReturn() async {
     await _controller.loadFirstPage();
     if (!mounted) return;
+    setState(_resetActivityPrefetchFlags);
     await NotificationRealtimeService.instance.refreshUnread();
   }
 
   Future<void> _bootstrapActivity() async {
     await _controller.loadFirstPage();
     if (!mounted) return;
+    setState(_resetActivityPrefetchFlags);
     if (_controller.errorMessage == null) {
       await _controller.markEntireFeedViewed();
     }
@@ -152,7 +182,26 @@ class _ActivityPageState extends State<ActivityPage>
     }
     setState(() {
       _pageInTab[_tabController.index] = 0;
+      for (var k = 0; k < 4; k++) {
+        _activityTabPrefetchFailed[k] = false;
+      }
     });
+  }
+
+  void _scrollActivityToTop() {
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(0);
+      }
+    });
+  }
+
+  void _resetActivityPrefetchFlags() {
+    for (var k = 0; k < 4; k++) {
+      _activityTabPrefetchFailed[k] = false;
+    }
   }
 
   @override
@@ -229,10 +278,22 @@ class _ActivityPageState extends State<ActivityPage>
     return ((n - 1) ~/ kStandardListPageSize) + 1;
   }
 
+  (int, int, int) _activityPagerRange() {
+    final filtered = _filteredItems();
+    final tab = _tabController.index;
+    var p = _pageInTab[tab];
+    final maxP = math.max(0, ((filtered.length - 1) ~/ kStandardListPageSize));
+    if (p > maxP) p = maxP;
+    final start = p * kStandardListPageSize + 1;
+    final end = math.min((p + 1) * kStandardListPageSize, filtered.length);
+    return (start, end, filtered.length);
+  }
+
   bool _canGoNextActivity() {
     final tab = _tabController.index;
     final f = _filterForTabIndex(_controller.items, tab);
     if (f.isEmpty) return false;
+    if (_activityTabPrefetchFailed[tab]) return false;
     final p = _pageInTab[tab];
     if ((p + 1) * kStandardListPageSize < f.length) return true;
     return _controller.hasMore;
@@ -247,6 +308,7 @@ class _ActivityPageState extends State<ActivityPage>
     var f = _filterForTabIndex(_controller.items, tab);
     if ((p + 1) * kStandardListPageSize < f.length) {
       setState(() => _pageInTab[tab] = p + 1);
+      _scrollActivityToTop();
       return;
     }
     if (!_controller.hasMore) return;
@@ -257,17 +319,119 @@ class _ActivityPageState extends State<ActivityPage>
       if (!mounted) return;
       f = _filterForTabIndex(_controller.items, tab);
       if ((p + 1) * kStandardListPageSize < f.length) {
-        setState(() => _pageInTab[tab] = p + 1);
+        setState(() {
+          _pageInTab[tab] = p + 1;
+          _activityTabPrefetchFailed[tab] = false;
+        });
+        _scrollActivityToTop();
         return;
       }
       if (_controller.items.length == beforeLen) break;
+    }
+    if (!mounted) return;
+    if ((p + 1) * kStandardListPageSize >=
+        _filterForTabIndex(_controller.items, tab).length) {
+      setState(() => _activityTabPrefetchFailed[tab] = true);
     }
   }
 
   void _goPrevActivity() {
     final t = _tabController.index;
     if (_pageInTab[t] <= 0) return;
-    setState(() => _pageInTab[t]--);
+    setState(() {
+      _pageInTab[t]--;
+      _activityTabPrefetchFailed[t] = false;
+    });
+    _scrollActivityToTop();
+  }
+
+  Future<void> _openProductReviewPageFromActivity(
+    BuildContext context,
+    ActivityItem item,
+  ) async {
+    final pid = item.targetContent?.productId;
+    if (pid == null || pid.isEmpty) return;
+    if (ProductMemoryCache.instance.peek(pid) == null) {
+      final thumb = item.targetContent?.thumbnailUrl ?? '';
+      final name = item.targetContent?.title ?? '';
+      if (thumb.isNotEmpty) {
+        ProductMemoryCache.instance.remember(
+          ProductDto(
+            id: pid,
+            name: name,
+            imageURL: thumb,
+            tag: TagDto(id: '', name: ''),
+          ),
+        );
+      }
+    }
+    if (!context.mounted) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ReviewPage(
+          productId: pid,
+          productName: item.targetContent?.title,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showProductOrReviewUnavailableDialog(BuildContext context) async {
+    if (!context.mounted) return;
+    await showContentUnavailableDialog(
+      context,
+      title: kTitleProductOrReviewUnavailable,
+      message: kMessageProductOrReviewNoLongerAvailable,
+      onContinue: () async {},
+    );
+  }
+
+  Future<void> _openReviewDetailFromId(
+    BuildContext context,
+    String reviewId,
+  ) async {
+    try {
+      final token = await SessionHelper().ensureSession();
+      if (!context.mounted) return;
+      final review = await ReviewRepository().getReviewById(
+        reviewId,
+        firebaseIdToken: token,
+      );
+      final product = await ProductRepository().getProductById(
+        review.productId,
+        firebaseIdToken: token,
+        bypassCache: true,
+      );
+      if (!context.mounted) return;
+      await Navigator.of(context).push<void>(
+        SlideRightRoute(
+          page: ReviewDetailPage(
+            review: review,
+            product: product,
+          ),
+        ),
+      );
+    } on ReviewNotAvailableException {
+      if (context.mounted) {
+        await _showProductOrReviewUnavailableDialog(context);
+      }
+    } on ProductNotAvailableException {
+      if (context.mounted) {
+        await _showProductOrReviewUnavailableDialog(context);
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      if (_activitySuggestProductOrReviewGone(e)) {
+        await _showProductOrReviewUnavailableDialog(context);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(ErrorHandler.getUserFriendlyMessage(e)),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _onOpenItem(BuildContext context, ActivityItem item) async {
@@ -302,31 +466,16 @@ class _ActivityPageState extends State<ActivityPage>
         );
         break;
       case ActivityType.like:
+        final rid = item.targetContent?.reviewId?.trim();
+        if (rid != null && rid.isNotEmpty) {
+          await _openReviewDetailFromId(context, rid);
+        } else {
+          await _openProductReviewPageFromActivity(context, item);
+        }
+        break;
       case ActivityType.comment:
       case ActivityType.review:
-        final pid = item.targetContent?.productId;
-        if (pid != null && pid.isNotEmpty) {
-          if (ProductMemoryCache.instance.peek(pid) == null) {
-            final thumb = item.targetContent?.thumbnailUrl ?? '';
-            final name  = item.targetContent?.title ?? '';
-            if (thumb.isNotEmpty) {
-              ProductMemoryCache.instance.remember(ProductDto(
-                id: pid,
-                name: name,
-                imageURL: thumb,
-                tag: TagDto(id: '', name: ''),
-              ));
-            }
-          }
-          Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => ReviewPage(
-                productId: pid,
-                productName: item.targetContent?.title,
-              ),
-            ),
-          );
-        }
+        await _openProductReviewPageFromActivity(context, item);
         break;
     }
   }
@@ -357,7 +506,10 @@ class _ActivityPageState extends State<ActivityPage>
   }
 
   Future<void> _onRefresh() async {
-    await _controller.loadFirstPage();
+    await _controller.loadFirstPage(flushRemoteListabilityCaches: true);
+    if (mounted) {
+      setState(_resetActivityPrefetchFlags);
+    }
     if (mounted && _controller.errorMessage == null) {
       await _controller.markEntireFeedViewed();
     }
@@ -526,49 +678,51 @@ class _ActivityPageState extends State<ActivityPage>
           }
 
           final pageItems = _visiblePageForCurrentTab();
+          final range = _activityPagerRange();
           return Column(
             children: [
               Expanded(
                 child: RefreshIndicator(
-            color: AppColors.primary,
-            onRefresh: _onRefresh,
-            child: ListView.separated(
-              controller: _scrollController,
-              physics: const AlwaysScrollableScrollPhysics(
-                parent: ClampingScrollPhysics(),
-              ),
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 20),
-              itemCount: pageItems.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
-              itemBuilder: (context, index) {
-                final item = pageItems[index];
-                return Container(
-                  key: ValueKey(item.id),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: AppColors.border.withValues(alpha: 0.7),
+                  color: AppColors.primary,
+                  onRefresh: _onRefresh,
+                  child: ListView.separated(
+                    controller: _scrollController,
+                    physics: const AlwaysScrollableScrollPhysics(
+                      parent: ClampingScrollPhysics(),
                     ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.03),
-                        blurRadius: 8,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
+                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 20),
+                    itemCount: pageItems.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final item = pageItems[index];
+                      return Container(
+                        key: ValueKey(item.id),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: AppColors.border.withValues(alpha: 0.7),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.03),
+                              blurRadius: 8,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        child: ActivityFeedRow(
+                          key: ValueKey('row_${item.id}'),
+                          item: item,
+                          following: _controller.isFollowingUser(item.user.id),
+                          onToggleFollow: () =>
+                              _onToggleFollow(context, item.user.id),
+                          onOpen: () => _onOpenItem(context, item),
+                          onUserTap: () => _onUserTap(context, item),
+                        ),
+                      );
+                    },
                   ),
-                  child: ActivityFeedRow(
-                    key: ValueKey('row_${item.id}'),
-                    item: item,
-                    following: _controller.isFollowingUser(item.user.id),
-                    onToggleFollow: () => _onToggleFollow(context, item.user.id),
-                    onOpen: () => _onOpenItem(context, item),
-                    onUserTap: () => _onUserTap(context, item),
-                  ),
-                );
-              },
-            ),
                 ),
               ),
               if (filtered.isNotEmpty)
@@ -583,6 +737,10 @@ class _ActivityPageState extends State<ActivityPage>
                     unawaited(_goNextActivity());
                   },
                   showTopDivider: true,
+                  rangeStart1Based: range.$1,
+                  rangeEnd1Based: range.$2,
+                  rangeTotal: range.$3,
+                  itemNounPlural: 'activities',
                 ),
             ],
           );

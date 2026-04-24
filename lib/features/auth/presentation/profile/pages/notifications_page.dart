@@ -1,16 +1,23 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../../core/config/list_paging.dart';
 import '../../../../../core/navigation/app_route_observer.dart';
 import '../../../../../core/notifications/notification_realtime_service.dart';
+import '../../../../../core/routes/custom_page_transitions.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/theme/app_text_styles.dart';
+import '../../../../../core/utils/content_availability_messages.dart';
+import '../../../../../core/utils/content_unavailable_dialog.dart';
 import '../../../../../core/utils/error_handler.dart';
+import '../../../../../core/utils/exceptions.dart';
+import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/widgets/paged_navigation_bar.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
@@ -19,10 +26,32 @@ import '../../../data/services/auth_service.dart';
 import '../../../data/utils/notification_remote_user_filter.dart';
 import '../../../data/models/notification_section.dart';
 import '../../../data/repositories/notification_repository.dart';
+import '../../../data/repositories/product_repository.dart';
+import '../../../data/repositories/review_repository.dart';
+import '../../review/pages/review_detail_page.dart';
 import '../../review/pages/review_page.dart';
 
 /// Tarihler ve metinler İngilizce (ekran dili ne olursa olsun).
 const String _kDateLocale = 'en_US';
+
+bool _suggestsProductOrReviewGone(Object e) {
+  if (e is ReviewNotAvailableException || e is ProductNotAvailableException) {
+    return true;
+  }
+  if (e is DioException) {
+    final c = e.response?.statusCode;
+    if (c != null && c >= 400 && c < 500 && c != 429) {
+      return true;
+    }
+  }
+  final s = e.toString().toLowerCase();
+  return s.contains('reviewnotavailable') ||
+      s.contains('productnotavailable') ||
+      s.contains('not available') ||
+      s.contains('no longer') ||
+      s.contains('unavailable') ||
+      s.contains('removed from');
+}
 
 String _notificationActorInitial(NotificationDto n) {
   final u = n.actor?.userName?.trim();
@@ -56,6 +85,17 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
   bool _paging = false;
   String? _errorMessage;
   bool _markingAll = false;
+  final ScrollController _listScrollController = ScrollController();
+
+  void _scrollNotificationsToTop() {
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_listScrollController.hasClients) {
+        _listScrollController.jumpTo(0);
+      }
+    });
+  }
 
   List<NotificationDto> get _items {
     final start = _uiPage * kStandardListPageSize;
@@ -114,6 +154,7 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
     appRouteObserver.unsubscribe(this);
     _pushSub?.cancel();
     NotificationRealtimeService.instance.detach();
+    _listScrollController.dispose();
     super.dispose();
   }
 
@@ -158,8 +199,6 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
         size: kStandardListPageSize,
       );
       if (!mounted) return;
-      RemoteNotificationUserListabilityCache.instance
-          .invalidateForNotificationDtos(page.content);
       final list = await filterNotificationsHidingUnlistedUsers(
         page.content,
         _auth,
@@ -171,7 +210,7 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
     }
   }
 
-  Future<void> _loadFirstPage() async {
+  Future<void> _loadFirstPage({bool flushRemoteListabilityCaches = false}) async {
     setState(() {
       _loadingFirst = true;
       _errorMessage = null;
@@ -181,11 +220,15 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
       _serverTotalPages = 1;
     });
     try {
-      // Pull-to-refresh / yeniden yükleme: askı ↔ aktif kontrolü için önbelleği sıfırla.
-      RemoteNotificationUserListabilityCache.instance.clear();
+      if (flushRemoteListabilityCaches) {
+        RemoteNotificationUserListabilityCache.instance.clear();
+        RemoteNotificationProductListabilityCache.instance.clear();
+        RemoteNotificationReviewContextCache.instance.clear();
+      }
       await _pumpFromServerForVisibleCount(kStandardListPageSize);
       if (!mounted) return;
       setState(() => _loadingFirst = false);
+      _scrollNotificationsToTop();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -200,6 +243,7 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
     final nextStart = (_uiPage + 1) * kStandardListPageSize;
     if (nextStart < _allVisible.length) {
       setState(() => _uiPage++);
+      _scrollNotificationsToTop();
       return;
     }
     setState(() => _paging = true);
@@ -211,6 +255,7 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
           _uiPage++;
           _paging = false;
         });
+        _scrollNotificationsToTop();
       } else {
         setState(() => _paging = false);
       }
@@ -222,6 +267,7 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
   void _goPrevPage() {
     if (!_canGoPrev) return;
     setState(() => _uiPage--);
+    _scrollNotificationsToTop();
   }
 
   Future<void> _markAllRead() async {
@@ -230,7 +276,7 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
     try {
       await _repository.markAllRead();
       if (!mounted) return;
-      await _loadFirstPage();
+      await _loadFirstPage(flushRemoteListabilityCaches: true);
       await NotificationRealtimeService.instance.refreshUnread();
     } catch (e) {
       if (!mounted) return;
@@ -257,37 +303,101 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
           });
         }
         await NotificationRealtimeService.instance.refreshUnread();
-      } catch (e) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(ErrorHandler.getUserFriendlyMessage(e)),
-            backgroundColor: AppColors.error,
-          ),
-        );
+      } catch (_) {
+        // Okundu işaretinde hata (ör. ağ): jenerik kırmızı snackbar gösterme;
+        // kullanıcı hedef içeriğe gidebilsin.
       }
     }
     if (!mounted) return;
-    _tryNavigateFromPayload(n);
+    await _tryNavigateFromPayload(n);
   }
 
-  void _tryNavigateFromPayload(NotificationDto n) {
+  Future<void> _showProductOrReviewUnavailableDialog() async {
+    if (!mounted) return;
+    await showContentUnavailableDialog(
+      context,
+      title: kTitleProductOrReviewUnavailable,
+      message: kMessageProductOrReviewNoLongerAvailable,
+      onContinue: () async {},
+    );
+  }
+
+  Future<void> _tryNavigateFromPayload(NotificationDto n) async {
     final raw = n.payloadJson?.trim();
     if (raw == null || raw.isEmpty) return;
+    Map<String, dynamic> map;
     try {
-      final map = jsonDecode(raw) as Map<String, dynamic>;
-      final productId = map['productId']?.toString();
-      if (productId == null || productId.isEmpty) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ReviewPage(
-            productId: productId,
-            productName: map['productName']?.toString() ?? n.title,
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) return;
+      map = decoded;
+    } catch (_) {
+      return;
+    }
+
+    final reviewId = notificationReviewIdKey(n)?.trim();
+    if (reviewId != null && reviewId.isNotEmpty) {
+      try {
+        final token = await SessionHelper().ensureSession();
+        if (!mounted) return;
+        final review = await ReviewRepository().getReviewById(
+          reviewId,
+          firebaseIdToken: token,
+        );
+        final product = await ProductRepository().getProductById(
+          review.productId,
+          firebaseIdToken: token,
+          bypassCache: true,
+        );
+        if (!mounted) return;
+        await Navigator.push<void>(
+          context,
+          SlideRightRoute(
+            page: ReviewDetailPage(
+              review: review,
+              product: product,
+            ),
           ),
+        );
+      } on ReviewNotAvailableException {
+        if (mounted) await _showProductOrReviewUnavailableDialog();
+      } on ProductNotAvailableException {
+        if (mounted) await _showProductOrReviewUnavailableDialog();
+      } catch (e) {
+        if (!mounted) return;
+        if (_suggestsProductOrReviewGone(e)) {
+          await _showProductOrReviewUnavailableDialog();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(ErrorHandler.getUserFriendlyMessage(e)),
+              backgroundColor: AppColors.error,
+            ),
+          );
+        }
+      }
+      return;
+    }
+
+    final productId = map['productId']?.toString().trim();
+    final fallbackPid = notificationProductIdKey(n)?.trim();
+    final pid = (productId != null && productId.isNotEmpty)
+        ? productId
+        : fallbackPid;
+    if (pid == null || pid.isEmpty) return;
+    if (!mounted) return;
+    final rawName = map['productName']?.toString().trim() ?? '';
+    final name = rawName.isNotEmpty
+        ? rawName
+        : ((n.product?.name.isNotEmpty ?? false) ? n.product!.name : n.title);
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ReviewPage(
+          productId: pid,
+          productName: name,
         ),
-      );
-    } catch (_) {}
+      ),
+    );
   }
 
   String _formatTimestamp(DateTime? d) {
@@ -413,7 +523,7 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
             child: RefreshIndicator(
               color: AppColors.primary,
               onRefresh: () async {
-                await _loadFirstPage();
+                await _loadFirstPage(flushRemoteListabilityCaches: true);
                 await NotificationRealtimeService.instance.refreshUnread();
               },
               child: _buildBody(),
@@ -433,6 +543,13 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
                 unawaited(_goNextPage());
               },
               backgroundColor: AppColors.background,
+              rangeStart1Based: _uiPage * kStandardListPageSize + 1,
+              rangeEnd1Based: math.min(
+                (_uiPage + 1) * kStandardListPageSize,
+                _allVisible.length,
+              ),
+              rangeTotal: _allVisible.length,
+              itemNounPlural: 'notifications',
             ),
         ],
       ),
@@ -442,6 +559,7 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
   Widget _buildBody() {
     if (_loadingFirst) {
       return ListView(
+        controller: _listScrollController,
         physics: const AlwaysScrollableScrollPhysics(
           parent: ClampingScrollPhysics(),
         ),
@@ -453,6 +571,7 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
     }
     if (_errorMessage != null) {
       return ListView(
+        controller: _listScrollController,
         physics: const AlwaysScrollableScrollPhysics(
           parent: ClampingScrollPhysics(),
         ),
@@ -469,7 +588,8 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
           const SizedBox(height: AppSpacing.large),
           Center(
             child: TextButton(
-              onPressed: _loadFirstPage,
+              onPressed: () =>
+                  unawaited(_loadFirstPage(flushRemoteListabilityCaches: true)),
               child: const Text('Retry'),
             ),
           ),
@@ -478,6 +598,7 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
     }
     if (_allVisible.isEmpty) {
       return ListView(
+        controller: _listScrollController,
         physics: const AlwaysScrollableScrollPhysics(
           parent: ClampingScrollPhysics(),
         ),
@@ -598,6 +719,7 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
     sectionWidgets.add(const SizedBox(height: AppSpacing.large));
 
     return ListView(
+      controller: _listScrollController,
       physics: const AlwaysScrollableScrollPhysics(
         parent: ClampingScrollPhysics(),
       ),

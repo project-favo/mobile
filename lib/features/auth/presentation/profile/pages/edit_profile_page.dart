@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
@@ -13,6 +15,7 @@ import '../../../../../core/utils/user_display_name_prefs.dart';
 import '../../../../../core/utils/username_input_rules.dart';
 import '../../../../../core/utils/resolve_media_url.dart';
 import '../../../../auth/data/services/auth_service.dart';
+import '../../../../../core/utils/exceptions.dart';
 import '../../../../auth/data/models/user_response_dto.dart';
 import '../../../../auth/data/models/user_update_request_dto.dart';
 
@@ -28,7 +31,8 @@ class EditProfilePage extends StatefulWidget {
   State<EditProfilePage> createState() => _EditProfilePageState();
 }
 
-class _EditProfilePageState extends State<EditProfilePage> {
+class _EditProfilePageState extends State<EditProfilePage>
+    with WidgetsBindingObserver {
   final AuthService _authService = AuthService();
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _nameController;
@@ -48,6 +52,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _nameController = TextEditingController(text: widget.user.name ?? '');
     _surnameController = TextEditingController(text: widget.user.surname ?? '');
     _userNameController = TextEditingController(text: widget.user.userName);
@@ -74,7 +79,24 @@ class _EditProfilePageState extends State<EditProfilePage> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_revalidateAccountOnResume());
+    }
+  }
+
+  /// Profil düzenlerken askı — [getMe] → [_finalizeUserResponse] oturumu kapatır.
+  Future<void> _revalidateAccountOnResume() async {
+    try {
+      await _authService.getMe();
+    } on DeactivatedAccountException {
+      // Oturum zaten kapatılıyor
+    } catch (_) {}
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _nameController.dispose();
     _surnameController.dispose();
     _userNameController.dispose();

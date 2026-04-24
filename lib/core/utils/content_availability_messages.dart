@@ -20,4 +20,9 @@ const String kTitleContentUnavailable = 'Content unavailable';
 const String kMessageGenericContentNoLongerAvailable =
     'This content is no longer available.';
 
+/// Bildirim / paylaşım: ürün askıda veya review kaldırıldığında ortak metin.
+const String kTitleProductOrReviewUnavailable = 'Content unavailable';
+const String kMessageProductOrReviewNoLongerAvailable =
+    'This product or review is no longer available.';
+
 const String kDialogButtonContinue = 'Continue';

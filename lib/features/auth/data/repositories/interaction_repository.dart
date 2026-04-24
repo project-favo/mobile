@@ -1,5 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import '../../../../core/cache/current_user_cache.dart';
+import '../../../../core/cache/follow_notification_horizon_prefs.dart';
 import '../../../../core/config/api_config.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/utils/app_datetime.dart';
@@ -295,11 +297,22 @@ class InteractionRepository {
     try {
       _apiClient.setAuthToken(firebaseIdToken);
       final response = await _apiClient.dio.post('/api/interactions/user/$userId/follow');
+      final bool following;
       if (response.data is Map) {
         final v = response.data['following'];
-        return v == true || v == 1;
+        following = v == true || v == 1;
+      } else {
+        following = false;
       }
-      return false;
+      final me = CurrentUserCache.instance.userId?.trim();
+      if (me != null && me.isNotEmpty) {
+        await FollowNotificationHorizonPrefs.instance.applyFollowToggle(
+          viewerId: me,
+          followeeId: userId,
+          nowFollowing: following,
+        );
+      }
+      return following;
     } on DioException catch (e) {
       if (e.response?.statusCode == 401) throw const UnauthorizedException();
       final errorData = e.response?.data;

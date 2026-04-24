@@ -57,7 +57,7 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
   final AuthService _authService = AuthService();
   final InteractionRepository _interactionRepository = InteractionRepository();
@@ -162,6 +162,7 @@ class _ProfilePageState extends State<ProfilePage>
   void initState() {
     super.initState();
     unawaited(ReviewReportStorage.hydrateForCurrentUser());
+    WidgetsBinding.instance.addObserver(this);
     unawaited(ProductReportStorage.hydrateForCurrentUser());
     _tabController = TabController(length: 2, vsync: this);
     final warm = ProfileWarmCache.instance.peek();
@@ -760,6 +761,9 @@ class _ProfilePageState extends State<ProfilePage>
     if (_profileRefreshInFlight) return;
     _profileRefreshInFlight = true;
     try {
+      await _loadUserData(background: true);
+      if (!mounted) return;
+      if (_user == null || _user!.id.isEmpty) return;
       final id = _user!.id;
       await Future.wait<void>([
         _loadFollowCounts(id),
@@ -793,9 +797,17 @@ class _ProfilePageState extends State<ProfilePage>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _profilePollTimer?.cancel();
     _tabController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_loadUserData(background: true));
+    }
   }
 
   /// Wishlist [ProductDto] satırını [getProductById] ile teyit eder; askı/404’te [null] (satır gider).

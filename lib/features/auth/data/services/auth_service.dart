@@ -82,7 +82,7 @@ class AuthService {
       await _sessionHelper.handleSuspendedAccount();
       throw const SuspendedAccountException();
     }
-    if (merged.isAccountDeactivated) {
+    if (merged.isAccountDeactivated || merged.isProfileViewBlocked) {
       await _sessionHelper.handleDeactivatedAccount();
       throw const DeactivatedAccountException();
     }
@@ -468,6 +468,8 @@ class AuthService {
       _sessionHelper.clearSession();
       clearAllAppCachesOnLogout();
       RemoteNotificationUserListabilityCache.instance.clear();
+      RemoteNotificationProductListabilityCache.instance.clear();
+      RemoteNotificationReviewContextCache.instance.clear();
       // Firebase oturumunu kapat
       await _firebaseAuth.signOut();
     } on FirebaseAuthException catch (e) {
@@ -482,6 +484,8 @@ class AuthService {
     _sessionHelper.clearSession();
     clearAllAppCachesOnLogout();
     RemoteNotificationUserListabilityCache.instance.clear();
+    RemoteNotificationProductListabilityCache.instance.clear();
+    RemoteNotificationReviewContextCache.instance.clear();
     await _firebaseAuth.signOut();
   }
 

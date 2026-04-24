@@ -12,6 +12,7 @@ import 'review_report_storage.dart';
 import '../cache/app_session_cache.dart';
 import '../config/app_background_timers.dart';
 import 'app_logger.dart';
+import 'user_account_flags.dart';
 
 /// Session management helper
 /// Handles backend session establishment and token management
@@ -206,6 +207,7 @@ class SessionHelper {
         (map['isAccountDeactivated'] as bool)) {
       return true;
     }
+    if (isUserSuspendedSignalInMap(map)) return true;
     final status = map['status']?.toString().toLowerCase() ?? '';
     final active = map['active'];
     final enabled = map['enabled'];

@@ -1,4 +1,6 @@
 import 'package:dio/dio.dart';
+import '../../../../core/cache/current_user_cache.dart';
+import '../../../../core/cache/product_review_notification_horizon_prefs.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/utils/entity_active.dart';
 import '../../../../core/utils/exceptions.dart';
@@ -149,7 +151,11 @@ class ReviewRepository {
     } on DioException catch (e) {
       if (e.response != null) {
         final code = e.response?.statusCode;
-        if (code == 404 || code == 401) {
+        if (code == 404 ||
+            code == 401 ||
+            code == 403 ||
+            code == 410 ||
+            code == 423) {
           throw ReviewNotAvailableException(reviewId, statusCode: code);
         }
         final errorData = e.response?.data;
@@ -207,7 +213,16 @@ class ReviewRepository {
         '/api/reviews',
         data: request.toJson(),
       );
-      return ReviewDto.fromJson(response.data as Map<String, dynamic>);
+      final dto = ReviewDto.fromJson(response.data as Map<String, dynamic>);
+      final uid = CurrentUserCache.instance.userId?.trim();
+      if (uid != null && uid.isNotEmpty) {
+        final pid = dto.productId.trim();
+        if (pid.isNotEmpty) {
+          await ProductReviewNotificationHorizonPrefs.instance
+              .applyReviewPosted(viewerId: uid, productId: pid);
+        }
+      }
+      return dto;
     } on DioException catch (e) {
       if (e.response != null) {
         final errorData = e.response?.data;
@@ -233,7 +248,16 @@ class ReviewRepository {
         '/api/reviews/$reviewId',
         data: request.toJson(),
       );
-      return ReviewDto.fromJson(response.data as Map<String, dynamic>);
+      final dto = ReviewDto.fromJson(response.data as Map<String, dynamic>);
+      final uid = CurrentUserCache.instance.userId?.trim();
+      if (uid != null && uid.isNotEmpty) {
+        final pid = dto.productId.trim();
+        if (pid.isNotEmpty) {
+          await ProductReviewNotificationHorizonPrefs.instance
+              .applyReviewPosted(viewerId: uid, productId: pid);
+        }
+      }
+      return dto;
     } on DioException catch (e) {
       if (e.response != null) {
         final errorData = e.response?.data;

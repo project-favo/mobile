@@ -71,6 +71,9 @@ class ReviewDto {
     if (o is Map<String, dynamic>) {
       ownerInactive = isUserAccountInactiveInMap(o) || isUserSuspendedSignalInMap(o);
     }
+    if (!ownerInactive) {
+      ownerInactive = isReviewOwnerAccountInactiveSignalsOutsideOwnerBlock(json);
+    }
     return ReviewDto(
       id: json['id']?.toString() ?? '',
       title: json['title']?.toString() ?? '',

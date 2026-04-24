@@ -1,4 +1,6 @@
 import 'current_user_cache.dart';
+import 'follow_notification_horizon_prefs.dart';
+import 'product_review_notification_horizon_prefs.dart';
 import 'activity_memory_cache.dart';
 import 'following_id_set_cache.dart';
 import 'friend_feed_memory_cache.dart';
@@ -18,7 +20,14 @@ import '../notifications/app_badge_sync.dart';
 /// [AuthService.signOut] ve Firebase-only çıkışlarda: hesap değişiminde kalan tüm in-memory
 /// ve (ilgili) disk önbelleklerini temizle.
 void clearAllAppCachesOnLogout() {
+  final uid = CurrentUserCache.instance.userId?.trim();
   CurrentUserCache.instance.clear();
+  if (uid != null && uid.isNotEmpty) {
+    // ignore: discarded_futures
+    FollowNotificationHorizonPrefs.instance.removeAllForViewer(uid);
+    // ignore: discarded_futures
+    ProductReviewNotificationHorizonPrefs.instance.removeAllForViewer(uid);
+  }
   SearchWarmCache.instance.clear();
   HomeFeedCache.instance.clear();
   HomeTopPicksCache.clear();

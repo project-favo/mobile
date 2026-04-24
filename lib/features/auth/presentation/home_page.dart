@@ -305,6 +305,30 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
   }
 
+  /// Pull-to-refresh / tam yenilemede: kart in-memory sayaçları + key ile yeniden mount;
+  /// askıdaki yorum sonrası yıldız ve review sayısı API ile hizalansın.
+  void _bumpProductCardCachesForListedProductIds() {
+    final ids = <String>{};
+    for (final p in _filteredProducts) {
+      final id = p.id.trim();
+      if (id.isNotEmpty) ids.add(id);
+    }
+    for (final p in _searchResults) {
+      final id = p.id.trim();
+      if (id.isNotEmpty) ids.add(id);
+    }
+    for (final tab in HomeTopPicksTab.values) {
+      for (final p in _topPicksByTab[tab]!) {
+        final id = p.id.trim();
+        if (id.isNotEmpty) ids.add(id);
+      }
+    }
+    for (final id in ids) {
+      invalidateProductCardSocialCaches(id);
+      _productCardResync[id] = (_productCardResync[id] ?? 0) + 1;
+    }
+  }
+
   /// Ürün kartı baloncuğu: sadece [source] satırları. Askı/deaktif aktör yok, eski cache yok.
   Map<String, List<String>> _buildFriendLikersMapForItems(
     Iterable<ActivityItem> source,
@@ -874,7 +898,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             rating: product.averageRating ?? 0.0,
             desc: product.description ?? '',
             isFavorite: product.isLiked ?? false,
-            loadReviewCount: false,
+            loadReviewCount: true,
             friendAvatarUrls: _friendLikersMap[product.id] ?? const [],
             onTap: () async {
               final r = await Navigator.push<ReviewPagePopResult?>(
@@ -1537,10 +1561,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         firebaseIdToken: token,
       );
       if (!mounted) return;
+      final visible = filterVisibleReviews(reviews);
+      final rc = visible.length;
+      final sumRating = visible.fold<int>(0, (sum, r) => sum + r.rating);
+      final computedRating = rc > 0 ? (sumRating / rc) : 0.0;
       setProductCardSocialCaches(
         productId,
         likeCount: likeCount,
-        reviewCount: filterVisibleReviews(reviews).length,
+        reviewCount: rc,
+        rating: computedRating,
       );
       if (!mounted) return;
       setState(() {
@@ -1611,6 +1640,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       }
       await Future.wait([
         _loadProductsPage(0),
+        _loadFriendLikers(),
         if (!wasInCategoryMode) ...[
           _loadTopPicksForTab(HomeTopPicksTab.weeklyLikes),
           _loadTopPicksForTab(HomeTopPicksTab.forYou),
@@ -1620,6 +1650,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       if (mounted) {
         setState(() {
           _isLoading = false;
+          _bumpProductCardCachesForListedProductIds();
           _friendLikersMap = _buildFriendLikersMapForItems(_friendFeedItemsForLikers);
         });
       }

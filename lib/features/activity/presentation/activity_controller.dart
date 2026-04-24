@@ -120,7 +120,7 @@ class ActivityController extends ChangeNotifier {
     stream.addListener(listener);
   }
 
-  Future<void> loadFirstPage() async {
+  Future<void> loadFirstPage({bool flushRemoteListabilityCaches = false}) async {
     // Cache'den içerik zaten gösteriliyorsa skeleton açma (stale-while-revalidate)
     final silentRefresh = _items.isNotEmpty;
     if (!silentRefresh) {
@@ -130,7 +130,11 @@ class ActivityController extends ChangeNotifier {
     _errorMessage = null;
     _page = 0;
     try {
-      RemoteNotificationUserListabilityCache.instance.clear();
+      if (flushRemoteListabilityCaches) {
+        RemoteNotificationUserListabilityCache.instance.clear();
+        RemoteNotificationProductListabilityCache.instance.clear();
+        RemoteNotificationReviewContextCache.instance.clear();
+      }
       final page = await _notifications.getNotifications(
         page: 0,
         size: kStandardListPageSize,
@@ -164,8 +168,6 @@ class ActivityController extends ChangeNotifier {
         page: _page + 1,
         size: kStandardListPageSize,
       );
-      RemoteNotificationUserListabilityCache.instance
-          .invalidateForNotificationDtos(next.content);
       final visible = await filterNotificationsHidingUnlistedUsers(
         next.content,
         _auth,

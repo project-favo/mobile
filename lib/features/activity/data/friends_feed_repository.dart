@@ -1,5 +1,7 @@
 import 'package:dio/dio.dart';
 
+import '../../../core/cache/current_user_cache.dart';
+import '../../../core/cache/follow_notification_horizon_prefs.dart';
 import '../../../core/config/list_paging.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/utils/session_helper.dart';
@@ -42,10 +44,29 @@ class FriendsFeedRepository {
       final raw = FriendsFeedPageDto.fromJson(
         response.data as Map<String, dynamic>,
       );
-      final content = await filterFriendsFeedHidingUnlistedActors(
+      var content = await filterFriendsFeedHidingUnlistedActors(
         raw.content,
         _auth,
       );
+      final me = CurrentUserCache.instance.userId?.trim();
+      if (me != null && me.isNotEmpty) {
+        final horizons =
+            await FollowNotificationHorizonPrefs.instance.loadHorizonsUtc(me);
+        if (horizons.isNotEmpty) {
+          content = content
+              .where((e) {
+                final aid = e.actorUserId.trim();
+                if (aid.isEmpty) return true;
+                final h = horizons[aid];
+                if (h == null) return true;
+                final at = e.createdAt;
+                if (at == null) return true;
+                return !at.toUtc().isBefore(h);
+              })
+              .toList();
+        }
+        content = await filterFriendsFeedByProductReviewHorizon(content, me);
+      }
       return FriendsFeedPageDto(
         content: content,
         totalElements: raw.totalElements,

@@ -145,6 +145,8 @@ class FriendsFeedItemDto {
         ),
       );
     }
+    productNotListed =
+        productNotListed || isProductNotListedFromJsonMap(json);
 
     return FriendsFeedItemDto(
       id: itemId,

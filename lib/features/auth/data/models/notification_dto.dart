@@ -85,13 +85,20 @@ class NotificationProductDto {
     this.isProductNotListed = false,
   });
 
-  factory NotificationProductDto.fromJson(Map<String, dynamic> json) {
+  factory NotificationProductDto.fromJson(
+    Map<String, dynamic> json, {
+    Map<String, dynamic>? notificationRow,
+  }) {
     final rawId = json['id'];
     final id = rawId is num
         ? rawId.toInt()
         : int.tryParse(rawId?.toString() ?? '') ?? 0;
     final rawImage = json['imageURL']?.toString().trim();
     var notListed = isProductDataNotListedInMap(json);
+    if (!notListed && notificationRow != null) {
+      notListed = isProductDataNotListedInMap(notificationRow) ||
+          isProductNotListedFromJsonMap(notificationRow);
+    }
     if (!notListed && (rawImage == null || rawImage.isEmpty)) {
       notListed = isNotListedImpliedByEmptyProductImage(rawImage);
     }
@@ -210,14 +217,20 @@ class NotificationDto {
     NotificationProductDto? product;
     final rawProduct = json['product'];
     if (rawProduct is Map<String, dynamic>) {
-      product = NotificationProductDto.fromJson(rawProduct);
+      product = NotificationProductDto.fromJson(
+        rawProduct,
+        notificationRow: json,
+      );
     }
     if (product == null) {
       final pPayload = json['payload'];
       if (pPayload is Map<String, dynamic>) {
         final sub = pPayload['product'];
         if (sub is Map<String, dynamic>) {
-          product = NotificationProductDto.fromJson(sub);
+          product = NotificationProductDto.fromJson(
+            sub,
+            notificationRow: json,
+          );
         }
       }
     }
@@ -229,12 +242,17 @@ class NotificationDto {
           if (decoded is Map<String, dynamic>) {
             final sub = decoded['product'];
             if (sub is Map<String, dynamic>) {
-              product = NotificationProductDto.fromJson(sub);
+              product = NotificationProductDto.fromJson(
+                sub,
+                notificationRow: json,
+              );
             }
           }
         } catch (_) {}
       }
     }
+
+    final mergedPayloadJson = _mergeNotificationPayloadJsonFields(json);
 
     return NotificationDto(
       id: notificationIdToString(json['id']),
@@ -244,11 +262,51 @@ class NotificationDto {
       actorDisplayName: json['actorDisplayName']?.toString(),
       title: json['title']?.toString() ?? '',
       body: json['body']?.toString(),
-      payloadJson: json['payloadJson']?.toString(),
+      payloadJson: mergedPayloadJson,
       createdAt: parseFlexibleDateTime(json['createdAt']),
       readAt: parseFlexibleDateTime(json['readAt']),
     );
   }
+}
+
+/// [payloadJson] string + kök [payload] / [data] map’lerini tek JSON metninde birleştirir
+/// (reviewId yalnızca [payload] içinde geldiğinde [notificationReviewIdKey] kaçırmasın).
+String? _mergeNotificationPayloadJsonFields(Map<String, dynamic> json) {
+  Map<String, dynamic>? merged;
+  void mergeIn(Map<String, dynamic> m) {
+    merged = merged == null ? Map<String, dynamic>.from(m) : {...merged!, ...m};
+  }
+
+  final rawPj = json['payloadJson'];
+  if (rawPj != null && rawPj.toString().trim().isNotEmpty) {
+    try {
+      final d = jsonDecode(rawPj.toString());
+      if (d is Map<String, dynamic>) {
+        mergeIn(d);
+      }
+    } catch (_) {}
+  }
+  for (final key in [
+    'payload',
+    'data',
+    'metadata',
+    'context',
+    'target',
+    'entity',
+    'details',
+    'extras',
+    'resource',
+    'notificationPayload',
+  ]) {
+    final v = json[key];
+    if (v is Map<String, dynamic>) {
+      mergeIn(v);
+    }
+  }
+  if (merged != null && merged!.isNotEmpty) {
+    return jsonEncode(merged);
+  }
+  return rawPj?.toString();
 }
 
 class NotificationPageDto {
@@ -288,4 +346,210 @@ class NotificationPageDto {
       empty: json['empty'] as bool? ?? items.isEmpty,
     );
   }
+}
+
+/// "X liked your review" satırı mı? (ürün/review kimliği olmadan vitrin kontrolü yapılamaz → elenebilir.)
+bool notificationIsLikedYourReviewRow(NotificationDto n) {
+  final t = n.type.toUpperCase();
+  final body = '${n.title} ${n.body ?? ''}'.toLowerCase();
+  if (body.contains('liked your review') || body.contains('like your review')) {
+    return true;
+  }
+  if (t.contains('LIKE') && t.contains('REVIEW')) return true;
+  if (body.contains('your') && body.contains('review') && body.contains('liked')) {
+    return true;
+  }
+  return false;
+}
+
+/// Başka kullanıcıların ürüne review bırakmasına dair bildirim türü mü (like/reply vb. değil).
+bool notificationTypeIsOthersProductReviewPost(String type) {
+  final t = type.toUpperCase();
+  if (!t.contains('REVIEW')) return false;
+  if (t.contains('LIKE')) return false;
+  return true;
+}
+
+String? _productIdFromUrlString(String? s) {
+  if (s == null || s.trim().isEmpty) return null;
+  final u = s.trim();
+  for (final re in [
+    RegExp(r'/api/products/([^/?#]+)'),
+    RegExp(r'/products/([^/?#]+)'),
+    RegExp(r'[?&]productId=([^&]+)'),
+  ]) {
+    final m = re.firstMatch(u);
+    final g = m?.group(1)?.trim();
+    if (g != null && g.isNotEmpty) return g;
+  }
+  return null;
+}
+
+String? _deepFindProductIdInJson(dynamic node, {int depth = 0}) {
+  if (depth > 10) return null;
+  const keyHints = <String>{
+    'productid',
+    'product_id',
+    'targetproductid',
+    'catalogproductid',
+    'listedproductid',
+    'itemproductid',
+  };
+  if (node is Map<String, dynamic>) {
+    for (final e in node.entries) {
+      final lk = e.key.toString().toLowerCase().replaceAll('-', '_');
+      if (keyHints.contains(lk) ||
+          lk.endsWith('_product_id') ||
+          lk.endsWith('product_id')) {
+        final s = e.value?.toString().trim() ?? '';
+        if (s.isNotEmpty) return s;
+      }
+      if (lk.contains('image') ||
+          lk.contains('thumb') ||
+          lk.contains('photo') ||
+          lk.endsWith('url')) {
+        final fromUrl = _productIdFromUrlString(e.value?.toString());
+        if (fromUrl != null) return fromUrl;
+      }
+    }
+    for (final nk in ['product', 'targetProduct', 'catalogProduct']) {
+      final sub = node[nk];
+      if (sub is Map<String, dynamic>) {
+        final id = sub['id'] ?? sub['productId'];
+        if (id is num && id > 0) return id.toInt().toString();
+        final idS = id?.toString().trim();
+        if (idS != null && idS.isNotEmpty) return idS;
+      }
+    }
+    for (final e in node.entries) {
+      final inner = _deepFindProductIdInJson(e.value, depth: depth + 1);
+      if (inner != null) return inner;
+    }
+  } else if (node is List) {
+    for (final item in node) {
+      final inner = _deepFindProductIdInJson(item, depth: depth + 1);
+      if (inner != null) return inner;
+    }
+  }
+  return null;
+}
+
+/// Ürün kimliği: gömülü [product] veya [payloadJson] içinden (derin tarama + URL).
+String? notificationProductIdKey(NotificationDto n) {
+  final p = n.product;
+  if (p != null && p.id > 0) return p.id.toString();
+  final raw = n.payloadJson;
+  if (raw == null || raw.trim().isEmpty) return null;
+  try {
+    final d = jsonDecode(raw);
+    if (d is! Map<String, dynamic>) return null;
+    for (final k in ['productId', 'product_id']) {
+      final v = d[k];
+      if (v == null) continue;
+      final s = v.toString().trim();
+      if (s.isNotEmpty) return s;
+    }
+    final prod = d['product'];
+    if (prod is Map<String, dynamic>) {
+      final id = prod['id'];
+      if (id is num && id > 0) return id.toInt().toString();
+      final idS = id?.toString().trim();
+      if (idS != null && idS.isNotEmpty) return idS;
+    }
+    for (final rk in ['review', 'targetReview', 'likedReview', 'reviewDto']) {
+      final rev = d[rk];
+      if (rev is! Map<String, dynamic>) continue;
+      for (final k in ['productId', 'product_id']) {
+        final v = rev[k];
+        if (v == null) continue;
+        final s = v.toString().trim();
+        if (s.isNotEmpty) return s;
+      }
+      final rp = rev['product'];
+      if (rp is Map<String, dynamic>) {
+        final id = rp['id'];
+        if (id is num && id > 0) return id.toInt().toString();
+        final idS = id?.toString().trim();
+        if (idS != null && idS.isNotEmpty) return idS;
+      }
+    }
+    final deep = _deepFindProductIdInJson(d);
+    if (deep != null && deep.isNotEmpty) return deep;
+    if (p != null) {
+      final fromImg = _productIdFromUrlString(p.imageURL);
+      if (fromImg != null) return fromImg;
+    }
+  } catch (_) {}
+  return null;
+}
+
+String? _reviewIdFromPayloadMap(Map<String, dynamic> d) {
+  for (final k in [
+    'reviewId',
+    'review_id',
+    'targetReviewId',
+    'likedReviewId',
+    'sourceReviewId',
+  ]) {
+    final v = d[k];
+    if (v == null) continue;
+    final s = v.toString().trim();
+    if (s.isNotEmpty) return s;
+  }
+  for (final rk in ['review', 'targetReview', 'likedReview', 'reviewDto']) {
+    final rev = d[rk];
+    if (rev is! Map<String, dynamic>) continue;
+    final id = rev['id'] ?? rev['reviewId'];
+    if (id == null) continue;
+    final s = id.toString().trim();
+    if (s.isNotEmpty) return s;
+  }
+  return null;
+}
+
+String? _deepFindReviewIdInJson(dynamic node, {int depth = 0}) {
+  if (depth > 10) return null;
+  const keyHints = <String>{
+    'reviewid',
+    'review_id',
+    'targetreviewid',
+    'likedreviewid',
+    'sourcereviewid',
+    'reviewreferenceid',
+    'parentreviewid',
+    'commentreviewid',
+  };
+  if (node is Map<String, dynamic>) {
+    for (final e in node.entries) {
+      final lk = e.key.toString().toLowerCase().replaceAll('-', '_');
+      if (keyHints.contains(lk) ||
+          lk.endsWith('_review_id') ||
+          lk.endsWith('review_id')) {
+        final s = e.value?.toString().trim() ?? '';
+        if (s.isNotEmpty) return s;
+      }
+    }
+    for (final e in node.entries) {
+      final inner = _deepFindReviewIdInJson(e.value, depth: depth + 1);
+      if (inner != null) return inner;
+    }
+  } else if (node is List) {
+    for (final item in node) {
+      final inner = _deepFindReviewIdInJson(item, depth: depth + 1);
+      if (inner != null) return inner;
+    }
+  }
+  return null;
+}
+
+/// [payloadJson] (+ birleştirilmiş kök payload) içinden review kimliği.
+String? notificationReviewIdKey(NotificationDto n) {
+  final raw = n.payloadJson;
+  if (raw == null || raw.trim().isEmpty) return null;
+  try {
+    final d = jsonDecode(raw);
+    if (d is! Map<String, dynamic>) return null;
+    return _reviewIdFromPayloadMap(d) ?? _deepFindReviewIdInJson(d);
+  } catch (_) {}
+  return null;
 }

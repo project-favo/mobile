@@ -75,11 +75,12 @@ ActivityItem activityItemFromNotification(NotificationDto n) {
       (payloadImage != null && payloadImage.trim().isNotEmpty)
           ? payloadImage
           : n.product?.imageURL;
-  final reviewId = p?['reviewId']?.toString();
+  final reviewId = notificationReviewIdKey(n);
 
   ActivityTargetContent? target;
   if ((productId != null && productId.isNotEmpty) ||
-      (productImageUrl != null && productImageUrl.isNotEmpty)) {
+      (productImageUrl != null && productImageUrl.isNotEmpty) ||
+      (reviewId != null && reviewId.isNotEmpty)) {
     target = ActivityTargetContent(
       title: (productName != null && productName.isNotEmpty)
           ? productName

@@ -428,10 +428,14 @@ class ProductRepository {
   }
 
   /// Fetches a single product by ID from GET /api/products/{id}
+  ///
+  /// [includeRatingAndLike]: false — bildirim/feed süzme gibi toplu senaryolarda
+  /// yalnızca tek GET (rating + like istekleri yok).
   Future<ProductDto> getProductById(
     String productId, {
     String? firebaseIdToken,
     bool bypassCache = false,
+    bool includeRatingAndLike = true,
   }) async {
     // Taze GET öncesi eski (aktif sanılan) satırı sil — askı/GET ile çelişen cache dönmesin.
     if (bypassCache) {
@@ -454,6 +458,11 @@ class ProductRepository {
       if (!product.isProductNotListed &&
           isNotListedImpliedByEmptyProductImage(product.imageURL)) {
         product = product.copyWith(isProductNotListed: true);
+      }
+
+      if (!includeRatingAndLike) {
+        ProductMemoryCache.instance.remember(product);
+        return product;
       }
 
       // Rating ve like bilgilerini paralel olarak çek
@@ -502,8 +511,12 @@ class ProductRepository {
     } on DioException catch (e) {
       if (e.response != null) {
         final code = e.response?.statusCode;
-        // Sadece 404 / 401: ürün yok veya bu kaynağa erişim yok (API sözleşmesi).
-        if (code == 404 || code == 401) {
+        // Vitrin dışı / erişim yok (404, 401) ve katalog dışı (403, 410, 423).
+        if (code == 404 ||
+            code == 401 ||
+            code == 403 ||
+            code == 410 ||
+            code == 423) {
           throw ProductNotAvailableException(productId, statusCode: code);
         }
         final errorData = e.response?.data;

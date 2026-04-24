@@ -360,11 +360,15 @@ class _SearchPageState extends State<SearchPage> {
         firebaseIdToken: token,
       );
       if (!mounted) return;
+      final visible = filterVisibleReviews(reviews);
+      final rc = visible.length;
+      final sumRating = visible.fold<int>(0, (sum, r) => sum + r.rating);
+      final computedRating = rc > 0 ? (sumRating / rc) : 0.0;
       setProductCardSocialCaches(
         productId,
         likeCount: like,
-        reviewCount: filterVisibleReviews(reviews).length,
-        rating: updated.averageRating ?? 0.0,
+        reviewCount: rc,
+        rating: computedRating,
       );
       if (!mounted) return;
       setState(() {
@@ -385,7 +389,7 @@ class _SearchPageState extends State<SearchPage> {
 
   Future<void> _primeSocialCountsForProducts(
     List<ProductDto> products, {
-    int maxCount = 8,
+    int maxCount = 40,
   }) async {
     final targets = products
         .map((p) => p.id)
@@ -693,6 +697,16 @@ class _SearchPageState extends State<SearchPage> {
     if (q.isNotEmpty && mounted) {
       await _onSearchChanged(q);
     }
+    if (!mounted) return;
+    if (_searchResults.isNotEmpty) {
+      for (final p in _searchResults) {
+        final id = p.id.trim();
+        if (id.isEmpty) continue;
+        invalidateProductCardSocialCaches(id);
+        _productCardResync[id] = (_productCardResync[id] ?? 0) + 1;
+      }
+      setState(() {});
+    }
   }
 
   Future<void> _openCategory(TagDto category) async {
@@ -861,7 +875,7 @@ class _SearchPageState extends State<SearchPage> {
                       desc: product.description ?? '',
                       isFavorite: product.isLiked ?? false,
                       loadReviewCount: true,
-                      fetchSocialCounts: false,
+                      fetchSocialCounts: true,
                       onTap: () async {
                         final r = await Navigator.push<ReviewPagePopResult?>(
                           context,
@@ -1266,7 +1280,7 @@ class _SearchPageState extends State<SearchPage> {
                                                         desc: product.description ?? '',
                                                         isFavorite: product.isLiked ?? false,
                                                         loadReviewCount: true,
-                                                        fetchSocialCounts: false,
+                                                        fetchSocialCounts: true,
                                                         onTap: () async {
                                                           final r = await Navigator.push<ReviewPagePopResult?>(
                                                             context,

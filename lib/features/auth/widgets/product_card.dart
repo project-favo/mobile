@@ -8,6 +8,7 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/utils/product_rating_display.dart';
 import '../../../../core/widgets/rating_stars_row.dart';
 import '../../../../core/utils/entity_active.dart';
+import '../../../../core/utils/session_helper.dart';
 import '../data/repositories/interaction_repository.dart';
 import '../data/repositories/review_repository.dart';
 import '../data/models/review_dto.dart';
@@ -163,10 +164,11 @@ class _ProductCardState extends State<ProductCard> {
     try {
       final reviewRepository = ReviewRepository();
       final interactionRepository = InteractionRepository();
+      final token = await SessionHelper().ensureSession();
       final futures = await Future.wait([
         reviewRepository.getReviewsByProductId(
           widget.productId,
-          firebaseIdToken: null,
+          firebaseIdToken: token,
         ),
         interactionRepository.getProductLikeCount(widget.productId),
       ]);

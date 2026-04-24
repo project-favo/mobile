@@ -86,6 +86,9 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
   final Map<String, List<ReviewDto>> _reviewQueryCache = {};
   final Map<String, DateTime> _reviewQueryCacheTimes = {};
   static const Duration _reviewQueryCacheTtl = Duration(seconds: 25);
+  /// GET /users/{id} — review JSON’unda askı yoksa bile vitrin dışı yazarları ele.
+  final Map<String, ({bool blocked, DateTime checkedAt})> _ownerGateById = {};
+  static const Duration _ownerGateRecheckTtl = Duration(seconds: 12);
   /// Review detail ile aynı: home ilk 50 dışı + önceki tur vitrin = askı sinyali.
   bool? _lastProductOnHomeFirstPage;
   static const EdgeInsets _contentHorizontalPadding = EdgeInsets.symmetric(
@@ -98,6 +101,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
   static const String _sortRatingHigh =
       ReviewRepository.reviewSortHighestRating;
   static const String _sortRatingLow = ReviewRepository.reviewSortLowestRating;
+  static const String _guestReviewsLoginMessage = 'Please login to view reviews';
 
   bool? _hasMediaFilter;
   bool? _isCollaborativeFilter;
@@ -177,7 +181,74 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
     if (cachedAt == null || cached == null) return null;
     final fresh = DateTime.now().difference(cachedAt) <= _reviewQueryCacheTtl;
     if (!fresh) return null;
-    return cached;
+    return filterVisibleReviews(cached);
+  }
+
+  void _clearLocalReviewQueryCacheForCurrentProduct() {
+    final id = _currentProduct.id.trim();
+    if (id.isEmpty) return;
+    final prefix = '$id|';
+    _reviewQueryCache.removeWhere((k, _) => k.startsWith(prefix));
+    _reviewQueryCacheTimes.removeWhere((k, _) => k.startsWith(prefix));
+  }
+
+  double _averageRatingFromReviews(List<ReviewDto> list) {
+    if (list.isEmpty) return 0.0;
+    final sum = list.fold<int>(0, (s, r) => s + r.rating);
+    return sum / list.length;
+  }
+
+  Future<List<ReviewDto>> _filterReviewsHidingBlockedOwners(
+    List<ReviewDto> reviews, {
+    bool forceRefreshBlockedCache = false,
+  }) async {
+    final fb = FirebaseAuth.instance.currentUser;
+    if (fb == null) return reviews;
+    final me = _currentUserId?.trim() ?? '';
+    final ownerIds = reviews
+        .map((r) => r.ownerId.trim())
+        .where((id) => id.isNotEmpty && id != me)
+        .toSet()
+        .toList();
+    if (ownerIds.isEmpty) return reviews;
+    if (forceRefreshBlockedCache) {
+      for (final oid in ownerIds) {
+        _ownerGateById.remove(oid);
+      }
+    }
+    final auth = AuthService();
+    Future<void> resolveOne(String ownerId) async {
+      final existing = _ownerGateById[ownerId];
+      if (!forceRefreshBlockedCache && existing != null) {
+        if (existing.blocked) return;
+        if (DateTime.now().difference(existing.checkedAt) < _ownerGateRecheckTtl) {
+          return;
+        }
+      }
+      try {
+        final u = await auth.getUserById(ownerId);
+        final blocked = u?.isProfileViewBlocked ?? false;
+        _ownerGateById[ownerId] = (blocked: blocked, checkedAt: DateTime.now());
+      } on TargetUserNotAvailableException {
+        _ownerGateById[ownerId] = (blocked: true, checkedAt: DateTime.now());
+      } catch (_) {
+        _ownerGateById[ownerId] = (blocked: false, checkedAt: DateTime.now());
+      }
+    }
+    const batch = 6;
+    for (var i = 0; i < ownerIds.length; i += batch) {
+      final chunk = ownerIds.skip(i).take(batch).toList();
+      await Future.wait(chunk.map(resolveOne));
+    }
+    return reviews
+        .where((r) {
+          final oid = r.ownerId.trim();
+          if (oid.isEmpty || oid == me) return true;
+          final g = _ownerGateById[oid];
+          if (g == null) return true;
+          return !g.blocked;
+        })
+        .toList();
   }
 
   void _rememberReviewQueryCache(List<ReviewDto> reviews) {
@@ -694,6 +765,8 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      _ownerGateById.clear();
+      _clearLocalReviewQueryCacheForCurrentProduct();
       unawaited(_syncProductPageInBackground());
     }
   }
@@ -821,12 +894,16 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       if (_isUsingDefaultReviewQuery) {
         ReviewMemoryCache.instance.remember(_currentProduct.id, reviews);
       }
-      if (_reviewListDataChanged(_reviews, reviews)) {
+      final nextAvg = reviews.isEmpty ? 0.0 : _averageRatingFromReviews(reviews);
+      final avgChanged = (_currentProduct.averageRating ?? 0) != nextAvg;
+      if (_reviewListDataChanged(_reviews, reviews) || avgChanged) {
         if (mounted) {
           setState(() {
             _reviews = reviews;
+            _currentProduct = _currentProduct.copyWith(averageRating: nextAvg);
             _cachedRatingCounts = null;
           });
+          ProductMemoryCache.instance.remember(_currentProduct);
         }
       }
       if (mounted && FirebaseAuth.instance.currentUser != null) {
@@ -981,6 +1058,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
 
   Future<List<ReviewDto>> _fetchReviewsWithCurrentFilters({
     String? firebaseIdToken,
+    bool forceOwnerProfileRefresh = false,
   }) async {
     Future<List<ReviewDto>> run(String? token) async {
       return filterVisibleReviews(
@@ -994,34 +1072,41 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       );
     }
 
+    List<ReviewDto>? list;
     try {
-      return await run(firebaseIdToken);
+      list = await run(firebaseIdToken);
     } catch (e) {
       if (!_isUnauthorizedError(e)) rethrow;
       final refreshed = await _sessionHelper.refreshSession();
       if (refreshed != null) {
         try {
-          return await run(refreshed);
+          list = await run(refreshed);
         } catch (retryError) {
           if (!_isUnauthorizedError(retryError)) rethrow;
         }
       }
-
-      // Backend'de bazı kombinasyonlarda (özellikle sonuç boşken) yanlışlıkla
-      // auth hatası dönebiliyor. Session sağlamsa bu durumu "boş liste"ye çevir.
-      if (_hasBinaryReviewFilters) {
-        final probe = await _sessionHelper.ensureSession();
-        if (probe != null) {
-          await _reviewRepository.getReviewsByProductId(
-            _currentProduct.id,
-            firebaseIdToken: probe,
-            sort: _selectedSort,
-          );
-          return <ReviewDto>[];
+      if (list == null) {
+        if (_hasBinaryReviewFilters) {
+          final probe = await _sessionHelper.ensureSession();
+          if (probe != null) {
+            await _reviewRepository.getReviewsByProductId(
+              _currentProduct.id,
+              firebaseIdToken: probe,
+              sort: _selectedSort,
+            );
+            list = <ReviewDto>[];
+          } else {
+            rethrow;
+          }
+        } else {
+          rethrow;
         }
       }
-      rethrow;
     }
+    return _filterReviewsHidingBlockedOwners(
+      list,
+      forceRefreshBlockedCache: forceOwnerProfileRefresh,
+    );
   }
 
   Future<void> _onChatIconTap(ReviewDto review) async {
@@ -1176,9 +1261,16 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       }
       _lastProductOnHomeFirstPage = onHome;
       setState(() {
-        _currentProduct = updatedProduct;
+        if (!_isLoadingReviews) {
+          final nextAvg = _reviews.isEmpty
+              ? 0.0
+              : _averageRatingFromReviews(_reviews);
+          _currentProduct = updatedProduct.copyWith(averageRating: nextAvg);
+        } else {
+          _currentProduct = updatedProduct;
+        }
       });
-      ProductMemoryCache.instance.remember(updatedProduct);
+      ProductMemoryCache.instance.remember(_currentProduct);
     } on ProductNotAvailableException {
       if (!mounted) return;
       _exitProductPageBecauseUnavailable();
@@ -1192,6 +1284,9 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       if (cached != null) {
         setState(() {
           _reviews = cached;
+          _currentProduct = _currentProduct.copyWith(
+            averageRating: cached.isEmpty ? 0.0 : _averageRatingFromReviews(cached),
+          );
           _cachedRatingCounts = null;
           _isLoadingReviews = false;
           _errorMessage = null;
@@ -1221,13 +1316,20 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
           }
           setState(() {
             _reviews = reviews;
+            _currentProduct = _currentProduct.copyWith(
+              averageRating: reviews.isEmpty ? 0.0 : _averageRatingFromReviews(reviews),
+            );
             _cachedRatingCounts = null;
             _isLoadingReviews = false;
+            _errorMessage = null;
           });
+          ProductMemoryCache.instance.remember(_currentProduct);
           return;
         } catch (e) {
           setState(() {
-            _errorMessage = 'Please login to view reviews';
+            _reviews = [];
+            _currentProduct = _currentProduct.copyWith(averageRating: 0.0);
+            _errorMessage = _guestReviewsLoginMessage;
             _isLoadingReviews = false;
           });
           return;
@@ -1268,25 +1370,38 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
 
       setState(() {
         _reviews = reviews;
+        _currentProduct = _currentProduct.copyWith(
+          averageRating: reviews.isEmpty ? 0.0 : _averageRatingFromReviews(reviews),
+        );
         _cachedRatingCounts = null;
         _isLoadingReviews = false;
+        _errorMessage = null;
       });
-    } catch (e) {
+      ProductMemoryCache.instance.remember(_currentProduct);
+    } catch (e, st) {
       if (shouldFetchInBackground && _reviews.isNotEmpty) return;
       final isLoggedIn = FirebaseAuth.instance.currentUser != null;
       if (isLoggedIn && _isUnauthorizedError(e)) {
         setState(() {
           _reviews = [];
+          _currentProduct = _currentProduct.copyWith(averageRating: 0.0);
           _cachedRatingCounts = null;
           _errorMessage = null;
           _isLoadingReviews = false;
         });
         return;
       }
+      // Ağ / sunucu hatası veya tüm yorumlar gizlendi: vitrinde “0 yorum” ürünü gibi davran.
+      AppLogger.warnSilencedError('ReviewPage._loadReviews', e, st);
+      if (!mounted) return;
       setState(() {
-        _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
+        _reviews = [];
+        _currentProduct = _currentProduct.copyWith(averageRating: 0.0);
+        _cachedRatingCounts = null;
+        _errorMessage = null;
         _isLoadingReviews = false;
       });
+      ProductMemoryCache.instance.remember(_currentProduct);
     }
   }
 
@@ -1302,8 +1417,12 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       if (!mounted || !ok) return;
       setState(() {
         _reviews.removeWhere((r) => r.id == review.id);
+        _currentProduct = _currentProduct.copyWith(
+          averageRating: _reviews.isEmpty ? 0.0 : _averageRatingFromReviews(_reviews),
+        );
         _cachedRatingCounts = null;
       });
+      ProductMemoryCache.instance.remember(_currentProduct);
       ReviewMemoryCache.instance.removeReviewFromProduct(
         _currentProduct.id,
         review.id,
@@ -1483,6 +1602,8 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       ),
       body: CustomRefreshIndicator(
         onRefresh: () async {
+          _ownerGateById.clear();
+          _clearLocalReviewQueryCacheForCurrentProduct();
           await Future.wait([_loadReviews(), _refreshProductData()]);
         },
         child: SingleChildScrollView(
@@ -1811,7 +1932,20 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                         const SizedBox(height: AppSpacing.small),
                         Builder(
                           builder: (context) {
-                            final rawRating = _currentProduct.averageRating ?? 0.0;
+                            // Görünür yorumlar yüklendikten sonra özet; sunucu [averageRating]
+                            // askılı yazarları hâlâ sayıyor olabilir.
+                            final bool preferList =
+                                !_isLoadingReviews || _reviews.isNotEmpty;
+                            final double rawRating;
+                            if (preferList && _reviews.isNotEmpty) {
+                              final sum =
+                                  _reviews.fold<int>(0, (s, r) => s + r.rating);
+                              rawRating = sum / _reviews.length;
+                            } else if (preferList && _reviews.isEmpty) {
+                              rawRating = 0.0;
+                            } else {
+                              rawRating = _currentProduct.averageRating ?? 0.0;
+                            }
                             final hasRating = productHasMeaningfulRating(rawRating);
                             final rating =
                                 (rawRating.isNaN || rawRating.isInfinite)
@@ -2004,29 +2138,6 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                 /// REVIEWS LIST
                 if (_isLoadingReviews)
                   const SizedBox(height: AppSpacing.xxLarge)
-                else if (_errorMessage != null)
-                  Center(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.xxLarge,
-                        vertical: AppSpacing.xxLarge,
-                      ),
-                      child: Column(
-                        children: [
-                          Text(
-                            'Failed to load reviews: $_errorMessage',
-                            style: AppTextStyles.body,
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: AppSpacing.large),
-                          ElevatedButton(
-                            onPressed: _loadReviews,
-                            child: const Text('Retry'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
                 else if (_reviews.isEmpty)
                   Center(
                     child: Padding(
@@ -2035,7 +2146,9 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                         vertical: AppSpacing.xxLarge,
                       ),
                       child: Text(
-                        _emptyReviewsMessage(),
+                        _errorMessage == _guestReviewsLoginMessage
+                            ? _guestReviewsLoginMessage
+                            : _emptyReviewsMessage(),
                         style: AppTextStyles.bodySecondary,
                         textAlign: TextAlign.center,
                       ),

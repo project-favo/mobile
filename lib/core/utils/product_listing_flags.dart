@@ -124,7 +124,14 @@ bool isProductDataNotListedInMap(Map<String, dynamic> m) {
   // Review kökünde: generic `status` genelde hesap; ürün için productStatus/listingStatus kullan.
   final st = (reviewLike
           ? (m['productStatus'] ?? m['listingStatus'] ?? m['state'] ?? m['productState'] ?? '')
-          : (m['status'] ?? m['productStatus'] ?? m['state'] ?? m['listingStatus'] ?? m['productState'] ?? ''))
+          : (m['status'] ??
+              m['productStatus'] ??
+              m['catalogStatus'] ??
+              m['catalog_status'] ??
+              m['state'] ??
+              m['listingStatus'] ??
+              m['productState'] ??
+              ''))
       .toString()
       .toLowerCase();
   if (st.isNotEmpty) {
@@ -141,6 +148,9 @@ bool isProductDataNotListedInMap(Map<String, dynamic> m) {
       return true;
     }
     if (!reviewLike && (st == 'inactive' || st == 'suspended')) {
+      return true;
+    }
+    if (!reviewLike && RegExp(r'\binactive\b').hasMatch(st)) {
       return true;
     }
   }

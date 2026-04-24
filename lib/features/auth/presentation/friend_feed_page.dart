@@ -45,6 +45,9 @@ class _FriendFeedPageState extends State<FriendFeedPage>
     with SingleTickerProviderStateMixin, RouteAware {
   late final TabController _tabController;
   final List<int> _pageInTab = [0, 0, 0];
+  final List<bool> _tabPrefetchFailed = [false, false, false];
+  final List<ScrollController> _tabScrollControllers =
+      List.generate(3, (_) => ScrollController());
   int _lastTabIndex = 0;
   final FriendsFeedRepository _repository = FriendsFeedRepository();
   final InteractionRepository _interactions = InteractionRepository();
@@ -77,7 +80,18 @@ class _FriendFeedPageState extends State<FriendFeedPage>
       final i = _tabController.index;
       if (i != _lastTabIndex) {
         _lastTabIndex = i;
-        setState(() => _pageInTab[i] = 0);
+        setState(() {
+          _pageInTab[i] = 0;
+          for (var k = 0; k < 3; k++) {
+            _tabPrefetchFailed[k] = false;
+          }
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          if (_tabScrollControllers[i].hasClients) {
+            _tabScrollControllers[i].jumpTo(0);
+          }
+        });
       }
     });
     final warm = FriendFeedMemoryCache.instance.peek();
@@ -115,7 +129,7 @@ class _FriendFeedPageState extends State<FriendFeedPage>
   void didPopNext() {
     unawaited(_loadFirst(
       background: _items.isNotEmpty,
-      refreshUserListability: true,
+      refreshUserListability: false,
     ));
   }
 
@@ -123,8 +137,21 @@ class _FriendFeedPageState extends State<FriendFeedPage>
   void dispose() {
     appRouteObserver.unsubscribe(this);
     FriendFeedMemoryCache.instance.clear();
+    for (final c in _tabScrollControllers) {
+      c.dispose();
+    }
     _tabController.dispose();
     super.dispose();
+  }
+
+  void _scrollTabToTop(int tab) {
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_tabScrollControllers[tab].hasClients) {
+        _tabScrollControllers[tab].jumpTo(0);
+      }
+    });
   }
 
   void _mergeFollowFromGlobalCache() {
@@ -213,6 +240,8 @@ class _FriendFeedPageState extends State<FriendFeedPage>
     try {
       if (refreshUserListability) {
         RemoteNotificationUserListabilityCache.instance.clear();
+        RemoteNotificationProductListabilityCache.instance.clear();
+        RemoteNotificationReviewContextCache.instance.clear();
       }
       final pageSize = background
           ? (_items.isEmpty
@@ -229,6 +258,9 @@ class _FriendFeedPageState extends State<FriendFeedPage>
         _page = res.number;
         _totalPages = res.totalPages;
         _loadingFirst = false;
+        for (var k = 0; k < 3; k++) {
+          _tabPrefetchFailed[k] = false;
+        }
       });
       FriendFeedMemoryCache.instance.remember(
         items: _items,
@@ -263,6 +295,9 @@ class _FriendFeedPageState extends State<FriendFeedPage>
         _items.addAll(mapped);
         _page = res.number;
         _totalPages = res.totalPages;
+        for (var k = 0; k < 3; k++) {
+          _tabPrefetchFailed[k] = false;
+        }
       });
       FriendFeedMemoryCache.instance.remember(
         items: _items,
@@ -394,6 +429,7 @@ class _FriendFeedPageState extends State<FriendFeedPage>
   bool _canGoNextFd(int tab) {
     final s = _tabSource(tab);
     if (s.isEmpty) return false;
+    if (_tabPrefetchFailed[tab]) return false;
     final p = _pageInTab[tab];
     if ((p + 1) * kStandardListPageSize < s.length) return true;
     return _page + 1 < _totalPages;
@@ -417,6 +453,7 @@ class _FriendFeedPageState extends State<FriendFeedPage>
     var s = _tabSource(tab);
     if ((p + 1) * kStandardListPageSize < s.length) {
       setState(() => _pageInTab[tab] = p + 1);
+      _scrollTabToTop(tab);
       return;
     }
     if (_page + 1 >= _totalPages) return;
@@ -427,16 +464,28 @@ class _FriendFeedPageState extends State<FriendFeedPage>
       if (!mounted) return;
       s = _tabSource(tab);
       if ((p + 1) * kStandardListPageSize < s.length) {
-        setState(() => _pageInTab[tab] = p + 1);
+        setState(() {
+          _pageInTab[tab] = p + 1;
+          _tabPrefetchFailed[tab] = false;
+        });
+        _scrollTabToTop(tab);
         return;
       }
       if (_items.length == before) break;
+    }
+    if (!mounted) return;
+    if ((p + 1) * kStandardListPageSize >= _tabSource(tab).length) {
+      setState(() => _tabPrefetchFailed[tab] = true);
     }
   }
 
   void _goPrevFd(int tab) {
     if (_pageInTab[tab] <= 0) return;
-    setState(() => _pageInTab[tab]--);
+    setState(() {
+      _pageInTab[tab]--;
+      _tabPrefetchFailed[tab] = false;
+    });
+    _scrollTabToTop(tab);
   }
 
   @override
@@ -531,6 +580,7 @@ class _FriendFeedPageState extends State<FriendFeedPage>
               refreshUserListability: true,
             ),
         child: ListView(
+          controller: _tabScrollControllers[tabIndex],
           physics: const AlwaysScrollableScrollPhysics(
             parent: ClampingScrollPhysics(),
           ),
@@ -543,74 +593,84 @@ class _FriendFeedPageState extends State<FriendFeedPage>
       );
     }
     final slice = _slicedForTab(tabIndex);
+    final p = _pageInTab[tabIndex];
+    final rangeStart = p * kStandardListPageSize + 1;
+    final rangeEnd = math.min(
+      (p + 1) * kStandardListPageSize,
+      list.length,
+    );
     return Column(
       children: [
         Expanded(
           child: RefreshIndicator(
-        color: AppColors.primary,
-        onRefresh: () => _loadFirst(
+            color: AppColors.primary,
+            onRefresh: () => _loadFirst(
               background: _items.isNotEmpty,
               refreshUserListability: true,
             ),
-        child: ListView.separated(
-          physics: const AlwaysScrollableScrollPhysics(
-            parent: ClampingScrollPhysics(),
-          ),
-          padding: const EdgeInsets.fromLTRB(10, 8, 10, 12),
-          itemCount: slice.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 8),
-          itemBuilder: (context, index) {
-            final item = slice[index];
-            return Container(
-              key: ValueKey(item.id),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: AppColors.border.withValues(alpha: 0.7),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.03),
-                    blurRadius: 7,
-                    offset: const Offset(0, 2),
+            child: ListView.separated(
+              controller: _tabScrollControllers[tabIndex],
+              physics: const AlwaysScrollableScrollPhysics(
+                parent: ClampingScrollPhysics(),
+              ),
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 12),
+              itemCount: slice.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              itemBuilder: (context, index) {
+                final item = slice[index];
+                return Container(
+                  key: ValueKey(item.id),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppColors.border.withValues(alpha: 0.7),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.03),
+                        blurRadius: 7,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              child: ActivityFeedRow(
-                key: ValueKey('row_${item.id}'),
-                item: item,
-                following: _followingIds.contains(item.user.id),
-                onToggleFollow: () => _toggleFollow(item.user.id),
-                onOpen: () => _openItem(item),
-                onUserTap: () {
-                  if (item.user.id.isEmpty) return;
-                  openUserProfileIfActive(
-                    context,
-                    userId: item.user.id,
-                    userName: item.user.username,
-                    profileImageUrl: item.user.avatarUrl,
-                  );
-                },
-              ),
-            );
-          },
-        ),
-      ),
-        ),
-        if (list.isNotEmpty)
-          PagedNavigationBar(
-            currentPage1Based: _displayPage1Based(tabIndex),
-            totalPages: _totalTabPages(tabIndex),
-            canGoPrevious: _canGoPrevFd(tabIndex),
-            canGoNext: _canGoNextFd(tabIndex),
-            isLoadingNext: _loadingMore,
-            onPrevious: () => _goPrevFd(tabIndex),
-            onNext: () {
-              unawaited(_goNextFd(tabIndex));
-            },
-            showTopDivider: true,
+                  child: ActivityFeedRow(
+                    key: ValueKey('row_${item.id}'),
+                    item: item,
+                    following: _followingIds.contains(item.user.id),
+                    onToggleFollow: () => _toggleFollow(item.user.id),
+                    onOpen: () => _openItem(item),
+                    onUserTap: () {
+                      if (item.user.id.isEmpty) return;
+                      openUserProfileIfActive(
+                        context,
+                        userId: item.user.id,
+                        userName: item.user.username,
+                        profileImageUrl: item.user.avatarUrl,
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
           ),
+        ),
+        PagedNavigationBar(
+          currentPage1Based: _displayPage1Based(tabIndex),
+          totalPages: _totalTabPages(tabIndex),
+          canGoPrevious: _canGoPrevFd(tabIndex),
+          canGoNext: _canGoNextFd(tabIndex),
+          isLoadingNext: _loadingMore,
+          onPrevious: () => _goPrevFd(tabIndex),
+          onNext: () {
+            unawaited(_goNextFd(tabIndex));
+          },
+          showTopDivider: true,
+          rangeStart1Based: rangeStart,
+          rangeEnd1Based: rangeEnd,
+          rangeTotal: list.length,
+          itemNounPlural: 'activities',
+        ),
       ],
     );
   }

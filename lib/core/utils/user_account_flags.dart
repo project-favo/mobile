@@ -55,3 +55,41 @@ bool isUserAccountInactiveInMap(Map<String, dynamic> m) {
   }
   return false;
 }
+
+/// Review listesi satırında gömülü [owner] eksik veya güncel değilken yazar askısı
+/// (author/user veya düz alanlar) — [ReviewDto.fromJson] içinde [owner] ile birleştirilir.
+bool isReviewOwnerAccountInactiveSignalsOutsideOwnerBlock(
+  Map<String, dynamic> json,
+) {
+  for (final key in ['author', 'user', 'reviewOwner', 'createdBy', 'reviewer']) {
+    final v = json[key];
+    if (v is Map<String, dynamic>) {
+      if (isUserAccountInactiveInMap(v)) return true;
+    }
+  }
+  const flatSuspended = <String>[
+    'ownerSuspended',
+    'ownerIsSuspended',
+    'ownerBanned',
+    'ownerDeactivated',
+    'ownerAccountInactive',
+    'authorSuspended',
+    'userSuspended',
+    'reviewerSuspended',
+  ];
+  for (final k in flatSuspended) {
+    if (_truthy(json[k])) return true;
+  }
+  for (final k in ['ownerStatus', 'ownerAccountStatus', 'authorStatus']) {
+    final st = json[k]?.toString().toLowerCase().trim() ?? '';
+    if (st == 'suspended' ||
+        st == 'account_suspended' ||
+        st == 'user_suspended' ||
+        st == 'inactive' ||
+        st == 'banned' ||
+        st == 'deactivated') {
+      return true;
+    }
+  }
+  return false;
+}
