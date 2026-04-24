@@ -139,6 +139,29 @@ class AuthRepository {
     }
   }
 
+  /// Kullanıcı adının müsait olup olmadığını kontrol eder (auth gerektirmez).
+  /// Müsaitse `true`, alınmışsa `false` döner.
+  Future<bool> checkUsernameAvailable(String userName) async {
+    try {
+      final response = await _apiClient.dio.get(
+        ApiConfig.checkUsernamePath,
+        queryParameters: {'userName': userName.trim()},
+        options: Options(
+          extra: {kDioExtraSkipFirebaseAuth: true},
+        ),
+      );
+      final data = response.data;
+      if (data is Map) {
+        final available = data['available'];
+        if (available is bool) return available;
+      }
+      return response.statusCode == 200;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 409) return false;
+      rethrow;
+    }
+  }
+
   /// Backend'e register isteği gönderir
   /// Firebase idToken Authorization header'ında Bearer token olarak gönderilir
   /// RegisterRequestDto request body'de gönderilir

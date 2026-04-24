@@ -189,6 +189,12 @@ class AuthService {
     await _firebaseAuth.currentUser?.getIdToken(true);
   }
 
+  /// Kayıt öncesi: kullanıcı adının müsait olup olmadığını kontrol eder (Firebase gerektirmez).
+  /// Müsaitse `true`, alınmışsa `false` döner.
+  Future<bool> checkUsernameAvailable(String userName) async {
+    return _authRepository.checkUsernameAvailable(userName);
+  }
+
   /// Kayıt adımı 1: Firebase hesabı oluşturur; **e-posta göndermez** (Firebase link maili yok).
   /// E-postadaki 5 haneli kod yalnızca backend (`register` / `resend-verification`) üzerinden gelir.
   Future<void> createFirebaseUserForRegistration({

@@ -308,6 +308,19 @@ class _RegisterPageState extends State<RegisterPage> {
     setState(() => _isLoading = true);
 
     try {
+      // Firebase'e istek atmadan önce kullanıcı adı müsaitliğini kontrol et
+      final usernameAvailable = await _authService.checkUsernameAvailable(_userName.text.trim());
+      if (!usernameAvailable) {
+        if (mounted) {
+          setState(() {
+            _registerError = 'This username is already taken. Please choose another.';
+            _isLoading = false;
+          });
+          _formKey.currentState?.validate();
+        }
+        return;
+      }
+
       // Profil fotoğrafını base64'e çevir
       String? profilePhotoBase64;
       String? profilePhotoMimeType;
