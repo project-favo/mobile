@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -16,8 +15,7 @@ import '../../../core/utils/content_availability_messages.dart';
 import '../../../core/utils/content_unavailable_dialog.dart';
 import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/exceptions.dart';
-import '../../../core/config/list_paging.dart';
-import '../../../core/widgets/paged_navigation_bar.dart';
+import '../../../core/widgets/feed_screen_tab_bar.dart';
 import '../../../core/utils/session_helper.dart';
 import '../../../core/utils/user_profile_navigation.dart';
 import '../../../core/widgets/main_bottom_nav_items.dart';
@@ -72,9 +70,6 @@ class _ActivityPageState extends State<ActivityPage>
   late final ActivityController _controller;
   late final TabController _tabController;
   final ScrollController _scrollController = ScrollController();
-  /// Her sekme için ayrı sayfa (her sayfada en fazla [kStandardListPageSize] satır).
-  final List<int> _pageInTab = [0, 0, 0, 0];
-  final List<bool> _activityTabPrefetchFailed = [false, false, false, false];
   StreamSubscription<NotificationPushEvent>? _pushSub;
 
   Route<T> _instantRoute<T>(Widget page) {
@@ -159,20 +154,20 @@ class _ActivityPageState extends State<ActivityPage>
   Future<void> _refreshOnReturn() async {
     await _controller.loadFirstPage();
     if (!mounted) return;
-    setState(_resetActivityPrefetchFlags);
     await NotificationRealtimeService.instance.refreshUnread();
+    if (mounted) _scheduleActivityPrefetchIfNeeded();
   }
 
   Future<void> _bootstrapActivity() async {
     await _controller.loadFirstPage();
     if (!mounted) return;
-    setState(_resetActivityPrefetchFlags);
     if (_controller.errorMessage == null) {
       await _controller.markEntireFeedViewed();
     }
     if (mounted) {
       await NotificationRealtimeService.instance.refreshUnread();
     }
+    if (mounted) _scheduleActivityPrefetchIfNeeded();
   }
 
   void _onTabChanged() {
@@ -180,28 +175,10 @@ class _ActivityPageState extends State<ActivityPage>
     if (_scrollController.hasClients) {
       _scrollController.jumpTo(0);
     }
-    setState(() {
-      _pageInTab[_tabController.index] = 0;
-      for (var k = 0; k < 4; k++) {
-        _activityTabPrefetchFailed[k] = false;
-      }
-    });
-  }
-
-  void _scrollActivityToTop() {
-    if (!mounted) return;
+    setState(() {});
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (_scrollController.hasClients) {
-        _scrollController.jumpTo(0);
-      }
+      if (mounted) _scheduleActivityPrefetchIfNeeded();
     });
-  }
-
-  void _resetActivityPrefetchFlags() {
-    for (var k = 0; k < 4; k++) {
-      _activityTabPrefetchFailed[k] = false;
-    }
   }
 
   @override
@@ -249,100 +226,26 @@ class _ActivityPageState extends State<ActivityPage>
     }
   }
 
-  List<ActivityItem> _visiblePageForCurrentTab() {
-    final filtered = _filteredItems();
-    if (filtered.isEmpty) return const [];
-    final tab = _tabController.index;
-    var p = _pageInTab[tab];
-    final maxP = math.max(0, ((filtered.length - 1) ~/ kStandardListPageSize));
-    if (p > maxP) p = maxP;
-    final start = p * kStandardListPageSize;
-    if (start >= filtered.length) return const [];
-    final end = math.min(start + kStandardListPageSize, filtered.length);
-    return filtered.sublist(start, end);
-  }
-
-  int _tabDisplayPage1Based() {
-    final filtered = _filteredItems();
-    if (filtered.isEmpty) return 1;
-    final tab = _tabController.index;
-    var p = _pageInTab[tab];
-    final maxP = math.max(0, ((filtered.length - 1) ~/ kStandardListPageSize));
-    if (p > maxP) p = maxP;
-    return p + 1;
-  }
-
-  int _tabTotalPages() {
-    final n = _filteredItems().length;
-    if (n == 0) return 1;
-    return ((n - 1) ~/ kStandardListPageSize) + 1;
-  }
-
-  (int, int, int) _activityPagerRange() {
-    final filtered = _filteredItems();
-    final tab = _tabController.index;
-    var p = _pageInTab[tab];
-    final maxP = math.max(0, ((filtered.length - 1) ~/ kStandardListPageSize));
-    if (p > maxP) p = maxP;
-    final start = p * kStandardListPageSize + 1;
-    final end = math.min((p + 1) * kStandardListPageSize, filtered.length);
-    return (start, end, filtered.length);
-  }
-
-  bool _canGoNextActivity() {
-    final tab = _tabController.index;
-    final f = _filterForTabIndex(_controller.items, tab);
-    if (f.isEmpty) return false;
-    if (_activityTabPrefetchFailed[tab]) return false;
-    final p = _pageInTab[tab];
-    if ((p + 1) * kStandardListPageSize < f.length) return true;
-    return _controller.hasMore;
-  }
-
-  bool _canGoPrevActivity() => _pageInTab[_tabController.index] > 0;
-
-  Future<void> _goNextActivity() async {
-    if (!_canGoNextActivity()) return;
-    final tab = _tabController.index;
-    var p = _pageInTab[tab];
-    var f = _filterForTabIndex(_controller.items, tab);
-    if ((p + 1) * kStandardListPageSize < f.length) {
-      setState(() => _pageInTab[tab] = p + 1);
-      _scrollActivityToTop();
-      return;
-    }
+  void _maybeLoadMoreActivity(ScrollMetrics metrics) {
+    if (_controller.loadingMore || _controller.loadingFirst) return;
     if (!_controller.hasMore) return;
-    var guard = 40;
-    while (_controller.hasMore && guard-- > 0) {
-      final beforeLen = _controller.items.length;
-      await _controller.loadMore();
+    if (metrics.maxScrollExtent <= 0) return;
+    if (metrics.pixels < metrics.maxScrollExtent - 360) return;
+    unawaited(_controller.loadMore());
+  }
+
+  void _scheduleActivityPrefetchIfNeeded() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      f = _filterForTabIndex(_controller.items, tab);
-      if ((p + 1) * kStandardListPageSize < f.length) {
-        setState(() {
-          _pageInTab[tab] = p + 1;
-          _activityTabPrefetchFailed[tab] = false;
-        });
-        _scrollActivityToTop();
+      if (_controller.loadingMore ||
+          _controller.loadingFirst ||
+          !_controller.hasMore) {
         return;
       }
-      if (_controller.items.length == beforeLen) break;
-    }
-    if (!mounted) return;
-    if ((p + 1) * kStandardListPageSize >=
-        _filterForTabIndex(_controller.items, tab).length) {
-      setState(() => _activityTabPrefetchFailed[tab] = true);
-    }
-  }
-
-  void _goPrevActivity() {
-    final t = _tabController.index;
-    if (_pageInTab[t] <= 0) return;
-    setState(() {
-      _pageInTab[t]--;
-      _activityTabPrefetchFailed[t] = false;
+      if (!_scrollController.hasClients) return;
+      if (_scrollController.position.maxScrollExtent > 72) return;
+      unawaited(_controller.loadMore());
     });
-    _scrollActivityToTop();
   }
 
   Future<void> _openProductReviewPageFromActivity(
@@ -507,14 +410,12 @@ class _ActivityPageState extends State<ActivityPage>
 
   Future<void> _onRefresh() async {
     await _controller.loadFirstPage(flushRemoteListabilityCaches: true);
-    if (mounted) {
-      setState(_resetActivityPrefetchFlags);
-    }
     if (mounted && _controller.errorMessage == null) {
       await _controller.markEntireFeedViewed();
     }
     if (mounted) {
       await NotificationRealtimeService.instance.refreshUnread();
+      _scheduleActivityPrefetchIfNeeded();
     }
   }
 
@@ -532,9 +433,10 @@ class _ActivityPageState extends State<ActivityPage>
         title: Text(
           'Notifications',
           style: AppTextStyles.heading2.copyWith(
-            color: AppColors.primary,
-            fontWeight: FontWeight.w700,
-            fontSize: 20,
+            color: AppColors.textPrimary,
+            fontWeight: FontWeight.w600,
+            fontSize: 18,
+            letterSpacing: -0.2,
           ),
         ),
         bottom: PreferredSize(
@@ -542,34 +444,9 @@ class _ActivityPageState extends State<ActivityPage>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                child: TabBar(
-                  controller: _tabController,
-                  isScrollable: false,
-                  indicator: BoxDecoration(
-                    color: AppColors.primary,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  indicatorSize: TabBarIndicatorSize.tab,
-                  labelColor: Colors.white,
-                  unselectedLabelColor: AppColors.textSecondary,
-                  dividerColor: Colors.transparent,
-                  labelStyle: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13,
-                  ),
-                  unselectedLabelStyle: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                  ),
-                  tabs: const [
-                    Tab(text: 'All'),
-                    Tab(text: 'Follow'),
-                    Tab(text: 'Likes'),
-                    Tab(text: 'Reviews'),
-                  ],
-                ),
+              FeedScreenTabBar(
+                controller: _tabController,
+                tabLabels: const ['All', 'Follow', 'Likes', 'Reviews'],
               ),
               Divider(
                 height: 1,
@@ -677,72 +554,76 @@ class _ActivityPageState extends State<ActivityPage>
             );
           }
 
-          final pageItems = _visiblePageForCurrentTab();
-          final range = _activityPagerRange();
-          return Column(
-            children: [
-              Expanded(
-                child: RefreshIndicator(
-                  color: AppColors.primary,
-                  onRefresh: _onRefresh,
-                  child: ListView.separated(
-                    controller: _scrollController,
-                    physics: const AlwaysScrollableScrollPhysics(
-                      parent: ClampingScrollPhysics(),
-                    ),
-                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 20),
-                    itemCount: pageItems.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (context, index) {
-                      final item = pageItems[index];
-                      return Container(
-                        key: ValueKey(item.id),
-                        decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: AppColors.border.withValues(alpha: 0.7),
+          final tail =
+              _controller.loadingMore && _controller.hasMore ? 1 : 0;
+          return RefreshIndicator(
+            color: AppColors.primary,
+            onRefresh: _onRefresh,
+            child: NotificationListener<ScrollNotification>(
+              onNotification: (ScrollNotification n) {
+                if (n.metrics.axis == Axis.vertical &&
+                    (n is ScrollUpdateNotification ||
+                        n is ScrollEndNotification)) {
+                  _maybeLoadMoreActivity(n.metrics);
+                }
+                return false;
+              },
+              child: ListView.builder(
+                controller: _scrollController,
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: ClampingScrollPhysics(),
+                ),
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+                itemCount: filtered.length + tail,
+                itemBuilder: (context, index) {
+                  if (index >= filtered.length) {
+                    return const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Center(
+                        child: SizedBox(
+                          width: 26,
+                          height: 26,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.2,
+                            color: AppColors.primary,
                           ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.03),
-                              blurRadius: 8,
-                              offset: const Offset(0, 3),
-                            ),
-                          ],
                         ),
-                        child: ActivityFeedRow(
-                          key: ValueKey('row_${item.id}'),
-                          item: item,
-                          following: _controller.isFollowingUser(item.user.id),
-                          onToggleFollow: () =>
-                              _onToggleFollow(context, item.user.id),
-                          onOpen: () => _onOpenItem(context, item),
-                          onUserTap: () => _onUserTap(context, item),
+                      ),
+                    );
+                  }
+                  final item = filtered[index];
+                  return Padding(
+                    padding: EdgeInsets.only(top: index == 0 ? 0 : 10),
+                    child: Container(
+                      key: ValueKey(item.id),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: AppColors.border.withValues(alpha: 0.35),
                         ),
-                      );
-                    },
-                  ),
-                ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.04),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: ActivityFeedRow(
+                        key: ValueKey('row_${item.id}'),
+                        item: item,
+                        following: _controller.isFollowingUser(item.user.id),
+                        onToggleFollow: () =>
+                            _onToggleFollow(context, item.user.id),
+                        onOpen: () => _onOpenItem(context, item),
+                        onUserTap: () => _onUserTap(context, item),
+                      ),
+                    ),
+                  );
+                },
               ),
-              if (filtered.isNotEmpty)
-                PagedNavigationBar(
-                  currentPage1Based: _tabDisplayPage1Based(),
-                  totalPages: _tabTotalPages(),
-                  canGoPrevious: _canGoPrevActivity(),
-                  canGoNext: _canGoNextActivity(),
-                  isLoadingNext: _controller.loadingMore,
-                  onPrevious: _goPrevActivity,
-                  onNext: () {
-                    unawaited(_goNextActivity());
-                  },
-                  showTopDivider: true,
-                  rangeStart1Based: range.$1,
-                  rangeEnd1Based: range.$2,
-                  rangeTotal: range.$3,
-                  itemNounPlural: 'activities',
-                ),
-            ],
+            ),
           );
         },
       ),

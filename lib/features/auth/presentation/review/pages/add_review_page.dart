@@ -20,11 +20,7 @@ class AddReviewPage extends StatefulWidget {
   /// Doluysa [PUT /api/reviews/{id}] ile güncelleme modu
   final ReviewDto? reviewToEdit;
 
-  const AddReviewPage({
-    super.key,
-    required this.product,
-    this.reviewToEdit,
-  });
+  const AddReviewPage({super.key, required this.product, this.reviewToEdit});
 
   @override
   State<AddReviewPage> createState() => _AddReviewPageState();
@@ -47,14 +43,24 @@ class _AddReviewPageState extends State<AddReviewPage> {
   int _selectedRating = 0;
   bool _isCollaborative = false;
   final int _maxCharacters = 500;
+  static const int _minReviewLength = 10;
   static const int _maxReviewPhotos = 5;
   final ImagePicker _imagePicker = ImagePicker();
   final List<XFile> _selectedImages = [];
+
   /// Düzenleme modunda sunucuda kalan görseller (silinenler listeden çıkar; PUT’ta `id` ile korunur).
   List<ReviewMediaDto> _existingMedia = [];
   Map<String, String>? _imageHeaders;
 
   bool get _isEditMode => widget.reviewToEdit != null;
+
+  /// Yıldız + metin (validator ile aynı kurallar); kaydır butonu yalnızca buna göre etkin.
+  bool get _canSlideToSubmit {
+    if (_selectedRating < 1) return false;
+    final t = _reviewController.text.trim();
+    if (t.isEmpty || t.length < _minReviewLength) return false;
+    return true;
+  }
 
   bool get _hasAnyPhotos =>
       _existingMedia.isNotEmpty || _selectedImages.isNotEmpty;
@@ -94,8 +100,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
   void _applyReviewToForm(ReviewDto r) {
     final d = r.description?.trim();
     final t = r.title.trim();
-    final body =
-        (d != null && d.isNotEmpty) ? d : (t.isNotEmpty ? t : '');
+    final body = (d != null && d.isNotEmpty) ? d : (t.isNotEmpty ? t : '');
     _reviewController.text = body;
     final rt = r.rating;
     _selectedRating = rt >= 1 && rt <= 5 ? rt : 0;
@@ -122,8 +127,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
     final t = await _sessionHelper.ensureSession();
     if (!mounted) return;
     setState(() {
-      _imageHeaders =
-          t != null ? {'Authorization': 'Bearer $t'} : null;
+      _imageHeaders = t != null ? {'Authorization': 'Bearer $t'} : null;
     });
   }
 
@@ -217,30 +221,37 @@ class _AddReviewPageState extends State<AddReviewPage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.photo_library, color: AppColors.primary),
-              title: const Text('Choose from Gallery'),
-              onTap: () {
-                Navigator.pop(context);
-                _pickImage(ImageSource.gallery);
-              },
+      builder:
+          (context) => SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(
+                    Icons.photo_library,
+                    color: AppColors.primary,
+                  ),
+                  title: const Text('Choose from Gallery'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _pickImage(ImageSource.gallery);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(
+                    Icons.camera_alt,
+                    color: AppColors.primary,
+                  ),
+                  title: const Text('Take a Photo'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _pickImage(ImageSource.camera);
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
             ),
-            ListTile(
-              leading: const Icon(Icons.camera_alt, color: AppColors.primary),
-              title: const Text('Take a Photo'),
-              onTap: () {
-                Navigator.pop(context);
-                _pickImage(ImageSource.camera);
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
+          ),
     );
   }
 
@@ -254,13 +265,11 @@ class _AddReviewPageState extends State<AddReviewPage> {
         final mimeType = imageFile.mimeType ?? 'image/jpeg';
 
         mediaList.add(
-          ReviewMediaRequestDto.upload(
-            imageData: bytes,
-            mimeType: mimeType,
-          ),
+          ReviewMediaRequestDto.upload(imageData: bytes, mimeType: mimeType),
         );
       } catch (e) {
-        if (kDebugMode) debugPrint('Error converting image ${imageFile.path}: $e');
+        if (kDebugMode)
+          debugPrint('Error converting image ${imageFile.path}: $e');
       }
     }
 
@@ -378,12 +387,13 @@ class _AddReviewPageState extends State<AddReviewPage> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    // Klavye: Scaffold resizeToAvoidBottomInset ile gövde zaten yukarı kayar;
+    // viewInsets.bottom'u tekrar alt bar + scroll padding'e eklemek taşmaya yol açar.
     final bottomSafe = MediaQuery.paddingOf(context).bottom;
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
-      backgroundColor: _pageBackground,
+      backgroundColor: AppColors.surface,
       appBar: AppBar(
         backgroundColor: AppColors.surface,
         surfaceTintColor: Colors.transparent,
@@ -416,15 +426,24 @@ class _AddReviewPageState extends State<AddReviewPage> {
         onTap: () => FocusScope.of(context).unfocus(),
         child: Form(
           key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
+          child: SizedBox.expand(
+            child: ColoredBox(
+              color: _pageBackground,
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ListView(
+                  shrinkWrap: true,
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  physics: const AlwaysScrollableScrollPhysics(
+                    parent: ClampingScrollPhysics(),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
                       // Product — compact
                       Container(
                         padding: const EdgeInsets.all(12),
@@ -487,7 +506,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
                           ],
                         ),
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
 
                       // Rating + review + photos (tek kart — daha az kaydırma)
                       Container(
@@ -520,9 +539,10 @@ class _AddReviewPageState extends State<AddReviewPage> {
                                                 ? Icons.star_rounded
                                                 : Icons.star_outline_rounded,
                                             size: 30,
-                                            color: filled
-                                                ? _starFilled
-                                                : _starEmpty,
+                                            color:
+                                                filled
+                                                    ? _starFilled
+                                                    : _starEmpty,
                                           ),
                                         ),
                                       ),
@@ -543,6 +563,9 @@ class _AddReviewPageState extends State<AddReviewPage> {
                               minLines: 1,
                               maxLines: 4,
                               maxLength: _maxCharacters,
+                              scrollPadding: EdgeInsets.only(
+                                bottom: bottomSafe + 180,
+                              ),
                               decoration: InputDecoration(
                                 hintText:
                                     'Share your thoughts about this product…',
@@ -581,8 +604,8 @@ class _AddReviewPageState extends State<AddReviewPage> {
                                 if (value == null || value.trim().isEmpty) {
                                   return 'Please write a review';
                                 }
-                                if (value.trim().length < 10) {
-                                  return 'Review must be at least 10 characters';
+                                if (value.trim().length < _minReviewLength) {
+                                  return 'Review must be at least $_minReviewLength characters';
                                 }
                                 return null;
                               },
@@ -620,16 +643,19 @@ class _AddReviewPageState extends State<AddReviewPage> {
                                 height: 72,
                                 child: ListView.builder(
                                   scrollDirection: Axis.horizontal,
-                                  itemCount: _existingMedia.length +
+                                  itemCount:
+                                      _existingMedia.length +
                                       _selectedImages.length,
                                   itemBuilder: (context, index) {
                                     if (index < _existingMedia.length) {
                                       final m = _existingMedia[index];
-                                      final u =
-                                          m.getMediaUrl(ApiConfig.baseUrl);
+                                      final u = m.getMediaUrl(
+                                        ApiConfig.baseUrl,
+                                      );
                                       return Padding(
-                                        padding:
-                                            const EdgeInsets.only(right: 8),
+                                        padding: const EdgeInsets.only(
+                                          right: 8,
+                                        ),
                                         child: Stack(
                                           clipBehavior: Clip.none,
                                           children: [
@@ -651,8 +677,9 @@ class _AddReviewPageState extends State<AddReviewPage> {
                                                     child: const Icon(
                                                       Icons
                                                           .broken_image_outlined,
-                                                      color: AppColors
-                                                          .textSecondary,
+                                                      color:
+                                                          AppColors
+                                                              .textSecondary,
                                                       size: 28,
                                                     ),
                                                   );
@@ -665,9 +692,11 @@ class _AddReviewPageState extends State<AddReviewPage> {
                                               child: Material(
                                                 color: Colors.transparent,
                                                 child: InkWell(
-                                                  onTap: () =>
-                                                      _removeExistingMedia(
-                                                          index),
+                                                  onTap:
+                                                      () =>
+                                                          _removeExistingMedia(
+                                                            index,
+                                                          ),
                                                   customBorder:
                                                       const CircleBorder(),
                                                   child: Container(
@@ -676,8 +705,8 @@ class _AddReviewPageState extends State<AddReviewPage> {
                                                     decoration: BoxDecoration(
                                                       color: Colors.black
                                                           .withValues(
-                                                        alpha: 0.55,
-                                                      ),
+                                                            alpha: 0.55,
+                                                          ),
                                                       shape: BoxShape.circle,
                                                     ),
                                                     child: const Icon(
@@ -696,17 +725,18 @@ class _AddReviewPageState extends State<AddReviewPage> {
                                     final fileIndex =
                                         index - _existingMedia.length;
                                     return Padding(
-                                      padding:
-                                          const EdgeInsets.only(right: 8),
+                                      padding: const EdgeInsets.only(right: 8),
                                       child: Stack(
                                         clipBehavior: Clip.none,
                                         children: [
                                           ClipRRect(
-                                            borderRadius:
-                                                BorderRadius.circular(10),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
                                             child: Image.file(
-                                              File(_selectedImages[fileIndex]
-                                                  .path),
+                                              File(
+                                                _selectedImages[fileIndex].path,
+                                              ),
                                               width: 72,
                                               height: 72,
                                               fit: BoxFit.cover,
@@ -718,18 +748,20 @@ class _AddReviewPageState extends State<AddReviewPage> {
                                             child: Material(
                                               color: Colors.transparent,
                                               child: InkWell(
-                                                onTap: () =>
-                                                    _removeImage(fileIndex),
+                                                onTap:
+                                                    () =>
+                                                        _removeImage(fileIndex),
                                                 customBorder:
                                                     const CircleBorder(),
                                                 child: Container(
                                                   padding: const EdgeInsets.all(
-                                                      5),
+                                                    5,
+                                                  ),
                                                   decoration: BoxDecoration(
                                                     color: Colors.black
                                                         .withValues(
-                                                      alpha: 0.55,
-                                                    ),
+                                                          alpha: 0.55,
+                                                        ),
                                                     shape: BoxShape.circle,
                                                   ),
                                                   child: const Icon(
@@ -817,7 +849,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
                           ],
                         ),
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
 
                       // Disclosure
                       Container(
@@ -865,73 +897,77 @@ class _AddReviewPageState extends State<AddReviewPage> {
                           ],
                         ),
                       ),
-                      SizedBox(height: 6 + bottomInset),
-                    ],
-                  ),
-                ),
-              ),
-
-              // slide_to_act — alta yapışık, yatay boşluk minimum
-              ColoredBox(
-                color: AppColors.surface,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Divider(
-                      height: 1,
-                      thickness: 1,
-                      color: AppColors.border.withValues(alpha: 0.4),
-                    ),
-                    Padding(
-                      padding: EdgeInsets.fromLTRB(
-                        10,
-                        8,
-                        10,
-                        bottomInset + bottomSafe + 6,
-                      ),
-                      child: SlideAction(
-                        key: _slideActionKey,
-                        height: 56,
-                        borderRadius: 28,
-                        elevation: 1,
-                        animationDuration: const Duration(milliseconds: 280),
-                        innerColor: scheme.onPrimary,
-                        outerColor: scheme.primary,
-                        text: _isEditMode
-                            ? 'Slide to update review'
-                            : 'Slide to post review',
-                        textStyle: TextStyle(
-                          color: scheme.onPrimary,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 15,
-                          letterSpacing: 0.2,
-                        ),
-                        textColor: scheme.onPrimary,
-                        sliderRotate: false,
-                        sliderButtonIconPadding: 12,
-                        sliderButtonIconSize: 22,
-                        sliderButtonIcon: const Icon(
-                          Icons.arrow_forward,
-                          color: Colors.black,
-                        ),
-                        alignment: Alignment.center,
-                        onSubmit: () async {
-                          try {
-                            await _onSlideSubmit();
-                          } catch (e, st) {
-                            if (kDebugMode) {
-                              debugPrint('Slide submit error: $e\n$st');
-                            }
-                            if (!mounted) return;
-                            _slideActionKey.currentState?.reset();
-                            _showErrorSnackBar(
-                              ErrorHandler.getUserFriendlyMessage(e),
-                            );
-                          }
-                        },
-                      ),
+                      const SizedBox(height: 10),
+                      ],
                     ),
                   ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      bottomNavigationBar: ColoredBox(
+        color: AppColors.surface,
+        child: SafeArea(
+          top: false,
+          minimum: EdgeInsets.zero,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Divider(
+                height: 1,
+                thickness: 1,
+                color: AppColors.border.withValues(alpha: 0.4),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                child: Opacity(
+                  opacity: _canSlideToSubmit ? 1 : 0.5,
+                  child: SlideAction(
+                    key: _slideActionKey,
+                    enabled: _canSlideToSubmit,
+                    height: 56,
+                    borderRadius: 28,
+                    elevation: 1,
+                    animationDuration: const Duration(
+                      milliseconds: 280,
+                    ),
+                    innerColor: scheme.onPrimary,
+                    outerColor: scheme.primary,
+                    text: _isEditMode
+                        ? 'Slide to update review'
+                        : 'Slide to post review',
+                    textStyle: TextStyle(
+                      color: scheme.onPrimary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                      letterSpacing: 0.2,
+                    ),
+                    textColor: scheme.onPrimary,
+                    sliderRotate: false,
+                    sliderButtonIconPadding: 12,
+                    sliderButtonIconSize: 22,
+                    sliderButtonIcon: const Icon(
+                      Icons.arrow_forward,
+                      color: Colors.black,
+                    ),
+                    alignment: Alignment.center,
+                    onSubmit: () async {
+                      try {
+                        await _onSlideSubmit();
+                      } catch (e, st) {
+                        if (kDebugMode) {
+                          debugPrint('Slide submit error: $e\n$st');
+                        }
+                        if (!mounted) return;
+                        _slideActionKey.currentState?.reset();
+                        _showErrorSnackBar(
+                          ErrorHandler.getUserFriendlyMessage(e),
+                        );
+                      }
+                    },
+                  ),
                 ),
               ),
             ],
@@ -941,4 +977,3 @@ class _AddReviewPageState extends State<AddReviewPage> {
     );
   }
 }
-

@@ -211,7 +211,7 @@ Widget build(BuildContext context) {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text(
-                            "Welcome Back!",
+                            "Welcome",
                             style: AppTextStyles.heading1,
                           ),
                           const SizedBox(height: 4),

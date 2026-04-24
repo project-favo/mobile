@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -18,7 +17,6 @@ import '../../../../../core/utils/content_unavailable_dialog.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/utils/exceptions.dart';
 import '../../../../../core/utils/session_helper.dart';
-import '../../../../../core/widgets/paged_navigation_bar.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../../data/models/notification_dto.dart';
@@ -74,7 +72,6 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
 
   /// Tüm yüklenmiş ve süzülmüş satırlar (sıra korunur; sayfa pencereleri buna göre).
   final List<NotificationDto> _allVisible = [];
-  int _uiPage = 0;
   int _nextServerPage = 0;
   int _serverTotalPages = 1;
   StreamSubscription<NotificationPushEvent>? _pushSub;
@@ -97,26 +94,6 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
     });
   }
 
-  List<NotificationDto> get _items {
-    final start = _uiPage * kStandardListPageSize;
-    if (start >= _allVisible.length) return const [];
-    final end = (start + kStandardListPageSize).clamp(0, _allVisible.length);
-    return _allVisible.sublist(start, end);
-  }
-
-  int get _totalUiPages {
-    if (_allVisible.isEmpty) return 1;
-    return ((_allVisible.length - 1) ~/ kStandardListPageSize) + 1;
-  }
-
-  bool get _canGoPrev => _uiPage > 0;
-
-  bool get _canGoNext {
-    final nextStart = (_uiPage + 1) * kStandardListPageSize;
-    if (nextStart < _allVisible.length) return true;
-    return _nextServerPage < _serverTotalPages;
-  }
-
   @override
   void initState() {
     super.initState();
@@ -127,6 +104,7 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
     _pushSub = NotificationRealtimeService.instance.pushStream.listen((e) {
       unawaited(_onRealtimePush(e));
     });
+    _listScrollController.addListener(_onNotificationsScroll);
     unawaited(_loadFirstPage());
     unawaited(NotificationRealtimeService.instance.refreshUnread());
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -154,8 +132,44 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
     appRouteObserver.unsubscribe(this);
     _pushSub?.cancel();
     NotificationRealtimeService.instance.detach();
+    _listScrollController.removeListener(_onNotificationsScroll);
     _listScrollController.dispose();
     super.dispose();
+  }
+
+  void _onNotificationsScroll() {
+    if (!_listScrollController.hasClients) return;
+    if (_paging || _loadingFirst) return;
+    if (_nextServerPage >= _serverTotalPages) return;
+    final m = _listScrollController.position;
+    if (m.maxScrollExtent <= 0) return;
+    if (m.pixels < m.maxScrollExtent - 360) return;
+    unawaited(_loadMoreNotifications());
+  }
+
+  void _scheduleNotificationsPrefetchIfNeeded() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_paging || _loadingFirst || _nextServerPage >= _serverTotalPages) {
+        return;
+      }
+      if (!_listScrollController.hasClients) return;
+      if (_listScrollController.position.maxScrollExtent > 72) return;
+      unawaited(_loadMoreNotifications());
+    });
+  }
+
+  Future<void> _loadMoreNotifications() async {
+    if (_paging || _nextServerPage >= _serverTotalPages) return;
+    setState(() => _paging = true);
+    try {
+      await _pumpFromServerForVisibleCount(
+        _allVisible.length + kStandardListPageSize,
+      );
+      if (mounted) setState(() => _paging = false);
+    } catch (_) {
+      if (mounted) setState(() => _paging = false);
+    }
   }
 
   Future<void> _onRealtimePush(NotificationPushEvent e) async {
@@ -215,7 +229,6 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
       _loadingFirst = true;
       _errorMessage = null;
       _allVisible.clear();
-      _uiPage = 0;
       _nextServerPage = 0;
       _serverTotalPages = 1;
     });
@@ -229,6 +242,7 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
       if (!mounted) return;
       setState(() => _loadingFirst = false);
       _scrollNotificationsToTop();
+      _scheduleNotificationsPrefetchIfNeeded();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -236,38 +250,6 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
         _loadingFirst = false;
       });
     }
-  }
-
-  Future<void> _goNextPage() async {
-    if (!_canGoNext || _paging) return;
-    final nextStart = (_uiPage + 1) * kStandardListPageSize;
-    if (nextStart < _allVisible.length) {
-      setState(() => _uiPage++);
-      _scrollNotificationsToTop();
-      return;
-    }
-    setState(() => _paging = true);
-    try {
-      await _pumpFromServerForVisibleCount(nextStart + 1);
-      if (!mounted) return;
-      if (nextStart < _allVisible.length) {
-        setState(() {
-          _uiPage++;
-          _paging = false;
-        });
-        _scrollNotificationsToTop();
-      } else {
-        setState(() => _paging = false);
-      }
-    } catch (_) {
-      if (mounted) setState(() => _paging = false);
-    }
-  }
-
-  void _goPrevPage() {
-    if (!_canGoPrev) return;
-    setState(() => _uiPage--);
-    _scrollNotificationsToTop();
   }
 
   Future<void> _markAllRead() async {
@@ -473,20 +455,28 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
   void _onDismissed(NotificationDto n) {
     setState(() {
       _allVisible.removeWhere((e) => e.id == n.id);
-      if (_uiPage > 0 && _uiPage * kStandardListPageSize >= _allVisible.length) {
-        _uiPage--;
-      }
     });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.surface,
+      backgroundColor: AppColors.background.withValues(alpha: 0.96),
       appBar: AppBar(
-        backgroundColor: AppColors.background,
+        backgroundColor: AppColors.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        shadowColor: Colors.transparent,
         toolbarHeight: AppSpacing.toolbarHeight,
-        title: const Text('Notifications', style: AppTextStyles.HomeHeader),
+        title: Text(
+          'Notifications',
+          style: AppTextStyles.heading2.copyWith(
+            color: AppColors.textPrimary,
+            fontWeight: FontWeight.w600,
+            fontSize: 18,
+            letterSpacing: -0.2,
+          ),
+        ),
         centerTitle: true,
         leading: Padding(
           padding: const EdgeInsets.symmetric(vertical: AppSpacing.small),
@@ -513,45 +503,17 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
           child: Divider(
             height: 1,
             thickness: 1,
-            color: AppColors.textSecondary.withValues(alpha: 0.2),
+            color: AppColors.textSecondary.withValues(alpha: 0.12),
           ),
         ),
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: RefreshIndicator(
-              color: AppColors.primary,
-              onRefresh: () async {
-                await _loadFirstPage(flushRemoteListabilityCaches: true);
-                await NotificationRealtimeService.instance.refreshUnread();
-              },
-              child: _buildBody(),
-            ),
-          ),
-          if (!_loadingFirst &&
-              _errorMessage == null &&
-              _allVisible.isNotEmpty)
-            PagedNavigationBar(
-              currentPage1Based: _uiPage + 1,
-              totalPages: _totalUiPages,
-              canGoPrevious: _canGoPrev,
-              canGoNext: _canGoNext,
-              isLoadingNext: _paging,
-              onPrevious: _goPrevPage,
-              onNext: () {
-                unawaited(_goNextPage());
-              },
-              backgroundColor: AppColors.background,
-              rangeStart1Based: _uiPage * kStandardListPageSize + 1,
-              rangeEnd1Based: math.min(
-                (_uiPage + 1) * kStandardListPageSize,
-                _allVisible.length,
-              ),
-              rangeTotal: _allVisible.length,
-              itemNounPlural: 'notifications',
-            ),
-        ],
+      body: RefreshIndicator(
+        color: AppColors.primary,
+        onRefresh: () async {
+          await _loadFirstPage(flushRemoteListabilityCaches: true);
+          await NotificationRealtimeService.instance.refreshUnread();
+        },
+        child: _buildBody(),
       ),
     );
   }
@@ -620,7 +582,7 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
       );
     }
 
-    final grouped = groupNotifications(_items);
+    final grouped = groupNotifications(_allVisible);
     final orderedSections = List<NotificationSection>.from(
       NotificationSection.values,
     )..sort((a, b) => a.sortIndex.compareTo(b.sortIndex));
@@ -644,32 +606,45 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
           child: Theme(
             data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
             child: Material(
-              color: AppColors.background,
-              borderRadius: BorderRadius.circular(12),
+              color: AppColors.surface,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(
+                  color: AppColors.border.withValues(alpha: 0.35),
+                ),
+              ),
+              clipBehavior: Clip.antiAlias,
               child: ExpansionTile(
                 key: PageStorageKey<String>('notif-section-${section.name}'),
                 initiallyExpanded: _sectionExpanded[section] ?? true,
                 onExpansionChanged: (open) {
                   setState(() => _sectionExpanded[section] = open);
                 },
-                leading: Icon(section.icon, color: AppColors.primary, size: 22),
+                leading: Icon(
+                  section.icon,
+                  color: AppColors.textPrimary.withValues(alpha: 0.75),
+                  size: 22,
+                ),
                 title: Text(
                   section.title,
-                  style: AppTextStyles.bodyMedium.copyWith(
-                    fontWeight: FontWeight.w700,
+                  style: AppTextStyles.body.copyWith(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 16,
                   ),
                 ),
                 subtitle: Text(
                   countLabel,
-                  style: AppTextStyles.bodySmall.copyWith(
+                  style: AppTextStyles.bodySecondary.copyWith(
                     color: AppColors.textSecondary,
+                    fontSize: 13,
                   ),
                 ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.all(Radius.circular(16)),
                 ),
-                collapsedShape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+                collapsedShape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.all(Radius.circular(16)),
                 ),
                 backgroundColor: AppColors.surface,
                 collapsedBackgroundColor: AppColors.surface,
@@ -697,11 +672,6 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
                             if (await _deleteNotification(n) && mounted) {
                               setState(() {
                                 _allVisible.removeWhere((e) => e.id == n.id);
-                                if (_uiPage > 0 &&
-                                    _uiPage * kStandardListPageSize >=
-                                        _allVisible.length) {
-                                  _uiPage--;
-                                }
                               });
                             }
                           },
@@ -739,7 +709,7 @@ class _DismissDeleteBackground extends StatelessWidget {
       padding: const EdgeInsets.only(right: AppSpacing.xLarge),
       decoration: BoxDecoration(
         color: AppColors.error.withValues(alpha: 0.9),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
@@ -777,18 +747,18 @@ class _NotificationTile extends StatelessWidget {
     final n = notification;
     return Material(
       color: n.isUnread
-          ? AppColors.primary.withValues(alpha: 0.06)
+          ? AppColors.primary.withValues(alpha: 0.05)
           : AppColors.surface,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(14),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.large,
+            AppSpacing.medium,
             AppSpacing.small,
-            AppSpacing.small,
-            AppSpacing.small,
+            AppSpacing.medium,
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
