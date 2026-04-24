@@ -67,6 +67,7 @@ class _SearchPageState extends State<SearchPage> {
   String? _firebaseIdToken;
   bool _notificationSvcAttached = false;
   Timer? _topReviewersRefreshTimer;
+  String? _currentUserId;
 
   /// GET /api/reviews/top-reviewers — giriş yapmışken dolar
   List<TopReviewerDto> _topReviewers = [];
@@ -103,8 +104,21 @@ class _SearchPageState extends State<SearchPage> {
       setState(() {});
     });
     _loadInitialData();
+    unawaited(_loadCurrentUserIdentity());
     unawaited(_loadSocialGraphForSearch());
     _scheduleTopReviewerRefresh();
+  }
+
+  Future<void> _loadCurrentUserIdentity() async {
+    try {
+      final token = await _sessionHelper.ensureSession();
+      if (token == null || !mounted) return;
+      final me = await _authService.getMe();
+      if (!mounted) return;
+      setState(() {
+        _currentUserId = me.id.trim();
+      });
+    } catch (_) {}
   }
 
   /// Profil adına göre yerel eşleşme: top reviewers + takip edilen / takipçi.
@@ -883,6 +897,11 @@ class _SearchPageState extends State<SearchPage> {
                                     ),
                                     child: _TopReviewerRow(
                                       data: t,
+                                      isCurrentUser:
+                                          hasData &&
+                                          _currentUserId != null &&
+                                          t!.userId.trim() ==
+                                              _currentUserId!.trim(),
                                       onTap: hasData
                                           ? () {
                                               if (t!.userId.isEmpty) return;
@@ -1233,10 +1252,12 @@ class _ProfileSearchHitRow extends StatelessWidget {
 class _TopReviewerRow extends StatelessWidget {
   const _TopReviewerRow({
     required this.data,
+    required this.isCurrentUser,
     required this.onTap,
   });
 
   final TopReviewerDto? data;
+  final bool isCurrentUser;
   final VoidCallback? onTap;
 
   @override
@@ -1256,7 +1277,12 @@ class _TopReviewerRow extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(4, 6, 4, 4),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.border, width: 1),
+            border: Border.all(
+              color: isCurrentUser
+                  ? AppColors.primary.withValues(alpha: 0.85)
+                  : AppColors.border,
+              width: isCurrentUser ? 1.4 : 1,
+            ),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,

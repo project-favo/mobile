@@ -20,6 +20,7 @@ class UserResponseDto {
 
   /// Askı sinyali — [isUserSuspendedSignalInMap]; `isSuspended` alanı ve status varyantları.
   final bool isSuspended;
+  final bool profileAnonymous;
 
   /// Başka kullanıcının profili: açık askı, deaktif, hesap dışı — `isActive` kullanılmaz; açık JSON bayrakları.
   bool get isProfileViewBlocked =>
@@ -39,6 +40,7 @@ class UserResponseDto {
     this.isAccountInactive = false,
     this.isAccountDeactivated = false,
     this.isSuspended = false,
+    this.profileAnonymous = false,
   });
 
   /// Backend: null → legacy (verified), false → not verified, true → verified
@@ -68,6 +70,7 @@ class UserResponseDto {
       isAccountInactive: isAccountInactive,
       isAccountDeactivated: isAccountDeactivated,
       isSuspended: isSuspended,
+      profileAnonymous: profileAnonymous,
     );
   }
 
@@ -87,6 +90,7 @@ class UserResponseDto {
       isAccountInactive: isAccountInactive,
       isAccountDeactivated: isAccountDeactivated,
       isSuspended: isSuspended,
+      profileAnonymous: profileAnonymous,
     );
   }
 
@@ -109,6 +113,7 @@ class UserResponseDto {
       isAccountInactive: isAccountInactive,
       isAccountDeactivated: isAccountDeactivated,
       isSuspended: isSuspended,
+      profileAnonymous: profileAnonymous,
     );
   }
 
@@ -240,6 +245,7 @@ class UserResponseDto {
       isAccountDeactivated:
           (m['isAccountDeactivated'] == true) || _accountDeactivatedFromMap(m),
       isSuspended: isUserSuspendedSignalInMap(m),
+      profileAnonymous: m['profileAnonymous'] == true,
     );
   }
 
@@ -258,6 +264,7 @@ class UserResponseDto {
       'isAccountInactive': isAccountInactive,
       'isAccountDeactivated': isAccountDeactivated,
       'isSuspended': isSuspended,
+      'profileAnonymous': profileAnonymous,
     };
   }
 }

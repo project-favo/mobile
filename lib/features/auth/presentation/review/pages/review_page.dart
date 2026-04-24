@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../widgets/review_card.dart';
@@ -82,23 +83,25 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
   bool _poppedBecauseProductUnlisted = false;
   /// [_syncProductPageInBackground] tekil çalışsın; üst üste API çağrısı olmasın.
   bool _pageBackgroundSyncInFlight = false;
+  final Map<String, List<ReviewDto>> _reviewQueryCache = {};
+  final Map<String, DateTime> _reviewQueryCacheTimes = {};
+  static const Duration _reviewQueryCacheTtl = Duration(seconds: 25);
   /// Review detail ile aynı: home ilk 50 dışı + önceki tur vitrin = askı sinyali.
   bool? _lastProductOnHomeFirstPage;
   static const EdgeInsets _contentHorizontalPadding = EdgeInsets.symmetric(
     horizontal: AppSpacing.xxLarge,
   );
+  static const String _sortNewest = ReviewRepository.reviewSortNewest;
+  static const String _sortMostLiked = ReviewRepository.reviewSortMostLiked;
+  static const String _sortTopFollowerAuthor =
+      ReviewRepository.reviewSortTopFollowerAuthor;
+  static const String _sortRatingHigh =
+      ReviewRepository.reviewSortHighestRating;
+  static const String _sortRatingLow = ReviewRepository.reviewSortLowestRating;
 
-  List<ReviewDto> _sortedNewestFirst(List<ReviewDto> reviews) {
-    final out = List<ReviewDto>.from(reviews);
-    out.sort((a, b) {
-      final da = parseBackendDateTimeToLocal(a.createdAt) ??
-          DateTime.fromMillisecondsSinceEpoch(0);
-      final db = parseBackendDateTimeToLocal(b.createdAt) ??
-          DateTime.fromMillisecondsSinceEpoch(0);
-      return db.compareTo(da);
-    });
-    return out;
-  }
+  bool? _hasMediaFilter;
+  bool? _isCollaborativeFilter;
+  String _selectedSort = _sortNewest;
 
   String _formatReviewRelativeDate(String raw) {
     final parsed = parseBackendDateTimeToLocal(raw);
@@ -136,6 +139,316 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       counts[r] = (counts[r] ?? 0) + 1;
     }
     return counts;
+  }
+
+  bool get _isUsingDefaultReviewQuery =>
+      _hasMediaFilter == null &&
+      _isCollaborativeFilter == null &&
+      _selectedSort == _sortNewest;
+  bool get _hasBinaryReviewFilters =>
+      _hasMediaFilter != null || _isCollaborativeFilter != null;
+
+  Future<void> _setSortFilter(String value) async {
+    if (_selectedSort == value) return;
+    setState(() {
+      _selectedSort = value;
+    });
+    await _loadReviews();
+  }
+
+  int get _activeFilterCount =>
+      (_hasMediaFilter != null ? 1 : 0) +
+      (_isCollaborativeFilter != null ? 1 : 0);
+
+  String _reviewQueryCacheKey() {
+    final media = _hasMediaFilter == null
+        ? 'all'
+        : (_hasMediaFilter! ? 'with_media' : 'without_media');
+    final sponsor = _isCollaborativeFilter == null
+        ? 'all'
+        : (_isCollaborativeFilter! ? 'sponsored' : 'non_sponsored');
+    return '${_currentProduct.id}|$_selectedSort|$media|$sponsor';
+  }
+
+  List<ReviewDto>? _peekFreshReviewQueryCache() {
+    final key = _reviewQueryCacheKey();
+    final cachedAt = _reviewQueryCacheTimes[key];
+    final cached = _reviewQueryCache[key];
+    if (cachedAt == null || cached == null) return null;
+    final fresh = DateTime.now().difference(cachedAt) <= _reviewQueryCacheTtl;
+    if (!fresh) return null;
+    return cached;
+  }
+
+  void _rememberReviewQueryCache(List<ReviewDto> reviews) {
+    final key = _reviewQueryCacheKey();
+    _reviewQueryCache[key] = List<ReviewDto>.from(reviews);
+    _reviewQueryCacheTimes[key] = DateTime.now();
+  }
+
+  String _emptyReviewsMessage() {
+    if (_activeFilterCount == 0) {
+      return 'No reviews yet. Be the first to review!';
+    }
+
+    String mediaText;
+    if (_hasMediaFilter == true) {
+      mediaText = 'with media';
+    } else if (_hasMediaFilter == false) {
+      mediaText = 'without media';
+    } else {
+      mediaText = 'any media type';
+    }
+
+    String sponsorText;
+    if (_isCollaborativeFilter == true) {
+      sponsorText = 'sponsored';
+    } else if (_isCollaborativeFilter == false) {
+      sponsorText = 'non-sponsored';
+    } else {
+      sponsorText = 'any sponsorship type';
+    }
+
+    if (_hasMediaFilter != null && _isCollaborativeFilter != null) {
+      return 'No $sponsorText reviews found $mediaText for this product.';
+    }
+    if (_hasMediaFilter != null) {
+      return 'No reviews found $mediaText for this product.';
+    }
+    return 'No $sponsorText reviews found for this product.';
+  }
+
+  Widget _buildControlIconButton({
+    required IconData icon,
+    required bool isActive,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: Ink(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: isActive
+                  ? AppColors.primary.withValues(alpha: 0.1)
+                  : AppColors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isActive
+                    ? AppColors.primary.withValues(alpha: 0.35)
+                    : AppColors.border.withValues(alpha: 0.85),
+              ),
+            ),
+            child: Icon(
+              icon,
+              size: 18,
+              color: isActive ? AppColors.primary : AppColors.textSecondary,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openSortSheet() async {
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: AppColors.surface,
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                title: const Text('Newest'),
+                trailing: _selectedSort == _sortNewest
+                    ? const Icon(Icons.check_rounded, color: AppColors.primary)
+                    : null,
+                onTap: () => Navigator.of(ctx).pop(_sortNewest),
+              ),
+              ListTile(
+                title: const Text('Most liked'),
+                trailing: _selectedSort == _sortMostLiked
+                    ? const Icon(Icons.check_rounded, color: AppColors.primary)
+                    : null,
+                onTap: () => Navigator.of(ctx).pop(_sortMostLiked),
+              ),
+              ListTile(
+                title: const Text('Top follower author'),
+                trailing: _selectedSort == _sortTopFollowerAuthor
+                    ? const Icon(Icons.check_rounded, color: AppColors.primary)
+                    : null,
+                onTap: () => Navigator.of(ctx).pop(_sortTopFollowerAuthor),
+              ),
+              ListTile(
+                title: const Text('Highest rating'),
+                trailing: _selectedSort == _sortRatingHigh
+                    ? const Icon(Icons.check_rounded, color: AppColors.primary)
+                    : null,
+                onTap: () => Navigator.of(ctx).pop(_sortRatingHigh),
+              ),
+              ListTile(
+                title: const Text('Lowest rating'),
+                trailing: _selectedSort == _sortRatingLow
+                    ? const Icon(Icons.check_rounded, color: AppColors.primary)
+                    : null,
+                onTap: () => Navigator.of(ctx).pop(_sortRatingLow),
+              ),
+              const SizedBox(height: 6),
+            ],
+          ),
+        );
+      },
+    );
+    if (selected != null) {
+      await _setSortFilter(selected);
+    }
+  }
+
+  Future<void> _openFilterSheet() async {
+    final result = await showModalBottomSheet<Map<String, bool?>>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: AppColors.surface,
+      builder: (ctx) {
+        bool? media = _hasMediaFilter;
+        bool? sponsored = _isCollaborativeFilter;
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            Widget optionRow({
+              required String title,
+              required bool? value,
+              required bool? selected,
+              required ValueChanged<bool?> onChanged,
+            }) {
+              return ListTile(
+                dense: true,
+                title: Text(title),
+                trailing: selected == value
+                    ? const Icon(Icons.check_rounded, color: AppColors.primary)
+                    : null,
+                onTap: () {
+                  setModalState(() => onChanged(value));
+                },
+              );
+            }
+
+            return SafeArea(
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.xLarge,
+                        vertical: AppSpacing.small,
+                      ),
+                      child: Text('Media', style: AppTextStyles.bodyBold),
+                    ),
+                    optionRow(
+                      title: 'All',
+                      value: null,
+                      selected: media,
+                      onChanged: (v) => media = v,
+                    ),
+                    optionRow(
+                      title: 'With media',
+                      value: true,
+                      selected: media,
+                      onChanged: (v) => media = v,
+                    ),
+                    optionRow(
+                      title: 'Without media',
+                      value: false,
+                      selected: media,
+                      onChanged: (v) => media = v,
+                    ),
+                    const Divider(height: 18),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.xLarge,
+                        vertical: AppSpacing.small,
+                      ),
+                      child: Text('Sponsorship', style: AppTextStyles.bodyBold),
+                    ),
+                    optionRow(
+                      title: 'All',
+                      value: null,
+                      selected: sponsored,
+                      onChanged: (v) => sponsored = v,
+                    ),
+                    optionRow(
+                      title: 'Sponsored',
+                      value: true,
+                      selected: sponsored,
+                      onChanged: (v) => sponsored = v,
+                    ),
+                    optionRow(
+                      title: 'Non-sponsored',
+                      value: false,
+                      selected: sponsored,
+                      onChanged: (v) => sponsored = v,
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.xLarge,
+                        AppSpacing.medium,
+                        AppSpacing.xLarge,
+                        AppSpacing.large,
+                      ),
+                      child: Row(
+                        children: [
+                          TextButton(
+                            onPressed: () {
+                              Navigator.of(ctx).pop(<String, bool?>{
+                                'hasMedia': null,
+                                'isCollaborative': null,
+                              });
+                            },
+                            child: const Text('Reset'),
+                          ),
+                          const Spacer(),
+                          FilledButton(
+                            onPressed: () {
+                              Navigator.of(ctx).pop(<String, bool?>{
+                                'hasMedia': media,
+                                'isCollaborative': sponsored,
+                              });
+                            },
+                            child: const Text('Apply'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (result == null) return;
+    final nextMedia = result['hasMedia'];
+    final nextSponsored = result['isCollaborative'];
+    if (_hasMediaFilter == nextMedia &&
+        _isCollaborativeFilter == nextSponsored) {
+      return;
+    }
+    setState(() {
+      _hasMediaFilter = nextMedia;
+      _isCollaborativeFilter = nextSponsored;
+    });
+    await _loadReviews();
   }
 
   List<String> _productTagHierarchy() {
@@ -430,14 +743,14 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
         reviewsToken = await _sessionHelper.ensureSession();
         if (reviewsToken == null || !mounted) return;
       }
-      final reviews = _sortedNewestFirst(filterVisibleReviews(
-        await _reviewRepository.getReviewsByProductId(
-        _currentProduct.id,
+      final reviews = await _fetchReviewsWithCurrentFilters(
         firebaseIdToken: reviewsToken,
-        ),
-      ));
+      );
       if (!mounted) return;
-      ReviewMemoryCache.instance.remember(_currentProduct.id, reviews);
+      _rememberReviewQueryCache(reviews);
+      if (_isUsingDefaultReviewQuery) {
+        ReviewMemoryCache.instance.remember(_currentProduct.id, reviews);
+      }
       if (_reviewListDataChanged(_reviews, reviews)) {
         if (mounted) {
           setState(() {
@@ -514,9 +827,10 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
   }
 
   void _hydrateReviewsFromCache() {
+    if (!_isUsingDefaultReviewQuery) return;
     final cached = ReviewMemoryCache.instance.peek(_currentProduct.id);
     if (cached == null || cached.isEmpty) return;
-    _reviews = _sortedNewestFirst(filterVisibleReviews(cached));
+    _reviews = filterVisibleReviews(cached);
     _isLoadingReviews = false;
     _errorMessage = null;
   }
@@ -575,6 +889,68 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
     } catch (e, st) {
       AppLogger.warnSilencedError('_loadLikeCount', e, st);
       if (!mounted) return;
+    }
+  }
+
+  bool _isUnauthorizedError(Object error) {
+    if (error is DioException) {
+      final code = error.response?.statusCode;
+      if (code == 401 || code == 403) return true;
+      final payload = dioResponseDataAsSearchString(error.response?.data)
+          .toLowerCase();
+      if (payload.contains('authentication required')) return true;
+      if (payload.contains('unauthorized')) return true;
+      if ((error.message ?? '').toLowerCase().contains('unauthorized')) {
+        return true;
+      }
+    }
+    final asText = error.toString().toLowerCase();
+    return asText.contains('authentication required') ||
+        asText.contains('unauthorized');
+  }
+
+  Future<List<ReviewDto>> _fetchReviewsWithCurrentFilters({
+    String? firebaseIdToken,
+  }) async {
+    Future<List<ReviewDto>> run(String? token) async {
+      return filterVisibleReviews(
+        await _reviewRepository.getReviewsByProductId(
+          _currentProduct.id,
+          firebaseIdToken: token,
+          hasMedia: _hasMediaFilter,
+          isCollaborative: _isCollaborativeFilter,
+          sort: _selectedSort,
+        ),
+      );
+    }
+
+    try {
+      return await run(firebaseIdToken);
+    } catch (e) {
+      if (!_isUnauthorizedError(e)) rethrow;
+      final refreshed = await _sessionHelper.refreshSession();
+      if (refreshed != null) {
+        try {
+          return await run(refreshed);
+        } catch (retryError) {
+          if (!_isUnauthorizedError(retryError)) rethrow;
+        }
+      }
+
+      // Backend'de bazı kombinasyonlarda (özellikle sonuç boşken) yanlışlıkla
+      // auth hatası dönebiliyor. Session sağlamsa bu durumu "boş liste"ye çevir.
+      if (_hasBinaryReviewFilters) {
+        final probe = await _sessionHelper.ensureSession();
+        if (probe != null) {
+          await _reviewRepository.getReviewsByProductId(
+            _currentProduct.id,
+            firebaseIdToken: probe,
+            sort: _selectedSort,
+          );
+          return <ReviewDto>[];
+        }
+      }
+      rethrow;
     }
   }
 
@@ -740,11 +1116,23 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
   }
 
   Future<void> _loadReviews({bool background = false}) async {
+    var shouldFetchInBackground = background;
     if (!background) {
-      setState(() {
-        _isLoadingReviews = true;
-        _errorMessage = null;
-      });
+      final cached = _peekFreshReviewQueryCache();
+      if (cached != null) {
+        setState(() {
+          _reviews = cached;
+          _cachedRatingCounts = null;
+          _isLoadingReviews = false;
+          _errorMessage = null;
+        });
+        shouldFetchInBackground = true;
+      } else {
+        setState(() {
+          _isLoadingReviews = true;
+          _errorMessage = null;
+        });
+      }
     } else {
       _errorMessage = null;
     }
@@ -754,13 +1142,13 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       if (user == null) {
         // Kullanıcı giriş yapmamışsa, review'ları token olmadan çekmeyi dene
         try {
-          final reviews = _sortedNewestFirst(filterVisibleReviews(
-            await _reviewRepository.getReviewsByProductId(
-            _currentProduct.id,
+          final reviews = await _fetchReviewsWithCurrentFilters(
             firebaseIdToken: null,
-            ),
-          ));
-          ReviewMemoryCache.instance.remember(_currentProduct.id, reviews);
+          );
+          _rememberReviewQueryCache(reviews);
+          if (_isUsingDefaultReviewQuery) {
+            ReviewMemoryCache.instance.remember(_currentProduct.id, reviews);
+          }
           setState(() {
             _reviews = reviews;
             _cachedRatingCounts = null;
@@ -800,13 +1188,13 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       }
 
       // Review'ları çek
-      final reviews = _sortedNewestFirst(filterVisibleReviews(
-        await _reviewRepository.getReviewsByProductId(
-        _currentProduct.id,
+      final reviews = await _fetchReviewsWithCurrentFilters(
         firebaseIdToken: firebaseIdToken,
-        ),
-      ));
-      ReviewMemoryCache.instance.remember(_currentProduct.id, reviews);
+      );
+      _rememberReviewQueryCache(reviews);
+      if (_isUsingDefaultReviewQuery) {
+        ReviewMemoryCache.instance.remember(_currentProduct.id, reviews);
+      }
 
       setState(() {
         _reviews = reviews;
@@ -814,7 +1202,17 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
         _isLoadingReviews = false;
       });
     } catch (e) {
-      if (background && _reviews.isNotEmpty) return;
+      if (shouldFetchInBackground && _reviews.isNotEmpty) return;
+      final isLoggedIn = FirebaseAuth.instance.currentUser != null;
+      if (isLoggedIn && _isUnauthorizedError(e)) {
+        setState(() {
+          _reviews = [];
+          _cachedRatingCounts = null;
+          _errorMessage = null;
+          _isLoadingReviews = false;
+        });
+        return;
+      }
       setState(() {
         _errorMessage = ErrorHandler.getUserFriendlyMessage(e);
         _isLoadingReviews = false;
@@ -1487,6 +1885,59 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                   ),
                 ),
                 const SizedBox(height: AppSpacing.xLarge),
+                Padding(
+                  padding: _contentHorizontalPadding,
+                  child: Row(
+                    children: [
+                      _buildControlIconButton(
+                        icon: Icons.swap_vert_rounded,
+                        isActive: _selectedSort != _sortNewest,
+                        tooltip: 'Sort reviews',
+                        onTap: () {
+                          unawaited(_openSortSheet());
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          _buildControlIconButton(
+                            icon: Icons.tune_rounded,
+                            isActive: _activeFilterCount > 0,
+                            tooltip: 'Filter reviews',
+                            onTap: () {
+                              unawaited(_openFilterSheet());
+                            },
+                          ),
+                          if (_activeFilterCount > 0)
+                            Positioned(
+                              right: -4,
+                              top: -4,
+                              child: Container(
+                                width: 16,
+                                height: 16,
+                                alignment: Alignment.center,
+                                decoration: const BoxDecoration(
+                                  color: AppColors.primary,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Text(
+                                  '$_activeFilterCount',
+                                  style: AppTextStyles.bodySmall.copyWith(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const Spacer(),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.large),
 
                 /// REVIEWS LIST
                 if (_isLoadingReviews)
@@ -1522,7 +1973,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                         vertical: AppSpacing.xxLarge,
                       ),
                       child: Text(
-                        'No reviews yet. Be the first to review!',
+                        _emptyReviewsMessage(),
                         style: AppTextStyles.bodySecondary,
                         textAlign: TextAlign.center,
                       ),

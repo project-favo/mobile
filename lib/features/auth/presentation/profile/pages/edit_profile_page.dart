@@ -43,6 +43,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   Uint8List? _currentProfilePhotoBytes;
   /// Kullanıcı "Remove Photo" dediğinde true; kayıtta sunucuya clear gider.
   bool _wantsToRemovePhoto = false;
+  late bool _profileAnonymous;
 
   @override
   void initState() {
@@ -69,6 +70,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     if (fromData != null && fromData.isNotEmpty) {
       _currentProfilePhotoBytes = fromData;
     }
+    _profileAnonymous = widget.user.profileAnonymous;
   }
 
   @override
@@ -257,6 +259,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
         name: _nameController.text.trim(),
         surname: _surnameController.text.trim(),
         birthdate: _birthdateController.text.trim(),
+        profileAnonymous: _profileAnonymous,
         profilePhotoBase64: profilePhotoBase64,
         profilePhotoMimeType: profilePhotoMimeType,
         clearProfilePhoto: clearPhoto,
@@ -520,6 +523,54 @@ class _EditProfilePageState extends State<EditProfilePage> {
                     setState(() => _updateError = null);
                   }
                 },
+              ),
+
+              const SizedBox(height: AppSpacing.xLarge),
+
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.medium,
+                  vertical: AppSpacing.small,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Anonymous profile',
+                            style: AppTextStyles.bodyMedium.copyWith(
+                              color: AppColors.textPrimary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Others will see your name as A**** A****.',
+                            style: AppTextStyles.bodySmall.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Switch.adaptive(
+                      value: _profileAnonymous,
+                      activeColor: AppColors.primary,
+                      onChanged: (v) {
+                        setState(() {
+                          _profileAnonymous = v;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
 
               const SizedBox(height: AppSpacing.xLarge),

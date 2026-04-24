@@ -23,6 +23,12 @@ bool _dioMeansReviewAlreadyReported(DioException e) {
 class ReviewRepository {
   final ApiClient _apiClient = ApiClient();
 
+  static const String reviewSortNewest = 'newest';
+  static const String reviewSortMostLiked = 'most_liked';
+  static const String reviewSortHighestRating = 'highest_rating';
+  static const String reviewSortLowestRating = 'lowest_rating';
+  static const String reviewSortTopFollowerAuthor = 'top_follower_author';
+
   /// Giriş yapan kullanıcının kendi yorumları - GET /api/reviews/me
   /// Token zorunlu.
   Future<List<ReviewDto>> getMyReviews(String firebaseIdToken) async {
@@ -55,12 +61,22 @@ class ReviewRepository {
   Future<List<ReviewDto>> getReviewsByProductId(
     String productId, {
     String? firebaseIdToken,
+    bool? hasMedia,
+    bool? isCollaborative,
+    String sort = reviewSortNewest,
   }) async {
     try {
       if (firebaseIdToken != null) {
         _apiClient.setAuthToken(firebaseIdToken);
       }
-      final response = await _apiClient.dio.get('/api/reviews/product/$productId');
+      final response = await _apiClient.dio.get(
+        '/api/reviews/product/$productId',
+        queryParameters: <String, dynamic>{
+          if (hasMedia != null) 'hasMedia': hasMedia,
+          if (isCollaborative != null) 'isCollaborative': isCollaborative,
+          'sort': sort,
+        },
+      );
       
       if (response.data is List) {
         final list = (response.data as List)

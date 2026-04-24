@@ -98,6 +98,7 @@ class _UserProfilePageState extends State<UserProfilePage>
   String? _avatarPhotoDataRaw;
   String _profileUsername = '';
   String? _profileFullName;
+  bool _profileAnonymous = false;
 
   @override
   void initState() {
@@ -119,8 +120,41 @@ class _UserProfilePageState extends State<UserProfilePage>
       if (uname.isNotEmpty) {
         _profileUsername = uname;
       }
+      _profileAnonymous = u.profileAnonymous;
       _profileFullName = fullName.isNotEmpty ? fullName : null;
     });
+  }
+
+  String _maskedProfileFullName() {
+    final full = (_profileFullName ?? '').trim();
+    final userName = _profileUsername.trim();
+    String maskPart(String p) {
+      final t = p.trim();
+      if (t.isEmpty) return '';
+      return '${t[0].toUpperCase()}****';
+    }
+
+    if (full.isNotEmpty) {
+      final parts = full
+          .split(RegExp(r'\s+'))
+          .where((p) => p.trim().isNotEmpty)
+          .toList();
+      if (parts.length == 1) return maskPart(parts.first);
+      return '${maskPart(parts.first)} ${maskPart(parts.last)}';
+    }
+
+    if (userName.isNotEmpty) {
+      final unameParts = userName
+          .split(RegExp(r'[\s._-]+'))
+          .where((p) => p.trim().isNotEmpty)
+          .toList();
+      if (unameParts.length >= 2) {
+        return '${maskPart(unameParts.first)} ${maskPart(unameParts.last)}';
+      }
+      return maskPart(userName);
+    }
+
+    return 'U****';
   }
 
   /// Kendi kullanıcı kartına gidilmesin; deep link / hata durumunda kapat.
@@ -862,9 +896,10 @@ class _UserProfilePageState extends State<UserProfilePage>
         body: SizedBox.shrink(),
       );
     }
-    final handle =
-        '@${_profileUsername.toLowerCase().replaceAll(' ', '')}';
-    final displayName = _profileFullName ?? _profileUsername;
+    final handle = '@${_profileUsername.toLowerCase().replaceAll(' ', '')}';
+    final displayName = _profileAnonymous
+        ? _maskedProfileFullName()
+        : (_profileFullName ?? _profileUsername);
     final canOpenMessage = !_profileUnavailable && int.tryParse(widget.userId) != null;
 
     return Scaffold(

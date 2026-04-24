@@ -7,6 +7,7 @@ class UserUpdateRequestDto {
   final String? profilePhotoMimeType; // MIME type (örn: "image/jpeg")
   /// `true` ise profil fotosu sunucudan kaldırılır (yeni yük yok).
   final bool clearProfilePhoto;
+  final bool? profileAnonymous;
 
   UserUpdateRequestDto({
     this.userName,
@@ -16,6 +17,7 @@ class UserUpdateRequestDto {
     this.profilePhotoBase64,
     this.profilePhotoMimeType,
     this.clearProfilePhoto = false,
+    this.profileAnonymous,
   });
 
   Map<String, dynamic> toJson() {
@@ -25,6 +27,9 @@ class UserUpdateRequestDto {
     if (name != null) json['name'] = name;
     if (surname != null) json['surname'] = surname;
     if (birthdate != null) json['birthdate'] = birthdate;
+    if (profileAnonymous != null) {
+      json['profileAnonymous'] = profileAnonymous;
+    }
     if (clearProfilePhoto) {
       json['removeProfilePhoto'] = true;
       json['clearProfilePhoto'] = true;
