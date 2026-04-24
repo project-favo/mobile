@@ -5,6 +5,7 @@ import '../../../core/cache/home_feed_cache.dart';
 import '../../../core/cache/search_warm_cache.dart';
 import '../../../core/utils/session_helper.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_text_styles.dart';
 import '../data/repositories/product_repository.dart';
 import '../data/repositories/tag_repository.dart';
 import '../data/services/auth_service.dart';
@@ -116,45 +117,134 @@ class _AuthSplashGateState extends State<AuthSplashGate> {
   }
 }
 
-class _FavoLaunchSplash extends StatelessWidget {
+class _FavoLaunchSplash extends StatefulWidget {
   const _FavoLaunchSplash();
 
   @override
+  State<_FavoLaunchSplash> createState() => _FavoLaunchSplashState();
+}
+
+class _FavoLaunchSplashState extends State<_FavoLaunchSplash>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _intro;
+  late final Animation<double> _opacity;
+  late final Animation<double> _scale;
+  late final Animation<double> _taglineOpacity;
+
+  @override
+  void initState() {
+    super.initState();
+    _intro = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    );
+    _opacity = CurvedAnimation(
+      parent: _intro,
+      curve: const Interval(0.0, 0.55, curve: Curves.easeOutCubic),
+    );
+    _scale = Tween<double>(begin: 0.9, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _intro,
+        curve: const Interval(0.0, 0.72, curve: Curves.easeOutCubic),
+      ),
+    );
+    _taglineOpacity = CurvedAnimation(
+      parent: _intro,
+      curve: const Interval(0.35, 1.0, curve: Curves.easeOut),
+    );
+    _intro.forward();
+  }
+
+  @override
+  void dispose() {
+    _intro.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppColors.background,
+            Color.lerp(AppColors.background, Colors.white, 0.45)!,
+            AppColors.background,
+          ],
+          stops: const [0.0, 0.48, 1.0],
+        ),
+      ),
+      child: Stack(
+        fit: StackFit.expand,
         children: [
-          TweenAnimationBuilder<double>(
-            tween: Tween<double>(begin: 0.96, end: 1.0),
-            duration: const Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-            builder: (context, value, child) =>
-                Transform.scale(scale: value, child: child),
-            child: SizedBox(
-              width: 160,
-              child: Image.asset(
-                'assets/images/homepage_logo2.png',
-                fit: BoxFit.contain,
+          Positioned(
+            top: MediaQuery.sizeOf(context).height * 0.18,
+            left: 0,
+            right: 0,
+            child: IgnorePointer(
+              child: Center(
+                child: Container(
+                  width: 280,
+                  height: 280,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        AppColors.primary.withValues(alpha: 0.08),
+                        AppColors.primary.withValues(alpha: 0.02),
+                        Colors.transparent,
+                      ],
+                      stops: const [0.0, 0.45, 1.0],
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
-          const SizedBox(height: 18),
-          const SizedBox(
-            width: 26,
-            height: 26,
-            child: CircularProgressIndicator(
-              strokeWidth: 2.6,
-              color: AppColors.primary,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            'Loading FAVO...',
-            style: TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
+          SafeArea(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  FadeTransition(
+                    opacity: _opacity,
+                    child: ScaleTransition(
+                      scale: _scale,
+                      child: SizedBox(
+                        width: 168,
+                        height: 168,
+                        child: Image.asset(
+                          'assets/images/homepage_logo2.png',
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) => Icon(
+                            Icons.shopping_bag_rounded,
+                            size: 96,
+                            color: AppColors.primary.withValues(alpha: 0.85),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                  FadeTransition(
+                    opacity: _taglineOpacity,
+                    child: Text(
+                      'Discover. Review. Share.',
+                      textAlign: TextAlign.center,
+                      style: AppTextStyles.body.copyWith(
+                        color: AppColors.textSecondary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: 24 + bottomInset),
+                ],
+              ),
             ),
           ),
         ],
