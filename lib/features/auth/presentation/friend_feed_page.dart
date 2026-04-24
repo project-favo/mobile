@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -15,7 +14,7 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../core/utils/load_profile_image_bytes.dart';
 import '../../../core/config/list_paging.dart';
 import '../data/utils/notification_remote_user_filter.dart';
-import '../../../core/widgets/paged_navigation_bar.dart';
+import '../../../core/widgets/feed_screen_tab_bar.dart';
 import '../../../core/utils/user_profile_navigation.dart';
 import '../../../core/widgets/main_bottom_nav_items.dart';
 import '../../../features/activity/data/friends_feed_activity_mapper.dart';
@@ -44,8 +43,6 @@ class FriendFeedPage extends StatefulWidget {
 class _FriendFeedPageState extends State<FriendFeedPage>
     with SingleTickerProviderStateMixin, RouteAware {
   late final TabController _tabController;
-  final List<int> _pageInTab = [0, 0, 0];
-  final List<bool> _tabPrefetchFailed = [false, false, false];
   final List<ScrollController> _tabScrollControllers =
       List.generate(3, (_) => ScrollController());
   int _lastTabIndex = 0;
@@ -80,17 +77,12 @@ class _FriendFeedPageState extends State<FriendFeedPage>
       final i = _tabController.index;
       if (i != _lastTabIndex) {
         _lastTabIndex = i;
-        setState(() {
-          _pageInTab[i] = 0;
-          for (var k = 0; k < 3; k++) {
-            _tabPrefetchFailed[k] = false;
-          }
-        });
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
           if (_tabScrollControllers[i].hasClients) {
             _tabScrollControllers[i].jumpTo(0);
           }
+          _scheduleFriendFeedPrefetchIfNeeded();
         });
       }
     });
@@ -122,6 +114,9 @@ class _FriendFeedPageState extends State<FriendFeedPage>
       if (route is PageRoute<dynamic>) {
         appRouteObserver.subscribe(this, route);
       }
+      if (_items.isNotEmpty) {
+        _scheduleFriendFeedPrefetchIfNeeded();
+      }
     });
   }
 
@@ -142,16 +137,6 @@ class _FriendFeedPageState extends State<FriendFeedPage>
     }
     _tabController.dispose();
     super.dispose();
-  }
-
-  void _scrollTabToTop(int tab) {
-    if (!mounted) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (_tabScrollControllers[tab].hasClients) {
-        _tabScrollControllers[tab].jumpTo(0);
-      }
-    });
   }
 
   void _mergeFollowFromGlobalCache() {
@@ -258,9 +243,6 @@ class _FriendFeedPageState extends State<FriendFeedPage>
         _page = res.number;
         _totalPages = res.totalPages;
         _loadingFirst = false;
-        for (var k = 0; k < 3; k++) {
-          _tabPrefetchFailed[k] = false;
-        }
       });
       FriendFeedMemoryCache.instance.remember(
         items: _items,
@@ -269,6 +251,7 @@ class _FriendFeedPageState extends State<FriendFeedPage>
       );
       _prefetchItemVisuals(_items);
       await _syncFollowingForCurrentItems(refetchFollowingSet: true);
+      _scheduleFriendFeedPrefetchIfNeeded();
     } catch (e) {
       if (background && _items.isNotEmpty) {
         // keep stale list
@@ -295,9 +278,6 @@ class _FriendFeedPageState extends State<FriendFeedPage>
         _items.addAll(mapped);
         _page = res.number;
         _totalPages = res.totalPages;
-        for (var k = 0; k < 3; k++) {
-          _tabPrefetchFailed[k] = false;
-        }
       });
       FriendFeedMemoryCache.instance.remember(
         items: _items,
@@ -306,6 +286,7 @@ class _FriendFeedPageState extends State<FriendFeedPage>
       );
       _prefetchItemVisuals(_items);
       await _syncFollowingForCurrentItems(refetchFollowingSet: true);
+      _scheduleFriendFeedPrefetchIfNeeded();
     } catch (_) {
       // best effort pagination
     } finally {
@@ -409,83 +390,28 @@ class _FriendFeedPageState extends State<FriendFeedPage>
     }
   }
 
-  int _displayPage1Based(int tab) {
-    final s = _tabSource(tab);
-    if (s.isEmpty) return 1;
-    var p = _pageInTab[tab];
-    final maxP = math.max(0, ((s.length - 1) ~/ kStandardListPageSize));
-    if (p > maxP) p = maxP;
-    return p + 1;
-  }
-
-  int _totalTabPages(int tab) {
-    final n = _tabSource(tab).length;
-    if (n == 0) return 1;
-    return ((n - 1) ~/ kStandardListPageSize) + 1;
-  }
-
-  bool _canGoPrevFd(int tab) => _pageInTab[tab] > 0;
-
-  bool _canGoNextFd(int tab) {
-    final s = _tabSource(tab);
-    if (s.isEmpty) return false;
-    if (_tabPrefetchFailed[tab]) return false;
-    final p = _pageInTab[tab];
-    if ((p + 1) * kStandardListPageSize < s.length) return true;
-    return _page + 1 < _totalPages;
-  }
-
-  List<ActivityItem> _slicedForTab(int tab) {
-    final s = _tabSource(tab);
-    if (s.isEmpty) return const [];
-    var p = _pageInTab[tab];
-    final maxP = math.max(0, ((s.length - 1) ~/ kStandardListPageSize));
-    if (p > maxP) p = maxP;
-    final start = p * kStandardListPageSize;
-    if (start >= s.length) return const [];
-    final end = math.min(start + kStandardListPageSize, s.length);
-    return s.sublist(start, end);
-  }
-
-  Future<void> _goNextFd(int tab) async {
-    if (!_canGoNextFd(tab)) return;
-    var p = _pageInTab[tab];
-    var s = _tabSource(tab);
-    if ((p + 1) * kStandardListPageSize < s.length) {
-      setState(() => _pageInTab[tab] = p + 1);
-      _scrollTabToTop(tab);
-      return;
-    }
+  void _maybeLoadMoreFriendFeed(int tab, ScrollMetrics metrics) {
+    if (tab != _tabController.index) return;
+    if (!metrics.hasPixels) return;
+    if (_loadingMore || _loadFirstInFlight) return;
+    if (_error != null) return;
     if (_page + 1 >= _totalPages) return;
-    var guard = 40;
-    while (_page + 1 < _totalPages && guard-- > 0) {
-      final before = _items.length;
-      await _loadMore();
-      if (!mounted) return;
-      s = _tabSource(tab);
-      if ((p + 1) * kStandardListPageSize < s.length) {
-        setState(() {
-          _pageInTab[tab] = p + 1;
-          _tabPrefetchFailed[tab] = false;
-        });
-        _scrollTabToTop(tab);
-        return;
-      }
-      if (_items.length == before) break;
-    }
-    if (!mounted) return;
-    if ((p + 1) * kStandardListPageSize >= _tabSource(tab).length) {
-      setState(() => _tabPrefetchFailed[tab] = true);
-    }
+    if (metrics.maxScrollExtent <= 0) return;
+    if (metrics.pixels < metrics.maxScrollExtent - 360) return;
+    unawaited(_loadMore());
   }
 
-  void _goPrevFd(int tab) {
-    if (_pageInTab[tab] <= 0) return;
-    setState(() {
-      _pageInTab[tab]--;
-      _tabPrefetchFailed[tab] = false;
+  void _scheduleFriendFeedPrefetchIfNeeded() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_loadingMore || _loadFirstInFlight) return;
+      if (_page + 1 >= _totalPages) return;
+      final tab = _tabController.index;
+      final c = _tabScrollControllers[tab];
+      if (!c.hasClients) return;
+      if (c.position.maxScrollExtent > 72) return;
+      unawaited(_loadMore());
     });
-    _scrollTabToTop(tab);
   }
 
   @override
@@ -502,9 +428,10 @@ class _FriendFeedPageState extends State<FriendFeedPage>
           title: Text(
             'Friends Feed',
             style: AppTextStyles.heading2.copyWith(
-              color: AppColors.primary,
-              fontWeight: FontWeight.w700,
-              fontSize: 20,
+              color: AppColors.textPrimary,
+              fontWeight: FontWeight.w600,
+              fontSize: 18,
+              letterSpacing: -0.2,
             ),
           ),
           bottom: PreferredSize(
@@ -512,33 +439,9 @@ class _FriendFeedPageState extends State<FriendFeedPage>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                  child: TabBar(
-                    controller: _tabController,
-                    isScrollable: false,
-                    indicator: BoxDecoration(
-                      color: AppColors.primary,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    indicatorSize: TabBarIndicatorSize.tab,
-                    labelColor: Colors.white,
-                    unselectedLabelColor: AppColors.textSecondary,
-                    labelStyle: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                    ),
-                    unselectedLabelStyle: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                    ),
-                    dividerColor: Colors.transparent,
-                    tabs: const [
-                      Tab(text: 'All'),
-                      Tab(text: 'Reviews'),
-                      Tab(text: 'Likes'),
-                    ],
-                  ),
+                FeedScreenTabBar(
+                  controller: _tabController,
+                  tabLabels: const ['All', 'Reviews', 'Likes'],
                 ),
                 Divider(
                   height: 1,
@@ -592,86 +495,84 @@ class _FriendFeedPageState extends State<FriendFeedPage>
         ),
       );
     }
-    final slice = _slicedForTab(tabIndex);
-    final p = _pageInTab[tabIndex];
-    final rangeStart = p * kStandardListPageSize + 1;
-    final rangeEnd = math.min(
-      (p + 1) * kStandardListPageSize,
-      list.length,
-    );
-    return Column(
-      children: [
-        Expanded(
-          child: RefreshIndicator(
-            color: AppColors.primary,
-            onRefresh: () => _loadFirst(
-              background: _items.isNotEmpty,
-              refreshUserListability: true,
-            ),
-            child: ListView.separated(
-              controller: _tabScrollControllers[tabIndex],
-              physics: const AlwaysScrollableScrollPhysics(
-                parent: ClampingScrollPhysics(),
-              ),
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 12),
-              itemCount: slice.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (context, index) {
-                final item = slice[index];
-                return Container(
-                  key: ValueKey(item.id),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: AppColors.border.withValues(alpha: 0.7),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.03),
-                        blurRadius: 7,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: ActivityFeedRow(
-                    key: ValueKey('row_${item.id}'),
-                    item: item,
-                    following: _followingIds.contains(item.user.id),
-                    onToggleFollow: () => _toggleFollow(item.user.id),
-                    onOpen: () => _openItem(item),
-                    onUserTap: () {
-                      if (item.user.id.isEmpty) return;
-                      openUserProfileIfActive(
-                        context,
-                        userId: item.user.id,
-                        userName: item.user.username,
-                        profileImageUrl: item.user.avatarUrl,
-                      );
-                    },
-                  ),
-                );
-              },
-            ),
+    final tail = _loadingMore && _page + 1 < _totalPages ? 1 : 0;
+    return RefreshIndicator(
+      color: AppColors.primary,
+      onRefresh: () => _loadFirst(
+        background: _items.isNotEmpty,
+        refreshUserListability: true,
+      ),
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (ScrollNotification n) {
+          if (n.metrics.axis == Axis.vertical &&
+              (n is ScrollUpdateNotification || n is ScrollEndNotification)) {
+            _maybeLoadMoreFriendFeed(tabIndex, n.metrics);
+          }
+          return false;
+        },
+        child: ListView.builder(
+          controller: _tabScrollControllers[tabIndex],
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: ClampingScrollPhysics(),
           ),
-        ),
-        PagedNavigationBar(
-          currentPage1Based: _displayPage1Based(tabIndex),
-          totalPages: _totalTabPages(tabIndex),
-          canGoPrevious: _canGoPrevFd(tabIndex),
-          canGoNext: _canGoNextFd(tabIndex),
-          isLoadingNext: _loadingMore,
-          onPrevious: () => _goPrevFd(tabIndex),
-          onNext: () {
-            unawaited(_goNextFd(tabIndex));
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+          itemCount: list.length + tail,
+          itemBuilder: (context, index) {
+            if (index >= list.length) {
+              return const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Center(
+                  child: SizedBox(
+                    width: 26,
+                    height: 26,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.2,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                ),
+              );
+            }
+            final item = list[index];
+            return Padding(
+              padding: EdgeInsets.only(top: index == 0 ? 0 : 10),
+              child: Container(
+                key: ValueKey(item.id),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: AppColors.border.withValues(alpha: 0.35),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: ActivityFeedRow(
+                  key: ValueKey('row_${item.id}'),
+                  item: item,
+                  following: _followingIds.contains(item.user.id),
+                  onToggleFollow: () => _toggleFollow(item.user.id),
+                  onOpen: () => _openItem(item),
+                  onUserTap: () {
+                    if (item.user.id.isEmpty) return;
+                    openUserProfileIfActive(
+                      context,
+                      userId: item.user.id,
+                      userName: item.user.username,
+                      profileImageUrl: item.user.avatarUrl,
+                    );
+                  },
+                ),
+              ),
+            );
           },
-          showTopDivider: true,
-          rangeStart1Based: rangeStart,
-          rangeEnd1Based: rangeEnd,
-          rangeTotal: list.length,
-          itemNounPlural: 'activities',
         ),
-      ],
+      ),
     );
   }
 }

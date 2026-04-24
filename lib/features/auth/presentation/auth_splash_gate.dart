@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../core/cache/conversation_list_cache.dart';
 import '../../../core/cache/home_feed_cache.dart';
 import '../../../core/cache/search_warm_cache.dart';
@@ -108,9 +109,16 @@ class _AuthSplashGateState extends State<AuthSplashGate> {
   @override
   Widget build(BuildContext context) {
     if (_screen == null) {
-      return const Scaffold(
-        backgroundColor: AppColors.background,
-        body: _FavoLaunchSplash(),
+      return Scaffold(
+        backgroundColor: const Color(0xFFFAFAFB),
+        body: AnnotatedRegion<SystemUiOverlayStyle>(
+          value: SystemUiOverlayStyle.dark.copyWith(
+            statusBarColor: Colors.transparent,
+            systemNavigationBarColor: const Color(0xFFFAFAFB),
+            systemNavigationBarIconBrightness: Brightness.dark,
+          ),
+          child: const _FavoLaunchSplash(),
+        ),
       );
     }
     return _screen!;
@@ -130,27 +138,42 @@ class _FavoLaunchSplashState extends State<_FavoLaunchSplash>
   late final Animation<double> _opacity;
   late final Animation<double> _scale;
   late final Animation<double> _taglineOpacity;
+  late final Animation<Offset> _taglineSlide;
+  late final Animation<double> _loaderOpacity;
 
   @override
   void initState() {
     super.initState();
     _intro = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1100),
+      duration: const Duration(milliseconds: 1250),
     );
     _opacity = CurvedAnimation(
       parent: _intro,
-      curve: const Interval(0.0, 0.55, curve: Curves.easeOutCubic),
+      curve: const Interval(0.0, 0.52, curve: Curves.easeOutCubic),
     );
-    _scale = Tween<double>(begin: 0.9, end: 1.0).animate(
+    _scale = Tween<double>(begin: 0.88, end: 1.0).animate(
       CurvedAnimation(
         parent: _intro,
-        curve: const Interval(0.0, 0.72, curve: Curves.easeOutCubic),
+        curve: const Interval(0.0, 0.68, curve: Curves.easeOutCubic),
       ),
     );
     _taglineOpacity = CurvedAnimation(
       parent: _intro,
-      curve: const Interval(0.35, 1.0, curve: Curves.easeOut),
+      curve: const Interval(0.38, 1.0, curve: Curves.easeOutCubic),
+    );
+    _taglineSlide = Tween<Offset>(
+      begin: const Offset(0, 0.12),
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(
+        parent: _intro,
+        curve: const Interval(0.38, 1.0, curve: Curves.easeOutCubic),
+      ),
+    );
+    _loaderOpacity = CurvedAnimation(
+      parent: _intro,
+      curve: const Interval(0.55, 1.0, curve: Curves.easeOut),
     );
     _intro.forward();
   }
@@ -164,87 +187,146 @@ class _FavoLaunchSplashState extends State<_FavoLaunchSplash>
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final w = MediaQuery.sizeOf(context).width;
     return DecoratedBox(
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
           colors: [
-            AppColors.background,
-            Color.lerp(AppColors.background, Colors.white, 0.45)!,
-            AppColors.background,
+            Color(0xFFFAFAFB),
+            Color(0xFFF4F5F7),
+            Color(0xFFECEEF1),
           ],
-          stops: const [0.0, 0.48, 1.0],
         ),
       ),
       child: Stack(
         fit: StackFit.expand,
         children: [
           Positioned(
-            top: MediaQuery.sizeOf(context).height * 0.18,
-            left: 0,
-            right: 0,
+            top: -w * 0.15,
+            right: -w * 0.2,
             child: IgnorePointer(
-              child: Center(
-                child: Container(
-                  width: 280,
-                  height: 280,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        AppColors.primary.withValues(alpha: 0.08),
-                        AppColors.primary.withValues(alpha: 0.02),
-                        Colors.transparent,
-                      ],
-                      stops: const [0.0, 0.45, 1.0],
-                    ),
-                  ),
+              child: Container(
+                width: w * 0.75,
+                height: w * 0.75,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppColors.primary.withValues(alpha: 0.045),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: -w * 0.25,
+            left: -w * 0.15,
+            child: IgnorePointer(
+              child: Container(
+                width: w * 0.65,
+                height: w * 0.65,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppColors.primary.withValues(alpha: 0.03),
                 ),
               ),
             ),
           ),
           SafeArea(
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  FadeTransition(
-                    opacity: _opacity,
-                    child: ScaleTransition(
-                      scale: _scale,
+            child: Column(
+              children: [
+                const Spacer(flex: 2),
+                FadeTransition(
+                  opacity: _opacity,
+                  child: ScaleTransition(
+                    scale: _scale,
+                    child: Container(
+                      padding: const EdgeInsets.all(22),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(28),
+                        border: Border.all(
+                          color: AppColors.border.withValues(alpha: 0.35),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.primary.withValues(alpha: 0.08),
+                            blurRadius: 40,
+                            offset: const Offset(0, 18),
+                            spreadRadius: -12,
+                          ),
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.05),
+                            blurRadius: 24,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
                       child: SizedBox(
-                        width: 168,
-                        height: 168,
+                        width: 120,
+                        height: 120,
                         child: Image.asset(
                           'assets/images/homepage_logo2.png',
                           fit: BoxFit.contain,
                           errorBuilder: (_, __, ___) => Icon(
                             Icons.shopping_bag_rounded,
-                            size: 96,
-                            color: AppColors.primary.withValues(alpha: 0.85),
+                            size: 72,
+                            color: AppColors.primary.withValues(alpha: 0.88),
                           ),
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 28),
-                  FadeTransition(
+                ),
+                const SizedBox(height: 32),
+                SlideTransition(
+                  position: _taglineSlide,
+                  child: FadeTransition(
                     opacity: _taglineOpacity,
-                    child: Text(
-                      'Discover. Review. Share.',
-                      textAlign: TextAlign.center,
-                      style: AppTextStyles.body.copyWith(
-                        color: AppColors.textSecondary,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                        height: 1.35,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Discover · Review · Share',
+                          textAlign: TextAlign.center,
+                          style: AppTextStyles.body.copyWith(
+                            color: AppColors.textPrimary.withValues(alpha: 0.82),
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.6,
+                            height: 1.35,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        Container(
+                          width: 40,
+                          height: 3,
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.withValues(alpha: 0.9),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const Spacer(flex: 3),
+                FadeTransition(
+                  opacity: _loaderOpacity,
+                  child: Padding(
+                    padding: EdgeInsets.only(bottom: 20 + bottomInset),
+                    child: SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.4,
+                        color: AppColors.primary.withValues(alpha: 0.75),
+                        backgroundColor:
+                            AppColors.primary.withValues(alpha: 0.08),
                       ),
                     ),
                   ),
-                  SizedBox(height: 24 + bottomInset),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ],

@@ -2056,6 +2056,12 @@ String _formatCategoryLabel(String raw) {
   // Fazla boşlukları sadeleştir.
   text = text.replaceAll(RegExp(r'\s+'), ' ').trim();
 
+  // Ana sayfa yatay kategori: güzellik + kişisel bakım birleşik etiketi kısa gösterilir.
+  final lower = text.toLowerCase();
+  if (lower.contains('beauty') && lower.contains('personal')) {
+    return 'Beauty';
+  }
+
   return text;
 }
 

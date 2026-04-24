@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/widgets/profile_avatar.dart';
 import '../../domain/activity_models.dart';
 import '../../domain/activity_type.dart';
@@ -34,14 +35,13 @@ class ActivityFeedRow extends StatelessWidget {
       child: InkWell(
         onTap: onOpen,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+          padding: const EdgeInsets.fromLTRB(12, 14, 14, 14),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Okunmamış nokta veya küçük boşluk
               if (!item.isRead)
                 Padding(
-                  padding: const EdgeInsets.only(top: 7, right: 6),
+                  padding: const EdgeInsets.only(top: 8, right: 4),
                   child: Container(
                     width: 6,
                     height: 6,
@@ -52,28 +52,42 @@ class ActivityFeedRow extends StatelessWidget {
                   ),
                 )
               else
-                const SizedBox(width: 6),
+                const SizedBox(width: 2),
               GestureDetector(
                 onTap: onUserTap,
                 behavior: HitTestBehavior.opaque,
                 child: ProfileAvatar(
                   key: ValueKey('avatar_${item.user.id}'),
-                  radius: 20,
+                  radius: 22,
                   imageUrl: item.user.avatarUrl,
                   fallbackInitial: item.user.username.isNotEmpty
                       ? item.user.username
                       : '?',
                 ),
               ),
-              const SizedBox(width: 10),
-              // İçerik: metin + follow chip
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildLineText(),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: _buildLineText()),
+                        const SizedBox(width: 8),
+                        Text(
+                          time,
+                          style: AppTextStyles.bodySecondary.copyWith(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.textSecondary,
+                            height: 1.25,
+                          ),
+                        ),
+                      ],
+                    ),
                     if (showFollow) ...[
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 10),
                       _FollowChip(
                         following: following,
                         onTap: onToggleFollow,
@@ -82,25 +96,13 @@ class ActivityFeedRow extends StatelessWidget {
                   ],
                 ),
               ),
-              // Thumbnail (varsa)
               if (_showThumbnail) ...[
-                const SizedBox(width: 8),
+                const SizedBox(width: 12),
                 _ContentThumb(
                   url: item.targetContent?.thumbnailUrl,
                   title: item.targetContent?.title ?? '',
                 ),
               ],
-              // Saat — her zaman sağ üstte, thumbnail'dan bağımsız
-              const SizedBox(width: 8),
-              Text(
-                time,
-                style: const TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: 0.1,
-                ),
-              ),
             ],
           ),
         ),
@@ -121,10 +123,10 @@ class ActivityFeedRow extends StatelessWidget {
     final line = item.lineText.trim();
     final u = item.user.username;
 
-    final baseStyle = TextStyle(
+    final baseStyle = AppTextStyles.body.copyWith(
       color: AppColors.textPrimary,
       fontSize: 15,
-      height: 1.35,
+      height: 1.4,
       fontWeight: FontWeight.w400,
     );
 
@@ -137,7 +139,13 @@ class ActivityFeedRow extends StatelessWidget {
               text: u,
               style: baseStyle.copyWith(fontWeight: FontWeight.w600),
             ),
-            TextSpan(text: line.substring(u.length)),
+            TextSpan(
+              text: line.substring(u.length),
+              style: baseStyle.copyWith(
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w400,
+              ),
+            ),
           ],
         ),
       );
@@ -146,7 +154,7 @@ class ActivityFeedRow extends StatelessWidget {
     return Text(
       line,
       style: baseStyle,
-      maxLines: 3,
+      maxLines: 4,
       overflow: TextOverflow.ellipsis,
     );
   }
@@ -168,15 +176,21 @@ class _FollowChip extends StatelessWidget {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
           decoration: BoxDecoration(
+            color: following
+                ? AppColors.textPrimary.withValues(alpha: 0.05)
+                : AppColors.surface,
             border: Border.all(
               color: following
-                  ? AppColors.textSecondary.withValues(alpha: 0.45)
-                  : AppColors.primary,
+                  ? AppColors.border.withValues(alpha: 0.65)
+                  : AppColors.primary.withValues(alpha: 0.55),
+              width: 1,
             ),
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(999),
           ),
           child: Text(
             following ? 'Following' : 'Follow',
@@ -186,7 +200,7 @@ class _FollowChip extends StatelessWidget {
                   : AppColors.primary,
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              letterSpacing: 0.3,
+              letterSpacing: 0.2,
             ),
           ),
         ),
@@ -207,18 +221,27 @@ class _ContentThumb extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 52,
-      height: 52,
+      width: 56,
+      height: 56,
       decoration: BoxDecoration(
         color: AppColors.background,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border.withValues(alpha: 0.7)),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: AppColors.border.withValues(alpha: 0.4),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(11),
         child: url != null && url!.isNotEmpty
             ? Padding(
-                padding: const EdgeInsets.all(3),
+                padding: const EdgeInsets.all(4),
                 child: Image.network(
                   url!,
                   fit: BoxFit.contain,

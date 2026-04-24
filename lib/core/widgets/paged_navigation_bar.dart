@@ -129,13 +129,13 @@ class _SinglePageStatus extends StatelessWidget {
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: AppColors.border.withValues(alpha: 0.45),
+            color: AppColors.border.withValues(alpha: 0.35),
           ),
           boxShadow: [
             BoxShadow(
-              color: AppColors.primary.withValues(alpha: 0.04),
-              blurRadius: 12,
-              offset: const Offset(0, 3),
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 10,
+              offset: const Offset(0, 2),
             ),
           ],
         ),
@@ -149,7 +149,7 @@ class _SinglePageStatus extends StatelessWidget {
               Icon(
                 Icons.check_circle_outline_rounded,
                 size: 22,
-                color: AppColors.primary.withValues(alpha: 0.75),
+                color: AppColors.textSecondary.withValues(alpha: 0.75),
               ),
               const SizedBox(width: AppSpacing.small + 2),
               Expanded(
@@ -210,13 +210,13 @@ class _MultiPagePager extends StatelessWidget {
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: AppColors.border.withValues(alpha: 0.5),
+            color: AppColors.border.withValues(alpha: 0.35),
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 10,
-              offset: const Offset(0, 2),
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 12,
+              offset: const Offset(0, 3),
             ),
           ],
         ),
@@ -319,20 +319,36 @@ class _PagerSideButton extends StatelessWidget {
     return Tooltip(
       message: tooltip,
       child: Material(
-        color: active
-            ? AppColors.primary.withValues(alpha: 0.1)
-            : AppColors.textSecondary.withValues(alpha: 0.06),
-        shape: const CircleBorder(),
-        clipBehavior: Clip.antiAlias,
+        color: Colors.transparent,
         child: InkWell(
           onTap: onPressed,
           customBorder: const CircleBorder(),
-          child: SizedBox(
+          child: Ink(
             width: 44,
             height: 44,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: active
+                  ? AppColors.surface
+                  : AppColors.textPrimary.withValues(alpha: 0.04),
+              border: Border.all(
+                color: active
+                    ? AppColors.primary.withValues(alpha: 0.4)
+                    : AppColors.border.withValues(alpha: 0.45),
+              ),
+              boxShadow: active
+                  ? [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ]
+                  : null,
+            ),
             child: Center(
               child: isLoading
-                  ? SizedBox(
+                  ? const SizedBox(
                       width: 22,
                       height: 22,
                       child: CircularProgressIndicator(
@@ -342,10 +358,10 @@ class _PagerSideButton extends StatelessWidget {
                     )
                   : Icon(
                       icon,
-                      size: 28,
+                      size: 26,
                       color: active
                           ? AppColors.primary
-                          : AppColors.textSecondary.withValues(alpha: 0.35),
+                          : AppColors.textSecondary.withValues(alpha: 0.4),
                     ),
             ),
           ),
