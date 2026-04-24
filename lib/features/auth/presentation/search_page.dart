@@ -71,6 +71,7 @@ class _SearchPageState extends State<SearchPage> {
   bool _notificationSvcAttached = false;
   Timer? _topReviewersRefreshTimer;
   Timer? _searchDebounce;
+  Timer? _userSearchDebounce;
   String? _currentUserId;
   final Set<String> _productLikeInFlight = <String>{};
   final Set<String> _socialCountsInFlight = <String>{};
@@ -84,6 +85,14 @@ class _SearchPageState extends State<SearchPage> {
 
   /// Aktif sorgu için eşleşen profiller (kullanıcı adı metni)
   List<_ProfileSearchEntry> _profileSearchMatches = [];
+
+  /// Sayfa açılınca arka planda preload edilen tüm kullanıcı dizini.
+  /// Arama anında bu listeden filtrelenir → sıfır network gecikmesi.
+  List<dynamic> _preloadedUsers = [];
+
+  /// Server search cache: en son server aramasının sonuçları ve query'si.
+  List<dynamic> _serverUserResults = [];
+  String _serverUserResultsQuery = '';
 
   Route _noAnimationRoute(Widget page) {
     return PageRouteBuilder(
@@ -117,6 +126,7 @@ class _SearchPageState extends State<SearchPage> {
     _loadInitialData();
     unawaited(_loadCurrentUserIdentity());
     unawaited(_loadSocialGraphForSearch());
+    unawaited(_preloadUserDirectory());
     _scheduleTopReviewerRefresh();
   }
 
@@ -140,48 +150,85 @@ class _SearchPageState extends State<SearchPage> {
     }
   }
 
+  /// Server'dan kullanıcı araması yapar ve sonuçları [_profileSearchMatches]'e ekler.
+  Future<void> _searchUsersFromServer(String normalizedQuery) async {
+    try {
+      final serverUsers = await _authService.searchUsers(normalizedQuery, size: 30);
+      if (!mounted || _activeQuery != normalizedQuery) return;
+      // Query değişmişse sonuçları yok say.
+      if (serverUsers.isEmpty) return;
+      _serverUserResults = serverUsers;
+      _serverUserResultsQuery = normalizedQuery;
+      setState(() {
+        _profileSearchMatches = _mergeProfileMatches(normalizedQuery, serverUsers);
+      });
+    } catch (e, s) {
+      AppLogger.warnSilencedError('SearchPage._searchUsersFromServer', e, s);
+    }
+  }
+
+  /// Server sonuçlarını lokal sonuçlarla birleştirir.
+  /// Server sonuçları önce gelir, ardından sadece lokalde bulunanlar eklenir.
+  List<_ProfileSearchEntry> _mergeProfileMatches(
+    String q,
+    List<dynamic> serverUsers,
+  ) {
+    final seen = <String>{};
+    final merged = <_ProfileSearchEntry>[];
+
+    for (final u in serverUsers) {
+      final id = u.id.trim();
+      final name = u.userName.trim();
+      if (id.isEmpty || name.isEmpty) continue;
+      if (u.isProfileViewBlocked) continue;
+      if (!seen.add(id)) continue;
+      merged.add(_ProfileSearchEntry(
+        userId: id,
+        userName: name,
+        profileImageUrl: u.profileImageUrl,
+      ));
+    }
+
+    for (final e in _computeProfileMatches(q)) {
+      if (!seen.add(e.userId)) continue;
+      merged.add(e);
+    }
+
+    merged.sort((a, b) {
+      final an = a.userName.toLowerCase();
+      final bn = b.userName.toLowerCase();
+      final aStarts = an.startsWith(q) ? 0 : 1;
+      final bStarts = bn.startsWith(q) ? 0 : 1;
+      if (aStarts != bStarts) return aStarts - bStarts;
+      return an.compareTo(bn);
+    });
+
+    if (merged.length > 50) return merged.sublist(0, 50);
+    return merged;
+  }
+
   /// Profil adına göre yerel eşleşme: top reviewers + takip edilen / takipçi.
   List<_ProfileSearchEntry> _computeProfileMatches(String q) {
     if (q.isEmpty) return const [];
     final seen = <String>{};
     final merged = <_ProfileSearchEntry>[];
 
-    void add(
-      String userId,
-      String userName,
-      String? imageUrl, {
-      String? subtitle,
-    }) {
+    void add(String userId, String userName, String? imageUrl) {
       final id = userId.trim();
       final name = userName.trim();
       if (id.isEmpty || name.isEmpty) return;
       if (!seen.add(id)) return;
       merged.add(
-        _ProfileSearchEntry(
-          userId: id,
-          userName: name,
-          profileImageUrl: imageUrl,
-          subtitle: subtitle,
-        ),
+        _ProfileSearchEntry(userId: id, userName: name, profileImageUrl: imageUrl),
       );
     }
 
     for (final t in _topReviewers) {
-      add(
-        t.userId,
-        t.userName,
-        t.profileImageUrl,
-        subtitle: t.reviewCount > 0 ? '${t.reviewCount} reviews' : null,
-      );
+      add(t.userId, t.userName, t.profileImageUrl);
     }
     for (final c in _socialSearchUsers) {
       if (c.id <= 0) continue;
-      add(
-        c.id.toString(),
-        c.username,
-        c.profilePhotoUrl,
-        subtitle: 'In your network',
-      );
+      add(c.id.toString(), c.username, c.profilePhotoUrl);
     }
 
     final out =
@@ -211,7 +258,7 @@ class _SearchPageState extends State<SearchPage> {
       return;
     }
     setState(() {
-      _profileSearchMatches = _computeProfileMatches(q);
+      _profileSearchMatches = _resolveProfileMatches(q);
     });
   }
 
@@ -249,6 +296,19 @@ class _SearchPageState extends State<SearchPage> {
       _recomputeProfileMatchesIfNeeded();
     } catch (e, s) {
       AppLogger.warnSilencedError('SearchPage._loadSocialGraphForSearch', e, s);
+    }
+  }
+
+  /// Sayfa açılırken arka planda tüm kullanıcı dizinini çeker.
+  /// Başarılı olursa aramalar anında sonuç verir (network gecikmesi olmadan).
+  Future<void> _preloadUserDirectory() async {
+    try {
+      final users = await _authService.fetchUserDirectory(maxPages: 1, pageSize: 100);
+      if (!mounted || users.isEmpty) return;
+      _preloadedUsers = users;
+      _recomputeProfileMatchesIfNeeded();
+    } catch (e, s) {
+      AppLogger.warnSilencedError('SearchPage._preloadUserDirectory', e, s);
     }
   }
 
@@ -543,6 +603,7 @@ class _SearchPageState extends State<SearchPage> {
     }
     _topReviewersRefreshTimer?.cancel();
     _searchDebounce?.cancel();
+    _userSearchDebounce?.cancel();
     _searchController.dispose();
     _searchFocusNode.dispose();
     super.dispose();
@@ -913,10 +974,14 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
+  /// Refresh veya programatik tetiklemeler için (ör. _refreshSearchPage).
+  /// Kullanıcı yazarken çağrılmaz; bunun yerine [_handleSearchInputChanged] kullanılır.
   Future<void> _onSearchChanged(String query) async {
-    final normalizedQuery = query.trim().toLowerCase();
-    _activeQuery = normalizedQuery;
-    if (normalizedQuery.isEmpty) {
+    final q = query.trim().toLowerCase();
+    _activeQuery = q;
+    if (q.isEmpty) {
+      _serverUserResults = [];
+      _serverUserResultsQuery = '';
       setState(() {
         _searchResults = [];
         _profileSearchMatches = [];
@@ -931,63 +996,113 @@ class _SearchPageState extends State<SearchPage> {
     }
 
     setState(() {
-      _isSearching = true;
       _showCategoryResults = false;
       _activeLeafCategory = null;
     });
 
-    try {
-      final results = _allProducts.where((product) {
-        final productName = product.name.toLowerCase();
-        final tagName = product.tag.name.toLowerCase();
-        final tagPathSegments = (product.tag.categoryPath ?? '')
-            .toLowerCase()
-            .split('.')
-            .where((segment) => segment.isNotEmpty)
-            .toList();
+    final results = _filterProducts(q);
+    if (!mounted || _activeQuery != q) return;
+    setState(() {
+      _searchResults = results;
+      _profileSearchMatches = _resolveProfileMatches(q);
+    });
+    unawaited(_primeSocialCountsForProducts(results));
+    ReviewPrefetchService.instance.prefetchForProducts(results, maxCount: 6);
+    unawaited(_searchUsersFromServer(q));
+  }
 
-        // Match only by product title OR product's own tags (name + category path segments).
-        final nameMatch = productName.contains(normalizedQuery);
-        final ownTagMatch = tagName.contains(normalizedQuery) ||
-            tagPathSegments.any((segment) => segment.contains(normalizedQuery));
+  /// Ürün filtrelemesi — lokal liste üzerinde senkron çalışır.
+  List<ProductDto> _filterProducts(String q) {
+    if (q.isEmpty) return const [];
+    return _allProducts.where((product) {
+      final productName = product.name.toLowerCase();
+      final tagName = product.tag.name.toLowerCase();
+      final tagPathSegments = (product.tag.categoryPath ?? '')
+          .toLowerCase()
+          .split('.')
+          .where((s) => s.isNotEmpty)
+          .toList();
+      return productName.contains(q) ||
+          tagName.contains(q) ||
+          tagPathSegments.any((s) => s.contains(q));
+    }).toList();
+  }
 
-        return nameMatch || ownTagMatch;
-      }).toList();
-
-      if (!mounted || _activeQuery != normalizedQuery) return;
-      setState(() {
-        _searchResults = results;
-        _profileSearchMatches = _computeProfileMatches(normalizedQuery);
-        _isSearching = false;
-      });
-      unawaited(_primeSocialCountsForProducts(results));
-      ReviewPrefetchService.instance.prefetchForProducts(
-        results,
-        maxCount: 6,
-      );
-    } catch (e) {
-      if (!mounted || _activeQuery != normalizedQuery) return;
-      setState(() {
-        _isSearching = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(ErrorHandler.getUserFriendlyMessage(e)),
-          backgroundColor: AppColors.error,
-        ),
-      );
+  /// Aktif query için anlık profil eşleşmelerini hesaplar.
+  /// Öncelik sırası: server cache → preloaded directory → lokal (top reviewers + social graph).
+  List<_ProfileSearchEntry> _resolveProfileMatches(String q) {
+    // 1. Server cache tam eşleşme
+    if (_serverUserResultsQuery == q && _serverUserResults.isNotEmpty) {
+      return _mergeProfileMatches(q, _serverUserResults);
     }
+
+    // 2. Server cache daraltma (ör. "ali" cache'i varken "alic" yazıldı)
+    if (_serverUserResultsQuery.isNotEmpty &&
+        q.startsWith(_serverUserResultsQuery) &&
+        _serverUserResults.isNotEmpty) {
+      final narrowed = _serverUserResults
+          .where((u) => (u.userName as String).toLowerCase().contains(q))
+          .toList();
+      if (narrowed.isNotEmpty) return _mergeProfileMatches(q, narrowed);
+    }
+
+    // 3. Preloaded directory — sayfanın açılışında yüklendi, network yok
+    if (_preloadedUsers.isNotEmpty) {
+      final fromDir = _preloadedUsers
+          .where((u) => (u.userName as String).toLowerCase().contains(q))
+          .toList();
+      if (fromDir.isNotEmpty) return _mergeProfileMatches(q, fromDir);
+    }
+
+    // 4. Fallback: sadece lokal (top reviewers + social graph)
+    return _computeProfileMatches(q);
   }
 
   void _handleSearchInputChanged(String query) {
-    _searchDebounce?.cancel();
-    final q = query.trim();
+    _userSearchDebounce?.cancel();
+    final q = query.trim().toLowerCase();
+
     if (q.isEmpty) {
-      unawaited(_onSearchChanged(query));
+      _activeQuery = '';
+      _serverUserResults = [];
+      _serverUserResultsQuery = '';
+      setState(() {
+        _searchResults = [];
+        _profileSearchMatches = [];
+        _isSearching = false;
+        _showCategoryResults = false;
+        _activeLeafCategory = null;
+        _currentCategories = _rootCategories;
+        _categoryHistory.clear();
+        _categoryPath.clear();
+      });
       return;
     }
-    _searchDebounce = Timer(const Duration(milliseconds: 180), () {
-      unawaited(_onSearchChanged(query));
+
+    // Cache'i sıfırla: yeni query önceki cache'le ilgisizse.
+    if (_serverUserResultsQuery.isNotEmpty &&
+        !q.startsWith(_serverUserResultsQuery) &&
+        !_serverUserResultsQuery.startsWith(q)) {
+      _serverUserResults = [];
+      _serverUserResultsQuery = '';
+    }
+
+    _activeQuery = q;
+
+    // Lokal sonuçları debounce olmadan anında göster.
+    final productResults = _filterProducts(q);
+    setState(() {
+      _showCategoryResults = false;
+      _activeLeafCategory = null;
+      _searchResults = productResults;
+      _profileSearchMatches = _resolveProfileMatches(q);
+    });
+    unawaited(_primeSocialCountsForProducts(productResults));
+    ReviewPrefetchService.instance.prefetchForProducts(productResults, maxCount: 6);
+
+    // Server user search: kullanıcı yazmayı bırakınca tetikle.
+    _userSearchDebounce = Timer(const Duration(milliseconds: 250), () {
+      unawaited(_searchUsersFromServer(q));
     });
   }
 
