@@ -1226,7 +1226,7 @@ class _SearchPageState extends State<SearchPage> {
                                   ),
                                 ),
                                 SizedBox(
-                                  height: 106,
+                                  height: 114,
                                   child: Row(
                                     children: List.generate(
                                       5,
@@ -1236,7 +1236,8 @@ class _SearchPageState extends State<SearchPage> {
                                             left: index == 0 ? 0 : 4,
                                             right: index == 4 ? 0 : 4,
                                           ),
-                                          child: const _TopReviewerRow(
+                                          child: _TopReviewerRow(
+                                            rank: index + 1,
                                             data: null,
                                             isCurrentUser: false,
                                             onTap: null,
@@ -1269,8 +1270,11 @@ class _SearchPageState extends State<SearchPage> {
                                     textAlign: TextAlign.center,
                                   ),
                                 ),
-                                SizedBox(
-                                  height: 106,
+                                // Alt rozetlere alan açmak için ekstra boşluk
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 14),
+                                  child: SizedBox(
+                                  height: 114,
                                   child: Row(
                                     children: List.generate(5, (index) {
                                       final hasData = index < _topReviewers.length;
@@ -1282,6 +1286,7 @@ class _SearchPageState extends State<SearchPage> {
                                             right: index == 4 ? 0 : 4,
                                           ),
                                           child: _TopReviewerRow(
+                                            rank: index + 1,
                                             data: t,
                                             isCurrentUser:
                                                 hasData &&
@@ -1318,6 +1323,7 @@ class _SearchPageState extends State<SearchPage> {
                                     }),
                                   ),
                                 ),
+                                ), // Padding(bottom:14)
                               ],
                             ),
                           ),
@@ -1627,13 +1633,11 @@ class _ProfileSearchEntry {
     required this.userId,
     required this.userName,
     this.profileImageUrl,
-    this.subtitle,
   });
 
   final String userId;
   final String userName;
   final String? profileImageUrl;
-  final String? subtitle;
 }
 
 String _formatCategoryLabel(String raw) {
@@ -1741,18 +1745,6 @@ class _ProfileSearchHitRow extends StatelessWidget {
                         color: AppColors.textPrimary,
                       ),
                     ),
-                    if (entry.subtitle != null && entry.subtitle!.isNotEmpty) ...[
-                      const SizedBox(height: 1),
-                      Text(
-                        entry.subtitle!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.bodySmall.copyWith(
-                          color: AppColors.textSecondary,
-                          fontSize: 10,
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),
@@ -1766,14 +1758,33 @@ class _ProfileSearchHitRow extends StatelessWidget {
 
 class _TopReviewerRow extends StatelessWidget {
   const _TopReviewerRow({
+    required this.rank,
     required this.data,
     required this.isCurrentUser,
     required this.onTap,
   });
 
+  final int rank;
   final TopReviewerDto? data;
   final bool isCurrentUser;
   final VoidCallback? onTap;
+
+  // Sıra rozeti renkleri — altın / gümüş / bronz / pastel
+  static const _badgeColors = [
+    Color(0xFFFFB800), // 1 — altın
+    Color(0xFFADB8C8), // 2 — gümüş
+    Color(0xFFBB7B3A), // 3 — bronz
+    Color(0xFF8FA0BE), // 4
+    Color(0xFF8FA0BE), // 5
+  ];
+
+  static const _badgeTextColors = [
+    Color(0xFF7A4F00),
+    Color(0xFF3A4050),
+    Color(0xFF5C3318),
+    Color(0xFF2E3F6B),
+    Color(0xFF2E3F6B),
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -1781,86 +1792,153 @@ class _TopReviewerRow extends StatelessWidget {
     final reviewLabel = data == null
         ? ' '
         : '${data!.reviewCount} ${data!.reviewCount == 1 ? 'review' : 'reviews'}';
+    final badgeColor = _badgeColors[(rank - 1).clamp(0, 4)];
+    final badgeTextColor = _badgeTextColors[(rank - 1).clamp(0, 4)];
+    final isTopThree = rank <= 3;
+
     return Material(
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(14),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(4, 6, 4, 5),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: isCurrentUser
-                  ? AppColors.primary.withValues(alpha: 0.85)
-                  : AppColors.border.withValues(alpha: 0.7),
-              width: isCurrentUser ? 1.4 : 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.02),
-                blurRadius: 8,
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(11),
-                child: SizedBox(
-                  width: 42,
-                  height: 42,
-                  child: ProfileAvatarImage(
-                    size: 42,
-                    imageUrl: data?.profileImageUrl,
-                    fallbackInitial: username.isNotEmpty ? username : '?',
-                  ),
+        // Stack + clipBehavior: none → rozet kartın altından çıkıyor
+        child: Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.bottomCenter,
+          children: [
+            // Ana kart
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(4, 8, 4, 18),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: isCurrentUser
+                      ? AppColors.primary.withValues(alpha: 0.85)
+                      : isTopThree
+                          ? badgeColor.withValues(alpha: 0.45)
+                          : AppColors.border.withValues(alpha: 0.7),
+                  width: isCurrentUser ? 1.5 : (isTopThree ? 1.2 : 1),
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: isTopThree
+                        ? badgeColor.withValues(alpha: 0.12)
+                        : Colors.black.withValues(alpha: 0.03),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
               ),
-              const SizedBox(height: 4),
-              SizedBox(
-                height: 13,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 1),
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      username.isNotEmpty ? '@$username' : '—',
-                      maxLines: 1,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 10.2,
-                        color: AppColors.textPrimary,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Avatar — ilk 3'te renkli halka
+                  Container(
+                    padding: const EdgeInsets.all(2.5),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: isTopThree
+                          ? LinearGradient(
+                              colors: [
+                                badgeColor.withValues(alpha: 0.9),
+                                badgeColor.withValues(alpha: 0.4),
+                              ],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            )
+                          : null,
+                      color: isTopThree ? null : Colors.transparent,
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(11),
+                      child: SizedBox(
+                        width: 42,
+                        height: 42,
+                        child: ProfileAvatarImage(
+                          size: 42,
+                          imageUrl: data?.profileImageUrl,
+                          fallbackInitial: username.isNotEmpty ? username : '?',
+                        ),
                       ),
                     ),
                   ),
-                ),
+                  const SizedBox(height: 5),
+                  SizedBox(
+                    height: 13,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 1),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          username.isNotEmpty ? '@$username' : '—',
+                          maxLines: 1,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 10.2,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  SizedBox(
+                    height: 12,
+                    child: Center(
+                      child: Text(
+                        reviewLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: AppTextStyles.bodySmall.copyWith(
+                          color: AppColors.textSecondary,
+                          fontSize: 9.2,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 1),
-              SizedBox(
-                height: 12,
+            ),
+
+            // Sıra rozeti — kartın altından çıkıyor
+            Positioned(
+              bottom: -12,
+              child: Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: badgeColor,
+                  border: Border.all(color: Colors.white, width: 2),
+                  boxShadow: [
+                    BoxShadow(
+                      color: badgeColor.withValues(alpha: 0.5),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
                 child: Center(
                   child: Text(
-                    reviewLabel,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: AppTextStyles.bodySmall.copyWith(
-                      color: AppColors.textSecondary,
-                      fontSize: 9.2,
-                      fontWeight: FontWeight.w500,
+                    '$rank',
+                    style: TextStyle(
+                      fontSize: rank == 1 ? 12 : 11,
+                      fontWeight: FontWeight.w900,
+                      color: badgeTextColor,
+                      height: 1,
                     ),
                   ),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
