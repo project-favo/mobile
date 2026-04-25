@@ -54,6 +54,8 @@ class _AddReviewPageState extends State<AddReviewPage> {
 
   bool get _isEditMode => widget.reviewToEdit != null;
 
+  bool _isSubmitting = false;
+
   /// Yıldız + metin (validator ile aynı kurallar); kaydır butonu yalnızca buna göre etkin.
   bool get _canSlideToSubmit {
     if (_selectedRating < 1) return false;
@@ -158,13 +160,20 @@ class _AddReviewPageState extends State<AddReviewPage> {
     try {
       final XFile? image = await _imagePicker.pickImage(
         source: source,
-        imageQuality: 85, // Kaliteyi biraz düşürerek dosya boyutunu küçült
+        imageQuality: 85,
         maxWidth: 1920,
         maxHeight: 1920,
       );
 
+      if (!mounted) return;
+
+      // Picker dönünce arka planda token yenilenmiş olabilir; mevcut
+      // fotoğrafların Image.network rebuild'inde doğru header ile yüklenmesi için
+      // headers'ı yenile, sonra setState yap.
+      await _refreshImageAuthHeaders();
+
+      if (!mounted) return;
       if (image != null) {
-        if (!mounted) return;
         if (_photoCount >= _maxReviewPhotos) return;
         setState(() {
           _selectedImages.add(image);
@@ -377,10 +386,13 @@ class _AddReviewPageState extends State<AddReviewPage> {
       return;
     }
 
+    if (mounted) setState(() => _isSubmitting = true);
     final ok = await _submitReviewInternal();
     if (!mounted) return;
     if (ok) {
       Navigator.pop(context, true);
+    } else {
+      setState(() => _isSubmitting = false);
     }
   }
 
@@ -391,7 +403,9 @@ class _AddReviewPageState extends State<AddReviewPage> {
     // viewInsets.bottom'u tekrar alt bar + scroll padding'e eklemek taşmaya yol açar.
     final bottomSafe = MediaQuery.paddingOf(context).bottom;
 
-    return Scaffold(
+    return Stack(
+      children: [
+        Scaffold(
       resizeToAvoidBottomInset: true,
       backgroundColor: AppColors.surface,
       appBar: AppBar(
@@ -653,6 +667,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
                                         ApiConfig.baseUrl,
                                       );
                                       return Padding(
+                                        key: ValueKey('existing_${m.id}'),
                                         padding: const EdgeInsets.only(
                                           right: 8,
                                         ),
@@ -725,6 +740,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
                                     final fileIndex =
                                         index - _existingMedia.length;
                                     return Padding(
+                                      key: ValueKey('new_${_selectedImages[fileIndex].path}'),
                                       padding: const EdgeInsets.only(right: 8),
                                       child: Stack(
                                         clipBehavior: Clip.none,
@@ -974,6 +990,37 @@ class _AddReviewPageState extends State<AddReviewPage> {
           ),
         ),
       ),
+        ),
+        // Fotoğraf yükleme sırasında loading overlay
+        if (_isSubmitting)
+          const Positioned.fill(
+            child: ColoredBox(
+              color: Colors.black26,
+              child: Center(
+                child: Card(
+                  elevation: 8,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(16)),
+                  ),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 16),
+                        Text(
+                          'Uploading...',
+                          style: TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

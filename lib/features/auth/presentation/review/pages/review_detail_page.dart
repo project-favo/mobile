@@ -593,11 +593,9 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
   }
 
   bool get _canShowChatIcon {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return false;
-    // ownerId backend user id, elimizde birebir karşılığı yok; username ile basic kontrol yapıyoruz
-    return _currentReview.ownerUserName.toLowerCase() !=
-        (user.email ?? '').split('@').first.toLowerCase();
+    if (FirebaseAuth.instance.currentUser == null) return false;
+    if (_isOwnReview) return false;
+    return true;
   }
 
   /// Review'ı backend'den yeniden yükler (like durumu için)
