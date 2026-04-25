@@ -8,7 +8,6 @@ import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../../../../core/utils/product_rating_display.dart';
 import '../../../../../core/utils/entity_active.dart';
 import '../../../../../core/utils/session_helper.dart';
-import '../../../../../core/widgets/new_product_badge.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/models/review_dto.dart';
 import '../../../data/repositories/review_repository.dart';
@@ -49,8 +48,12 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
     } catch (_) {}
     try {
       final results = await Future.wait([
-        _reviewRepository.getReviewsByProductId(widget.product1.id, firebaseIdToken: token),
-        _reviewRepository.getReviewsByProductId(widget.product2.id, firebaseIdToken: token),
+        _reviewRepository
+            .getReviewsByProductId(widget.product1.id, firebaseIdToken: token)
+            .catchError((_) => <ReviewDto>[]),
+        _reviewRepository
+            .getReviewsByProductId(widget.product2.id, firebaseIdToken: token)
+            .catchError((_) => <ReviewDto>[]),
       ]);
       if (!mounted) return;
       setState(() {
@@ -117,23 +120,31 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
   // ── Product cards with floating VS badge ────────────────────────────────────
 
   Widget _buildProductCardsRow() {
-    return Stack(
-      clipBehavior: Clip.none,
-      alignment: Alignment.topCenter,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Each card takes half the available width minus the center gap (44px).
+        final cardWidth = (constraints.maxWidth - 44) / 2;
+        // Image is 1:1, so its center is at cardWidth / 2.
+        final badgeTop = cardWidth / 2 - 14; // 14 = half of badge height (28px)
+        return Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.topCenter,
           children: [
-            Expanded(child: _buildProductCard(widget.product1, _isWinner(1))),
-            const SizedBox(width: 44),
-            Expanded(child: _buildProductCard(widget.product2, _isWinner(2))),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: _buildProductCard(widget.product1, _isWinner(1))),
+                const SizedBox(width: 44),
+                Expanded(child: _buildProductCard(widget.product2, _isWinner(2))),
+              ],
+            ),
+            Positioned(
+              top: badgeTop,
+              child: _VsBadge(),
+            ),
           ],
-        ),
-        Positioned(
-          top: 52,
-          child: _VsBadge(),
-        ),
-      ],
+        );
+      },
     );
   }
 
@@ -227,7 +238,7 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
                       ],
                     )
                   else
-                    const NewProductBadge(),
+                    const SizedBox.shrink(),
                   if (isWinner && hasRating) ...[
                     const SizedBox(height: 8),
                     Container(
@@ -330,7 +341,7 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        has1 ? r1.toStringAsFixed(1) : 'New',
+                        has1 ? r1.toStringAsFixed(1) : '-',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
@@ -338,7 +349,7 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
                         ),
                       ),
                       Text(
-                        has2 ? r2.toStringAsFixed(1) : 'New',
+                        has2 ? r2.toStringAsFixed(1) : '-',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
@@ -386,10 +397,10 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
     if (_loadingReviews) {
       return Row(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: const [
-          Expanded(child: ReviewCardSkeleton()),
+        children: [
+          Expanded(child: _CompactReviewSkeleton()),
           SizedBox(width: AppSpacing.medium),
-          Expanded(child: ReviewCardSkeleton()),
+          Expanded(child: _CompactReviewSkeleton()),
         ],
       );
     }
@@ -529,33 +540,85 @@ class _ProductComparisonPageState extends State<ProductComparisonPage> {
   }
 }
 
+// ── Compact skeleton for narrow review columns ────────────────────────────────
+
+class _CompactReviewSkeleton extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: List.generate(2, (_) => _singleCard()),
+    );
+  }
+
+  Widget _singleCard() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.medium),
+      padding: const EdgeInsets.all(AppSpacing.large),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: AppDecorations.softCardShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              SkeletonLoader(width: 22, height: 22, borderRadius: BorderRadius.circular(11)),
+              const SizedBox(width: 6),
+              const Expanded(child: SkeletonLoader(width: double.infinity, height: 12)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: List.generate(
+              5,
+              (_) => Padding(
+                padding: const EdgeInsets.only(right: 3),
+                child: SkeletonLoader(width: 11, height: 11, borderRadius: BorderRadius.circular(3)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          const SkeletonLoader(width: double.infinity, height: 11),
+          const SizedBox(height: 4),
+          const SkeletonLoader(width: double.infinity, height: 11),
+          const SizedBox(height: 4),
+          const SkeletonLoader(width: double.infinity, height: 11),
+        ],
+      ),
+    );
+  }
+}
+
 // ── VS badge ────────────────────────────────────────────────────────────────────
 
 class _VsBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 38,
-      height: 38,
+      width: 28,
+      height: 28,
       decoration: BoxDecoration(
-        color: AppColors.primary,
+        color: AppColors.surface,
         shape: BoxShape.circle,
+        border: Border.all(color: AppColors.border, width: 1),
         boxShadow: [
           BoxShadow(
-            color: AppColors.primary.withOpacity(0.35),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
-      child: const Center(
+      child: Center(
         child: Text(
-          'VS',
+          'vs',
           style: TextStyle(
-            color: Colors.white,
-            fontSize: 11,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.5,
+            color: AppColors.textSecondary,
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.3,
           ),
         ),
       ),

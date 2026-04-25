@@ -14,7 +14,6 @@ import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/utils/exceptions.dart';
 import '../../../../../core/utils/product_rating_display.dart';
 import '../../../../../core/utils/app_datetime.dart';
-import '../../../../../core/widgets/new_product_badge.dart';
 import '../../../../../core/cache/current_user_cache.dart';
 import '../../../../../core/cache/self_review_like_local_prefs.dart';
 import '../../../../../core/cache/product_memory_cache.dart';
@@ -2055,7 +2054,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                                     ? 0.0
                                     : rawRating.clamp(0.0, 5.0);
 
-                            if (!hasRating) return const NewProductBadge();
+                            if (!hasRating) return const SizedBox.shrink();
 
                             return Container(
                               padding: const EdgeInsets.all(AppSpacing.small),
