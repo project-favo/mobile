@@ -1,3 +1,5 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
@@ -56,6 +58,44 @@ class _RatingCache {
   }
 }
 
+class _ReviewerAvatarKeysCache {
+  static final Map<String, List<String>> _cache = {};
+
+  static List<String>? get(String productId) => _cache[productId];
+
+  static void set(String productId, List<String> keys) {
+    _cache[productId] = List<String>.from(keys);
+  }
+
+  static void remove(String productId) {
+    _cache.remove(productId);
+  }
+}
+
+const int _kMaxProductCardReviewerBubbles = 5;
+
+List<String> reviewerBubbleKeysFromReviews(List<ReviewDto> reviews) {
+  final seen = <String>{};
+  final out = <String>[];
+  for (final r in reviews) {
+    final uid = r.ownerId.trim();
+    final dedupe = uid.isNotEmpty ? uid : r.id.trim();
+    if (dedupe.isEmpty || seen.contains(dedupe)) continue;
+    seen.add(dedupe);
+    final raw = r.ownerProfilePhotoUrl?.trim();
+    if (raw != null && raw.isNotEmpty) {
+      out.add('url:$raw');
+    } else {
+      final name = r.ownerUserName.trim();
+      final initial = name.isEmpty ? '?' : name[0].toUpperCase();
+      final idPart = uid.isNotEmpty ? uid : r.id;
+      out.add('fallback:$idPart:$initial');
+    }
+    if (out.length >= _kMaxProductCardReviewerBubbles) break;
+  }
+  return out;
+}
+
 class ProductCard extends StatefulWidget {
   final String imageUrl;
   final String title;
@@ -72,8 +112,7 @@ class ProductCard extends StatefulWidget {
   final bool loadReviewCount;
   final bool fetchSocialCounts;
 
-  /// Avatar URL'leri — bu ürünü beğenen takip edilen kullanıcılar.
-  /// Boş liste ise hiç gösterilmez.
+  /// Arkadaş feed’inden gelen avatarlar; yorum listesi yüklenince kart önce gerçek yorumcuları gösterir.
   final List<String> friendAvatarUrls;
 
   const ProductCard({
@@ -101,6 +140,7 @@ class _ProductCardState extends State<ProductCard> {
   int? _reviewCount;
   int? _likeCount;
   double? _resolvedRating;
+  List<String> _reviewerBubbleKeys = const [];
   static const double _titleBlockHeight = 56;
   static const double _metaRowHeight = 18;
 
@@ -111,6 +151,10 @@ class _ProductCardState extends State<ProductCard> {
       _reviewCount = _ReviewCountCache.get(widget.productId);
       _likeCount = _LikeCountCache.get(widget.productId);
       _resolvedRating = _RatingCache.get(widget.productId);
+      final warmBubbles = _ReviewerAvatarKeysCache.get(widget.productId);
+      if (warmBubbles != null && warmBubbles.isNotEmpty) {
+        _reviewerBubbleKeys = warmBubbles;
+      }
       if (widget.fetchSocialCounts) {
         _loadSocialCounts();
       }
@@ -157,6 +201,14 @@ class _ProductCardState extends State<ProductCard> {
         needBuild = true;
       }
     }
+    if (widget.loadReviewCount && oldWidget.productId != widget.productId) {
+      final warm = _ReviewerAvatarKeysCache.get(widget.productId);
+      _reviewerBubbleKeys = warm ?? const [];
+      if (widget.fetchSocialCounts) {
+        unawaited(_loadSocialCounts());
+      }
+      needBuild = true;
+    }
     if (needBuild && mounted) setState(() {});
   }
 
@@ -180,19 +232,24 @@ class _ProductCardState extends State<ProductCard> {
       final count = reviews.length;
       final sumRating = reviews.fold<int>(0, (sum, r) => sum + r.rating);
       final computedRating = count > 0 ? (sumRating / count) : 0.0;
+      final bubbleKeys = reviewerBubbleKeysFromReviews(reviews);
       _ReviewCountCache.set(widget.productId, count);
       _LikeCountCache.set(widget.productId, likeCount);
       _RatingCache.set(widget.productId, computedRating);
+      _ReviewerAvatarKeysCache.set(widget.productId, bubbleKeys);
       setState(() {
         _reviewCount = count;
         _likeCount = likeCount;
         _resolvedRating = computedRating;
+        _reviewerBubbleKeys = bubbleKeys;
       });
     } catch (_) {
       if (!mounted) return;
+      _ReviewerAvatarKeysCache.set(widget.productId, const []);
       setState(() {
         _reviewCount ??= 0;
         _likeCount ??= 0;
+        _reviewerBubbleKeys = const [];
       });
     }
   }
@@ -203,9 +260,11 @@ class _ProductCardState extends State<ProductCard> {
     // yorum yoksa kartta puan + baloncuğu da gösterme (askıdaki yorum yıldızı kalmasın).
     final int? visibleReviewCount = widget.loadReviewCount ? _reviewCount : null;
     final bool noVisibleReviews = visibleReviewCount != null && visibleReviewCount == 0;
-    // Arkadaş baloncukları friends-feed verisinden gelir; karttaki görünür yorum sayısı
-    // (yenileme yarışı / filtre) ile bağlama — aksi halde review sonrası baloncuk kayboluyordu.
-    final bool showFriendBubbles = widget.friendAvatarUrls.isNotEmpty;
+    // Önce gerçek yorumcular (API); yoksa arkadaş feed — görünür yorum sayısıyla baloncuğu koparma.
+    final displayBubbleKeys = widget.loadReviewCount && _reviewerBubbleKeys.isNotEmpty
+        ? _reviewerBubbleKeys
+        : widget.friendAvatarUrls;
+    final bool showAvatarBubbles = displayBubbleKeys.isNotEmpty;
 
     final dpr = MediaQuery.devicePixelRatioOf(context);
     final screenW = MediaQuery.sizeOf(context).width;
@@ -260,12 +319,12 @@ class _ProductCardState extends State<ProductCard> {
                         ),
                       ),
                     ),
-                    if (showFriendBubbles)
+                    if (showAvatarBubbles)
                       Positioned(
                         left: 7,
                         bottom: 7,
                         child: _FriendAvatarStack(
-                          avatarUrls: widget.friendAvatarUrls,
+                          avatarUrls: displayBubbleKeys,
                         ),
                       ),
                   ],
@@ -537,6 +596,7 @@ void invalidateProductCardSocialCaches(String productId) {
   _ReviewCountCache.remove(productId);
   _LikeCountCache.remove(productId);
   _RatingCache.remove(productId);
+  _ReviewerAvatarKeysCache.remove(productId);
 }
 
 /// Detay ekranından dönmeden hemen (sunucu refetch yok) grid sayılarını doldurur; flash yapmaz.

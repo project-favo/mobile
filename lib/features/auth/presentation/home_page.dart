@@ -26,6 +26,7 @@ import '../../../core/cache/current_user_cache.dart';
 import '../../../features/activity/domain/activity_models.dart';
 import '../../../features/activity/domain/activity_type.dart';
 import '../../../features/activity/data/friends_feed_repository.dart';
+import '../../../features/activity/data/friends_feed_dto.dart';
 import '../../../features/activity/data/friends_feed_activity_mapper.dart';
 import '../widgets/product_card.dart';
 import 'messages/conversation_list_page.dart';
@@ -53,6 +54,9 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
+  static const int _kMaxFriendReviewBubblesPerProduct = 5;
+  static const int _kMaxFriendLikerKeysPerProduct = 8;
+
   // BottomNavigationBar index mapping:
   // 0: search, 1: add (placeholder), 2: home, 3: activity, 4: profile
   int _selectedCategoryIndex = -1; // -1 means "All", 0+ means selected category
@@ -330,36 +334,56 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   /// immediately rebuilds [_friendLikersMap] so avatars show on first open.
   Future<void> _loadFriendLikers() async {
     try {
-      final page = await _friendsFeedRepository.getFriendsFeed(
+      final page0 = await _friendsFeedRepository.getFriendsFeed(
         page: 0,
         size: 50,
       );
       if (!mounted) return;
 
-      final items = activityItemsFromFriendsFeedDtos(page.content);
-      _friendFeedItemsForLikers = items;
+      // Aynı üründe birden çok yorumcu: tek sayfada 50 satır yetmeyebilir — ikinci sayfayı da al.
+      final dtoById = <String, FriendsFeedItemDto>{};
+      for (final e in page0.content) {
+        final key = e.id.trim().isNotEmpty ? e.id.trim() : '${e.type}_${e.actorUserId}_${e.productId ?? ''}';
+        dtoById.putIfAbsent(key, () => e);
+      }
+      if (page0.totalPages > 1) {
+        try {
+          final page1 = await _friendsFeedRepository.getFriendsFeed(
+            page: 1,
+            size: 50,
+          );
+          if (!mounted) return;
+          for (final e in page1.content) {
+            final key = e.id.trim().isNotEmpty ? e.id.trim() : '${e.type}_${e.actorUserId}_${e.productId ?? ''}';
+            dtoById.putIfAbsent(key, () => e);
+          }
+        } catch (_) {}
+      }
 
-      // Merge with existing cache — tek tip [ActivityItem] listesi (cast yok).
+      var items = activityItemsFromFriendsFeedDtos(dtoById.values);
+      items.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+
       final existing = FriendFeedMemoryCache.instance.peek();
-      final byId = <String, ActivityItem>{};
+      final mergedByActivityId = <String, ActivityItem>{};
       for (final item in items) {
-        byId[item.id] = item;
+        mergedByActivityId.putIfAbsent(item.id, () => item);
       }
-      if (existing != null) {
-        for (final item in existing.items) {
-          byId.putIfAbsent(item.id, () => item);
-        }
+      for (final item in existing?.items ?? const <ActivityItem>[]) {
+        mergedByActivityId.putIfAbsent(item.id, () => item);
       }
-      final mergedItems = byId.values.toList();
+      final mergedList = mergedByActivityId.values.toList()
+        ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+
+      _friendFeedItemsForLikers = mergedList;
       FriendFeedMemoryCache.instance.remember(
-        items: mergedItems,
-        page: page.number,
-        totalPages: page.totalPages,
+        items: mergedList,
+        page: page0.number,
+        totalPages: page0.totalPages,
       );
 
       if (!mounted) return;
 
-      final fresh = _buildFriendLikersMapForItems(mergedItems);
+      final fresh = _buildFriendLikersMapForItems(mergedList);
       setState(() {
         var next = _mergeFriendLikersMapsPreserve(_friendLikersMap, fresh);
         next = _pruneFriendLikersMapByFollowing(next);
@@ -406,8 +430,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
   }
 
-  static const int _kMaxFriendLikerKeysPerProduct = 8;
-
   /// API sayfa 0 yenilendiğinde eski ürün→avatar eşlemesini korur (sıra değişince kaybolmayı önler).
   Map<String, List<String>> _mergeFriendLikersMapsPreserve(
     Map<String, List<String>> previous,
@@ -441,11 +463,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     return out;
   }
 
-  /// Ürün kartı baloncuğu: sadece [source] satırları. Askı/deaktif aktör yok, eski cache yok.
+  /// Ürün kartı arkadaş baloncuğu: review/like; kullanıcı [user.id] ile tekilleştir (ortak URL).
+  /// Taze harita [_kMaxFriendReviewBubblesPerProduct] ile sınırlanır; birleşik sırada en fazla [_kMaxFriendLikerKeysPerProduct].
   Map<String, List<String>> _buildFriendLikersMapForItems(
     Iterable<ActivityItem> source,
   ) {
     final map = <String, List<String>>{};
+    final seenKeysByProduct = <String, Set<String>>{};
     for (final item in source) {
       if (item.isActorInactive) continue;
       // Review veya ürün beğenisi: arkadaş feed’inde tip farklı gelebiliyor; ikisini de göster.
@@ -453,12 +477,17 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         continue;
       }
       final productId = item.targetContent?.productId;
-      final avatarKey = _friendAvatarKeyFor(item.user);
       if (productId == null || productId.isEmpty) continue;
-      map.putIfAbsent(productId, () => []);
-      if (!map[productId]!.contains(avatarKey)) {
-        map[productId]!.add(avatarKey);
-      }
+      final list = map.putIfAbsent(productId, () => <String>[]);
+      if (list.length >= _kMaxFriendReviewBubblesPerProduct) continue;
+
+      final avatarKey = _friendAvatarKeyFor(item.user);
+      final uid = item.user.id.trim();
+      final seen = seenKeysByProduct.putIfAbsent(productId, () => <String>{});
+      final dedupeKey = uid.isNotEmpty ? 'uid:$uid' : avatarKey;
+      if (seen.contains(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      list.add(avatarKey);
     }
     return map;
   }
