@@ -91,7 +91,8 @@ class _ChatDetailPageState extends State<ChatDetailPage>
       if (!_bootstrapping &&
           !_messagesLoading &&
           _errorMessage == null &&
-          _messages.isNotEmpty) {
+          _messages.isNotEmpty &&
+          _isNearBottom()) {
         _scrollToBottom();
       }
     });
@@ -359,7 +360,7 @@ class _ChatDetailPageState extends State<ChatDetailPage>
           (fresh.isNotEmpty && _messages.isNotEmpty && fresh.last.id != _messages.last.id);
       if (hasNew) {
         setState(() => _messages = fresh);
-        _scrollToBottom();
+        if (_isNearBottom()) _scrollToBottom();
       }
     } catch (_) {}
   }
@@ -468,11 +469,17 @@ class _ChatDetailPageState extends State<ChatDetailPage>
         size: 50,
       );
       if (!mounted) return;
+      final fresh = page.content;
+      final hadNew = fresh.length != _messages.length ||
+          (fresh.isNotEmpty &&
+              _messages.isNotEmpty &&
+              fresh.last.id != _messages.last.id);
+      // Kullanıcı yukarı kaydırdıysa ve yeni mesaj yoksa konumu sıfırlama.
+      final shouldScroll = hadNew || _isNearBottom();
       setState(() {
-        _messages = page.content;
+        _messages = fresh;
       });
-      // Her sessiz yenilemeden sonra da en güncel mesaja kaydır
-      _scrollToBottom();
+      if (shouldScroll) _scrollToBottom();
     } catch (_) {
       // Sessizce yut; real-time için sadece best-effort polling
     }
@@ -516,12 +523,11 @@ class _ChatDetailPageState extends State<ChatDetailPage>
               jsonDecode(body) as Map<String, dynamic>;
           final incoming = MessageDto.fromJson(data);
           if (!mounted) return;
+          final isNew = !_messages.any((m) => m.id == incoming.id);
           setState(() {
-            if (!_messages.any((m) => m.id == incoming.id)) {
-              _messages = [..._messages, incoming];
-            }
+            if (isNew) _messages = [..._messages, incoming];
           });
-          _scrollToBottom();
+          if (isNew || _isNearBottom()) _scrollToBottom();
         } catch (_) {
           // JSON parse hatası olursa görmezden gel
         }
@@ -693,6 +699,10 @@ class _ChatDetailPageState extends State<ChatDetailPage>
                           final maxWidth =
                               MediaQuery.of(context).size.width * 0.7;
 
+                          // Avatar sadece ardışık grup içindeki son mesajda görünür.
+                          final isLastInGroup = index == _messages.length - 1 ||
+                              _messages[index + 1].senderId != m.senderId;
+
                           final bubble = ConstrainedBox(
                             constraints: BoxConstraints(maxWidth: maxWidth),
                             child: Container(
@@ -713,17 +723,36 @@ class _ChatDetailPageState extends State<ChatDetailPage>
                             ),
                           );
 
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: AppSpacing.small),
-                            child: Row(
-                              mainAxisAlignment: isMine
-                                  ? MainAxisAlignment.end
-                                  : MainAxisAlignment.start,
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: isMine
-                                  ? [bubble, const SizedBox(width: 8), _buildMyAvatar(size: 28)]
-                                  : [_buildOtherAvatar(size: 34), const SizedBox(width: 10), bubble],
-                            ),
+                          Widget myAvatarOrGap() => isLastInGroup
+                              ? _buildMyAvatar(size: 28)
+                              : const SizedBox(width: 28);
+                          Widget otherAvatarOrGap() => isLastInGroup
+                              ? _buildOtherAvatar(size: 34)
+                              : const SizedBox(width: 34);
+
+                          final messageRow = Row(
+                            mainAxisAlignment: isMine
+                                ? MainAxisAlignment.end
+                                : MainAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: isMine
+                                ? [bubble, const SizedBox(width: 8), myAvatarOrGap()]
+                                : [otherAvatarOrGap(), const SizedBox(width: 10), bubble],
+                          );
+
+                          return Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (_shouldShowDateSeparator(index))
+                                _DateSeparator(label: _formatDateLabel(m.createdAt)),
+                              _SwipeableMessageRow(
+                                timeLabel: _formatTimeLabel(m.createdAt),
+                                bottomMargin: isLastInGroup
+                                    ? AppSpacing.medium
+                                    : AppSpacing.small / 2,
+                                child: messageRow,
+                              ),
+                            ],
                           );
                         },
                       ),
@@ -776,6 +805,65 @@ class _ChatDetailPageState extends State<ChatDetailPage>
     );
   }
 
+  // ── Mesaj zaman / tarih yardımcıları ────────────────────────────────────────
+
+  String _formatTimeLabel(String createdAt) {
+    try {
+      final s = createdAt.trim();
+      // Backend LocalDateTime → 'Z' suffix yok → UTC olarak zorla.
+      final utcStr = (s.contains('Z') || s.contains('+')) ? s : '${s}Z';
+      final dt = DateTime.parse(utcStr).toLocal();
+      final h = dt.hour.toString().padLeft(2, '0');
+      final m = dt.minute.toString().padLeft(2, '0');
+      return '$h:$m';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  String _formatDateLabel(String createdAt) {
+    try {
+      final s = createdAt.trim();
+      final utcStr = (s.contains('Z') || s.contains('+')) ? s : '${s}Z';
+      final dt = DateTime.parse(utcStr).toLocal();
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final msgDay = DateTime(dt.year, dt.month, dt.day);
+      final diff = today.difference(msgDay).inDays;
+      if (diff == 0) return 'Today';
+      if (diff == 1) return 'Yesterday';
+      if (diff < 7) {
+        const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        return days[dt.weekday - 1];
+      }
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      final yearSuffix = dt.year != now.year ? ' ${dt.year}' : '';
+      return '${dt.day} ${months[dt.month - 1]}$yearSuffix';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  bool _shouldShowDateSeparator(int index) {
+    if (index == 0) return true;
+    try {
+      final curr = DateTime.parse(_messages[index].createdAt).toLocal();
+      final prev = DateTime.parse(_messages[index - 1].createdAt).toLocal();
+      return curr.year != prev.year ||
+          curr.month != prev.month ||
+          curr.day != prev.day;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Kullanıcı zaten alta yakınsa true. Kaydırma kararı buna göre alınır.
+  bool _isNearBottom({double threshold = 120}) {
+    if (!_scrollController.hasClients) return true;
+    final pos = _scrollController.position;
+    return pos.maxScrollExtent - pos.pixels < threshold;
+  }
+
   void _scrollToBottom() {
     if (!mounted) return;
     void jump() {
@@ -801,3 +889,149 @@ class _ChatDetailPageState extends State<ChatDetailPage>
   }
 }
 
+// ── Swipe-to-reveal timestamp ────────────────────────────────────────────────
+
+class _SwipeableMessageRow extends StatefulWidget {
+  final Widget child;
+  final String timeLabel;
+  final double bottomMargin;
+
+  const _SwipeableMessageRow({
+    required this.child,
+    required this.timeLabel,
+    required this.bottomMargin,
+  });
+
+  @override
+  State<_SwipeableMessageRow> createState() => _SwipeableMessageRowState();
+}
+
+class _SwipeableMessageRowState extends State<_SwipeableMessageRow>
+    with SingleTickerProviderStateMixin {
+  double _offset = 0;
+  late final AnimationController _snapCtrl;
+  late Animation<double> _snapAnim;
+
+  static const double _maxDrag = 72;
+
+  @override
+  void initState() {
+    super.initState();
+    _snapCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 280),
+    );
+  }
+
+  @override
+  void dispose() {
+    _snapCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onDragUpdate(DragUpdateDetails d) {
+    _snapCtrl.stop();
+    setState(() {
+      _offset = (_offset + d.delta.dx).clamp(-_maxDrag, 0.0);
+    });
+  }
+
+  void _onDragEnd(DragEndDetails _) {
+    final start = _offset;
+    _snapAnim = Tween<double>(begin: start, end: 0).animate(
+      CurvedAnimation(parent: _snapCtrl, curve: Curves.easeOutCubic),
+    )..addListener(() => setState(() => _offset = _snapAnim.value));
+    _snapCtrl.forward(from: 0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final opacity = (-_offset / _maxDrag).clamp(0.0, 1.0);
+    return GestureDetector(
+      onHorizontalDragUpdate: _onDragUpdate,
+      onHorizontalDragEnd: _onDragEnd,
+      // opaque: gesture'ı kesinlikle bu widget yakalar, arena'ya bırakmaz.
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: double.infinity,
+        child: Stack(
+          alignment: Alignment.centerRight,
+          children: [
+            // Timestamp: sola kaydırdıkça sağda belirir
+            Opacity(
+              opacity: opacity,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 6, bottom: 2),
+                child: Text(
+                  widget.timeLabel,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: AppColors.textSecondary,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ),
+            // Mesaj satırı sola kayar
+            Padding(
+              padding: EdgeInsets.only(bottom: widget.bottomMargin),
+              child: Transform.translate(
+                offset: Offset(_offset, 0),
+                child: widget.child,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Date separator ───────────────────────────────────────────────────────────
+
+class _DateSeparator extends StatelessWidget {
+  final String label;
+  const _DateSeparator({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    if (label.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: Divider(
+              color: Colors.white.withOpacity(0.3),
+              thickness: 1,
+              endIndent: 10,
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.18),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Divider(
+              color: Colors.white.withOpacity(0.3),
+              thickness: 1,
+              indent: 10,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
