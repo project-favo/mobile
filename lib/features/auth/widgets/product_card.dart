@@ -56,6 +56,46 @@ class _RatingCache {
   }
 }
 
+class _PhotoReviewCache {
+  static final Map<String, bool> _cache = {};
+
+  static bool? get(String productId) => _cache[productId];
+
+  static void set(String productId, bool hasPhoto) {
+    _cache[productId] = hasPhoto;
+  }
+
+  static void remove(String productId) {
+    _cache.remove(productId);
+  }
+}
+
+/// Grid’de kalp [isLiked] zenginleştirmeden gelirken like sayısı ayrı uç/önbellekten 0 gelebiliyor.
+/// Wishlist’te olduğumuz halde toplam like en az 1 olmalı.
+int reconcileLikeCountWithWishlist({
+  required bool isWishlisted,
+  required int serverCount,
+}) {
+  if (isWishlisted && serverCount < 1) return 1;
+  return serverCount;
+}
+
+/// Görünür yorumlarda en az bir foto / ek medya var mı (ProductCard grid).
+bool _visibleReviewsIncludePhoto(ReviewDto r) {
+  if (r.mediaList.isEmpty) return false;
+  for (final m in r.mediaList) {
+    if (m.id.isNotEmpty) return true;
+    final u = (m.url ?? m.imageUrl)?.trim() ?? '';
+    if (u.isNotEmpty) return true;
+  }
+  return false;
+}
+
+/// [seedProductCardSocialCaches] / ebeveyn yenilemeleri için dışa açık kontrol.
+bool anyVisibleReviewHasPhoto(Iterable<ReviewDto> reviews) {
+  return reviews.any(_visibleReviewsIncludePhoto);
+}
+
 class ProductCard extends StatefulWidget {
   final String imageUrl;
   final String title;
@@ -100,6 +140,7 @@ class _ProductCardState extends State<ProductCard> {
   int? _reviewCount;
   int? _likeCount;
   double? _resolvedRating;
+  bool? _hasPhotoReview;
   static const double _titleBlockHeight = 56;
   static const double _metaRowHeight = 18;
 
@@ -108,8 +149,19 @@ class _ProductCardState extends State<ProductCard> {
     super.initState();
     if (widget.loadReviewCount) {
       _reviewCount = _ReviewCountCache.get(widget.productId);
-      _likeCount = _LikeCountCache.get(widget.productId);
+      final lcRaw = _LikeCountCache.get(widget.productId);
+      if (lcRaw != null) {
+        final adj = reconcileLikeCountWithWishlist(
+          isWishlisted: widget.isFavorite,
+          serverCount: lcRaw,
+        );
+        _likeCount = adj;
+        if (adj != lcRaw) {
+          _LikeCountCache.set(widget.productId, adj);
+        }
+      }
       _resolvedRating = _RatingCache.get(widget.productId);
+      _hasPhotoReview = _PhotoReviewCache.get(widget.productId);
       if (widget.fetchSocialCounts) {
         _loadSocialCounts();
       }
@@ -123,8 +175,13 @@ class _ProductCardState extends State<ProductCard> {
       if (oldWidget.isFavorite == widget.isFavorite) return;
       final c = _LikeCountCache.get(widget.productId);
       if (c != null) {
+        final adj = reconcileLikeCountWithWishlist(
+          isWishlisted: widget.isFavorite,
+          serverCount: c,
+        );
+        if (adj != c) _LikeCountCache.set(widget.productId, adj);
         setState(() {
-          _likeCount = c;
+          _likeCount = adj;
         });
       }
       return;
@@ -136,24 +193,43 @@ class _ProductCardState extends State<ProductCard> {
     final rc = _ReviewCountCache.get(widget.productId);
     final lc = _LikeCountCache.get(widget.productId);
     final rr = _RatingCache.get(widget.productId);
+    final ph = _PhotoReviewCache.get(widget.productId);
     var needBuild = false;
     if (rc != null && rc != _reviewCount) {
       _reviewCount = rc;
       needBuild = true;
     }
-    if (lc != null && lc != _likeCount) {
-      _likeCount = lc;
-      needBuild = true;
+    if (lc != null) {
+      final adj = reconcileLikeCountWithWishlist(
+        isWishlisted: widget.isFavorite,
+        serverCount: lc,
+      );
+      if (adj != lc) _LikeCountCache.set(widget.productId, adj);
+      if (adj != _likeCount) {
+        _likeCount = adj;
+        needBuild = true;
+      }
     }
     if (rr != null && rr != _resolvedRating) {
       _resolvedRating = rr;
       needBuild = true;
     }
+    if (ph != null && ph != _hasPhotoReview) {
+      _hasPhotoReview = ph;
+      needBuild = true;
+    }
     if (oldWidget.isFavorite != widget.isFavorite) {
       final c = _LikeCountCache.get(widget.productId);
       if (c != null) {
-        _likeCount = c;
-        needBuild = true;
+        final adj = reconcileLikeCountWithWishlist(
+          isWishlisted: widget.isFavorite,
+          serverCount: c,
+        );
+        if (adj != c) _LikeCountCache.set(widget.productId, adj);
+        if (adj != _likeCount) {
+          _likeCount = adj;
+          needBuild = true;
+        }
       }
     }
     if (needBuild && mounted) setState(() {});
@@ -175,23 +251,33 @@ class _ProductCardState extends State<ProductCard> {
       final reviews = filterVisibleReviews(
         futures[0] as List<ReviewDto>,
       );
-      final likeCount = futures[1] as int;
+      final likeCount = reconcileLikeCountWithWishlist(
+        isWishlisted: widget.isFavorite,
+        serverCount: futures[1] as int,
+      );
       final count = reviews.length;
       final sumRating = reviews.fold<int>(0, (sum, r) => sum + r.rating);
       final computedRating = count > 0 ? (sumRating / count) : 0.0;
+      final hasPhoto = reviews.any(_visibleReviewsIncludePhoto);
       _ReviewCountCache.set(widget.productId, count);
       _LikeCountCache.set(widget.productId, likeCount);
       _RatingCache.set(widget.productId, computedRating);
+      _PhotoReviewCache.set(widget.productId, hasPhoto);
       setState(() {
         _reviewCount = count;
         _likeCount = likeCount;
         _resolvedRating = computedRating;
+        _hasPhotoReview = hasPhoto;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _reviewCount ??= 0;
-        _likeCount ??= 0;
+        _likeCount = reconcileLikeCountWithWishlist(
+          isWishlisted: widget.isFavorite,
+          serverCount: _likeCount ?? 0,
+        );
+        _hasPhotoReview ??= false;
       });
     }
   }
@@ -295,6 +381,10 @@ class _ProductCardState extends State<ProductCard> {
               height: _metaRowHeight,
               child: Builder(
                 builder: (context) {
+                  final showPhotoBadge =
+                      widget.loadReviewCount &&
+                      _hasPhotoReview == true &&
+                      !noVisibleReviews;
                   if (noVisibleReviews) {
                     return Align(
                       alignment: Alignment.centerLeft,
@@ -312,13 +402,20 @@ class _ProductCardState extends State<ProductCard> {
                   if (!productHasMeaningfulRating(raw)) {
                     return Align(
                       alignment: Alignment.centerLeft,
-                      child: Text(
-                        'No rating yet',
-                        style: AppTextStyles.bodySmall.copyWith(
-                          color: AppColors.textSecondary,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Text(
+                            'No rating yet',
+                            style: AppTextStyles.bodySmall.copyWith(
+                              color: AppColors.textSecondary,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (showPhotoBadge) _buildPhotoReviewBadge(leadingGap: 6),
+                        ],
                       ),
                     );
                   }
@@ -327,11 +424,18 @@ class _ProductCardState extends State<ProductCard> {
                       : raw.clamp(0.0, 5.0);
                   return Align(
                     alignment: Alignment.centerLeft,
-                    child: RatingStarsRow(
-                      rating: rating,
-                      size: 12.5,
-                      gap: 1.5,
-                      showNumeric: true,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        RatingStarsRow(
+                          rating: rating,
+                          size: 12.5,
+                          gap: 1.5,
+                          showNumeric: true,
+                        ),
+                        if (showPhotoBadge) _buildPhotoReviewBadge(leadingGap: 4),
+                      ],
                     ),
                   );
                 },
@@ -402,6 +506,21 @@ class _ProductCardState extends State<ProductCard> {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Trendyol/Amazon tarzı: fotoğraflı yorum varsa ratingin hemen sağında minimal kamera.
+  Widget _buildPhotoReviewBadge({double leadingGap = 4}) {
+    return Semantics(
+      label: 'Includes photo reviews',
+      child: Padding(
+        padding: EdgeInsets.only(left: leadingGap),
+        child: Icon(
+          Icons.photo_camera_outlined,
+          size: 13.5,
+          color: AppColors.textSecondary.withValues(alpha: 0.88),
         ),
       ),
     );
@@ -536,6 +655,7 @@ void invalidateProductCardSocialCaches(String productId) {
   _ReviewCountCache.remove(productId);
   _LikeCountCache.remove(productId);
   _RatingCache.remove(productId);
+  _PhotoReviewCache.remove(productId);
 }
 
 /// Detay ekranından dönmeden hemen (sunucu refetch yok) grid sayılarını doldurur; flash yapmaz.
@@ -544,12 +664,16 @@ void seedProductCardSocialCaches(
   required int likeCount,
   required int reviewCount,
   double? rating,
+  bool? hasPhotoReview,
 }) {
   if (productId.isEmpty) return;
   _LikeCountCache.set(productId, likeCount);
   _ReviewCountCache.set(productId, reviewCount);
   if (rating != null) {
     _RatingCache.set(productId, rating);
+  }
+  if (hasPhotoReview != null) {
+    _PhotoReviewCache.set(productId, hasPhotoReview);
   }
 }
 
@@ -560,12 +684,16 @@ void setProductCardSocialCaches(
   required int likeCount,
   required int reviewCount,
   double? rating,
+  bool? hasPhotoReview,
 }) {
   if (productId.isEmpty) return;
   _LikeCountCache.set(productId, likeCount);
   _ReviewCountCache.set(productId, reviewCount);
   if (rating != null) {
     _RatingCache.set(productId, rating);
+  }
+  if (hasPhotoReview != null) {
+    _PhotoReviewCache.set(productId, hasPhotoReview);
   }
 }
 

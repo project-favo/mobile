@@ -33,8 +33,11 @@ class HomeViewStateCache {
   static final HomeViewStateCache instance = HomeViewStateCache._();
 
   HomeViewState? _memory;
+  String _ownerUserId = '';
 
-  HomeViewState? peek() {
+  HomeViewState? peek(String userId) {
+    final normalizedUserId = userId.trim();
+    if (_ownerUserId != normalizedUserId) return null;
     final s = _memory;
     if (s == null || s.products.isEmpty) return null;
     return HomeViewState(
@@ -51,7 +54,8 @@ class HomeViewStateCache {
     );
   }
 
-  void set(HomeViewState state) {
+  void set(String userId, HomeViewState state) {
+    _ownerUserId = userId.trim();
     _memory = HomeViewState(
       products: List<ProductDto>.from(state.products),
       currentPage: state.currentPage,
@@ -68,6 +72,7 @@ class HomeViewStateCache {
 
   void clear() {
     _memory = null;
+    _ownerUserId = '';
   }
 }
 

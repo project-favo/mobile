@@ -745,6 +745,7 @@ class _ChatDetailPageState extends State<ChatDetailPage>
                               if (_shouldShowDateSeparator(index))
                                 _DateSeparator(label: _formatDateLabel(m.createdAt)),
                               _SwipeableMessageRow(
+                                isFromMe: isMine,
                                 timeLabel: _formatTimeLabel(m.createdAt),
                                 bottomMargin: isLastInGroup
                                     ? AppSpacing.medium
@@ -894,11 +895,14 @@ class _SwipeableMessageRow extends StatefulWidget {
   final Widget child;
   final String timeLabel;
   final double bottomMargin;
+  /// Kendi mesajlarında sola kaydırınca sağda saat; karşı mesajlarda sağa kaydırınca solda saat.
+  final bool isFromMe;
 
   const _SwipeableMessageRow({
     required this.child,
     required this.timeLabel,
     required this.bottomMargin,
+    required this.isFromMe,
   });
 
   @override
@@ -931,7 +935,11 @@ class _SwipeableMessageRowState extends State<_SwipeableMessageRow>
   void _onDragUpdate(DragUpdateDetails d) {
     _snapCtrl.stop();
     setState(() {
-      _offset = (_offset + d.delta.dx).clamp(-_maxDrag, 0.0);
+      if (widget.isFromMe) {
+        _offset = (_offset + d.delta.dx).clamp(-_maxDrag, 0.0);
+      } else {
+        _offset = (_offset + d.delta.dx).clamp(0.0, _maxDrag);
+      }
     });
   }
 
@@ -945,7 +953,15 @@ class _SwipeableMessageRowState extends State<_SwipeableMessageRow>
 
   @override
   Widget build(BuildContext context) {
-    final opacity = (-_offset / _maxDrag).clamp(0.0, 1.0);
+    final opacity = widget.isFromMe
+        ? (-_offset / _maxDrag).clamp(0.0, 1.0)
+        : (_offset / _maxDrag).clamp(0.0, 1.0);
+    final stackAlign =
+        widget.isFromMe ? Alignment.centerRight : Alignment.centerLeft;
+    final timePadding = widget.isFromMe
+        ? const EdgeInsets.only(right: 6, bottom: 2)
+        : const EdgeInsets.only(left: 6, bottom: 2);
+
     return GestureDetector(
       onHorizontalDragUpdate: _onDragUpdate,
       onHorizontalDragEnd: _onDragEnd,
@@ -954,13 +970,12 @@ class _SwipeableMessageRowState extends State<_SwipeableMessageRow>
       child: SizedBox(
         width: double.infinity,
         child: Stack(
-          alignment: Alignment.centerRight,
+          alignment: stackAlign,
           children: [
-            // Timestamp: sola kaydırdıkça sağda belirir
             Opacity(
               opacity: opacity,
               child: Padding(
-                padding: const EdgeInsets.only(right: 6, bottom: 2),
+                padding: timePadding,
                 child: Text(
                   widget.timeLabel,
                   style: const TextStyle(
@@ -971,7 +986,6 @@ class _SwipeableMessageRowState extends State<_SwipeableMessageRow>
                 ),
               ),
             ),
-            // Mesaj satırı sola kayar
             Padding(
               padding: EdgeInsets.only(bottom: widget.bottomMargin),
               child: Transform.translate(

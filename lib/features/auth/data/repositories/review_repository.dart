@@ -4,6 +4,7 @@ import '../../../../core/cache/product_review_notification_horizon_prefs.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/utils/entity_active.dart';
 import '../../../../core/utils/exceptions.dart';
+import '../models/my_reviews_page_result_dto.dart';
 import '../models/review_dto.dart';
 
 bool _dioMeansReviewAlreadyReported(DioException e) {
@@ -31,21 +32,47 @@ class ReviewRepository {
   static const String reviewSortLowestRating = 'lowest_rating';
   static const String reviewSortTopFollowerAuthor = 'top_follower_author';
 
-  /// Giriş yapan kullanıcının kendi yorumları - GET /api/reviews/me
-  /// Token zorunlu.
-  Future<List<ReviewDto>> getMyReviews(String firebaseIdToken) async {
+  /// Giriş yapan kullanıcının kendi yorumları — GET /api/reviews/me?page=&size=&sort=
+  /// Token zorunlu. Sunucu Spring [Page] JSON döner.
+  Future<MyReviewsPageResultDto> getMyReviewsPage(
+    String firebaseIdToken, {
+    int page = 0,
+    int size = 20,
+    /// Örn. [reviewSortNewest] → `createdAt,desc`, en eski için `createdAt,asc`
+    String? sortParam,
+  }) async {
     try {
       _apiClient.setAuthToken(firebaseIdToken);
-      final response = await _apiClient.dio.get('/api/reviews/me');
+      final response = await _apiClient.dio.get(
+        '/api/reviews/me',
+        queryParameters: <String, dynamic>{
+          'page': page,
+          'size': size,
+          if (sortParam != null && sortParam.isNotEmpty) 'sort': sortParam,
+        },
+      );
 
-      if (response.data is List) {
-        final list = (response.data as List)
-            .map((json) => ReviewDto.fromJson(json as Map<String, dynamic>))
-            .toList();
-        return filterVisibleReviews(list);
+      if (response.data is Map<String, dynamic>) {
+        final raw = MyReviewsPageResultDto.fromJson(
+          response.data as Map<String, dynamic>,
+        );
+        final filtered = filterVisibleReviews(raw.content);
+        return MyReviewsPageResultDto(
+          content: filtered,
+          totalElements: raw.totalElements,
+          totalPages: raw.totalPages,
+          size: raw.size,
+          number: raw.number,
+        );
       }
 
-      return [];
+      return MyReviewsPageResultDto(
+        content: const [],
+        totalElements: 0,
+        totalPages: 0,
+        size: 0,
+        number: 0,
+      );
     } on DioException catch (e) {
       if (e.response != null) {
         final errorData = e.response?.data;

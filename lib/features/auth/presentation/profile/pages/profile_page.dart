@@ -40,7 +40,6 @@ import '../../../../../core/widgets/custom_snack_bar.dart';
 import '../../../../../core/widgets/app_button.dart';
 import '../../../../../core/utils/in_flight_id_lock.dart';
 import '../../../../../core/utils/product_report_storage.dart';
-import '../../../../../core/utils/app_datetime.dart';
 import '../../../../../core/utils/resolve_media_url.dart';
 import '../../../../../core/utils/review_report_storage.dart';
 import '../../../../../routes/app_routes.dart';
@@ -84,7 +83,14 @@ class _ProfilePageState extends State<ProfilePage>
   /// [getHomeFeed] ilk sayfada (size 50) yok: vitrin/feed dışı ürün (askı ile uyumlu, görsel+prefetch ile birleşince güvenilir).
   final Set<String> _myReviewProductIdsNotOnHomeFirstPage = {};
   bool _isLoadingMyReviews = false;
+  bool _isMyReviewsPageSwitching = false;
   String? _myReviewsError;
+  static const int _myReviewsPageSize = 5;
+  int _myReviewsServerTotal = 0;
+  int _myReviewsCurrentPageIndex = 0;
+  int _myReviewsTotalPages = 0;
+  final Map<int, List<ReviewDto>> _myReviewsPageCache = {};
+  final Set<int> _myReviewsPrefetchInFlightPages = {};
   String _selectedDateSort = 'Newest';
   int _followerCount = 0;
   int _followingCount = 0;
@@ -99,6 +105,7 @@ class _ProfilePageState extends State<ProfilePage>
     ProfileWarmCache.instance.remember(
       user: _user!,
       myReviews: _myReviews,
+      myReviewsServerTotal: _myReviewsServerTotal,
       wishlist: _wishlistProducts,
       reviewProductHints: _reviewProductHints,
       followerCount: _followerCount,
@@ -171,6 +178,12 @@ class _ProfilePageState extends State<ProfilePage>
       _user = warm.user;
       _cachedProfilePhotoBytes = decodeProfilePhotoBytes(warm.user.profilePhotoData);
       _myReviews = List<ReviewDto>.from(warm.myReviews);
+      _myReviewsServerTotal = warm.myReviewsServerTotal ?? warm.myReviews.length;
+      _myReviewsCurrentPageIndex = 0;
+      _myReviewsTotalPages =
+          ((_myReviewsServerTotal + _myReviewsPageSize - 1) ~/ _myReviewsPageSize)
+              .clamp(0, 999999);
+      _myReviewsPageCache[0] = List<ReviewDto>.from(warm.myReviews);
       _wishlistProducts = List<ProductDto>.from(warm.wishlist);
       _wishlistProductsOriginalOrder = List<ProductDto>.from(warm.wishlist);
       _reviewProductHints.addAll(warm.reviewProductHints);
@@ -180,7 +193,6 @@ class _ProfilePageState extends State<ProfilePage>
       // My Reviews: zenginleştirme bitene kadar iskelet — "önce normal sonra askı" titremesin
       _isLoadingMyReviews = true;
       _isLoadingWishlist = false;
-      _sortMyReviews();
       _sortWishlist();
       // Sıcak önbellek varken _loadUserData atla — getMe() avatar titremeye neden oluyor.
       // Sadece follower sayılarını ve içerikleri arka planda tazele.
@@ -216,19 +228,111 @@ class _ProfilePageState extends State<ProfilePage>
     });
   }
 
+  String _myReviewsSortApiParam() =>
+      _selectedDateSort == 'Oldest' ? 'createdAt,asc' : 'createdAt,desc';
+
+  Future<void> _precacheMyReviewThumbnails(List<ReviewDto> reviews) async {
+    if (!mounted || reviews.isEmpty) return;
+    final urls = <String>{};
+    for (final r in reviews) {
+      final p = _reviewProductHints[r.productId];
+      final resolved = resolveMediaUrl(p?.imageURL);
+      if (resolved != null && resolved.isNotEmpty) {
+        urls.add(resolved);
+      }
+    }
+    if (urls.isEmpty) return;
+    final tasks = urls.take(8).map((u) async {
+      try {
+        await precacheImage(NetworkImage(u), context);
+      } catch (_) {}
+    });
+    await Future.wait(tasks);
+  }
+
+  Future<void> _prefetchNeighborMyReviewsPages(
+    int currentPage,
+    String token,
+  ) async {
+    if (_myReviewsTotalPages <= 1) return;
+    final candidates = <int>{currentPage - 1, currentPage + 1}
+      ..removeWhere((p) => p < 0 || p >= _myReviewsTotalPages);
+    for (final p in candidates) {
+      if (_myReviewsPageCache.containsKey(p)) continue;
+      if (_myReviewsPrefetchInFlightPages.contains(p)) continue;
+      _myReviewsPrefetchInFlightPages.add(p);
+      unawaited(() async {
+        try {
+          final page = await _reviewRepository.getMyReviewsPage(
+            token,
+            page: p,
+            size: _myReviewsPageSize,
+            sortParam: _myReviewsSortApiParam(),
+          );
+          if (!mounted) return;
+          final reviews = page.content;
+          _myReviewsPageCache[p] = List<ReviewDto>.from(reviews);
+          final pre = await _prefetchProductHintsData(reviews, token);
+          if (!mounted) return;
+          for (final e in pre.hints.entries) {
+            _reviewProductHints[e.key] = e.value;
+          }
+          _unlistedProductIdsFromFailedFetch.addAll(pre.unlisted404);
+          await _precacheMyReviewThumbnails(reviews);
+        } catch (_) {
+        } finally {
+          _myReviewsPrefetchInFlightPages.remove(p);
+        }
+      }());
+    }
+  }
+
   /// [refreshProductState] true: aşağı çek; ipuçları + [ProductMemoryCache] setState’te temizlenir, sonra
   /// tek pasotta zenginleştirme taze sinyal uygular.
   /// [waitForEnrichment] true: prefetch + ana sayfa + reported bitene kadar iskelet (ilk açılış / pull titremesin).
-  /// Arka plan (5 sn poll): parça parça setState olmadan tek birleşik zenginleştirme — eski [ProductDto]
-  /// (vitrin dışı + eski URL) askıyı tespit etmeyi geciktirmesin.
+  /// [targetPageIndex] verilirse o sayfa çekilir (0 tabanlı).
   Future<void> _loadMyReviews({
     bool background = false,
     bool refreshProductState = false,
     bool waitForEnrichment = false,
+    int? targetPageIndex,
   }) async {
+    if (refreshProductState) {
+      _myReviewsPageCache.clear();
+      _myReviewsPrefetchInFlightPages.clear();
+    }
+    final isPageChangeRequest =
+        targetPageIndex != null && targetPageIndex != _myReviewsCurrentPageIndex;
+    final requestedPage = targetPageIndex ?? _myReviewsCurrentPageIndex;
+    if (isPageChangeRequest) {
+      final cached = _myReviewsPageCache[requestedPage];
+      if (cached != null) {
+        setState(() {
+          _myReviews = List<ReviewDto>.from(cached);
+          _myReviewsCurrentPageIndex = requestedPage;
+          _isMyReviewsPageSwitching = false;
+          _myReviewsError = null;
+        });
+        // Kullanıcı anında sayfayı görsün; sunucu gerçeğini arka planda yenileriz.
+        unawaited(
+          _loadMyReviews(
+            background: true,
+            refreshProductState: false,
+            waitForEnrichment: false,
+            targetPageIndex: requestedPage,
+          ),
+        );
+        return;
+      }
+    }
     final blockFirstPaint = !background || waitForEnrichment;
 
-    if (!background) {
+    if (isPageChangeRequest) {
+      setState(() {
+        _isMyReviewsPageSwitching = true;
+        _myReviewsError = null;
+      });
+    } else if (!background) {
       setState(() {
         _isLoadingMyReviews = true;
         _myReviewsError = null;
@@ -243,8 +347,45 @@ class _ProfilePageState extends State<ProfilePage>
         throw Exception('Please log in to see your reviews.');
       }
 
-      final reviews = await _reviewRepository.getMyReviews(token);
+      final nextPage = targetPageIndex ?? _myReviewsCurrentPageIndex;
+      final safePage = nextPage < 0 ? 0 : nextPage;
+
+      final page = await _reviewRepository.getMyReviewsPage(
+        token,
+        page: safePage,
+        size: _myReviewsPageSize,
+        sortParam: _myReviewsSortApiParam(),
+      );
       if (!mounted) return;
+
+      final reviews = page.content;
+      final totalPages = page.totalPages;
+      _myReviewsPageCache[safePage] = List<ReviewDto>.from(reviews);
+
+      if (isPageChangeRequest) {
+        final pids =
+            reviews.map((r) => r.productId).where((s) => s.isNotEmpty).toSet();
+        final pre = await _prefetchProductHintsData(reviews, token);
+        if (!mounted) return;
+        setState(() {
+          _myReviews = List<ReviewDto>.from(reviews);
+          _myReviewsServerTotal = page.totalElements;
+          _myReviewsCurrentPageIndex = reviews.isEmpty ? 0 : page.number;
+          _myReviewsTotalPages = totalPages;
+          _isMyReviewsPageSwitching = false;
+          for (final e in pre.hints.entries) {
+            _reviewProductHints[e.key] = e.value;
+          }
+          _unlistedProductIdsFromFailedFetch
+            ..removeWhere((id) => pids.contains(id))
+            ..addAll(pre.unlisted404);
+        });
+        _rememberWarmProfile();
+        unawaited(_precacheMyReviewThumbnails(reviews));
+        unawaited(_reconcileMyReviewsEnrichment(reviews, token));
+        unawaited(_prefetchNeighborMyReviewsPages(page.number, token));
+        return;
+      }
 
       if (blockFirstPaint) {
         final pids =
@@ -260,8 +401,12 @@ class _ProfilePageState extends State<ProfilePage>
         final enrich = await _enrichMyReviewsData(reviews, token);
         if (!mounted) return;
         setState(() {
-          _myReviews = _orderMyReviewsList(reviews);
+          _myReviews = List<ReviewDto>.from(reviews);
+          _myReviewsServerTotal = page.totalElements;
+          _myReviewsCurrentPageIndex = reviews.isEmpty ? 0 : page.number;
+          _myReviewsTotalPages = totalPages;
           _isLoadingMyReviews = false;
+          _isMyReviewsPageSwitching = false;
           for (final e in enrich.hints.entries) {
             _reviewProductHints[e.key] = e.value;
           }
@@ -274,12 +419,18 @@ class _ProfilePageState extends State<ProfilePage>
             ..addAll(enrich.reportedIds);
         });
         _rememberWarmProfile();
+        unawaited(_precacheMyReviewThumbnails(reviews));
+        unawaited(_prefetchNeighborMyReviewsPages(page.number, token));
         return;
       }
 
       setState(() {
-        _myReviews = reviews;
+        _myReviews = List<ReviewDto>.from(reviews);
+        _myReviewsServerTotal = page.totalElements;
+        _myReviewsCurrentPageIndex = reviews.isEmpty ? 0 : page.number;
+        _myReviewsTotalPages = totalPages;
         _isLoadingMyReviews = false;
+        _isMyReviewsPageSwitching = false;
         final pids =
             reviews.map((r) => r.productId).where((s) => s.isNotEmpty).toSet();
         if (!background || refreshProductState) {
@@ -291,42 +442,27 @@ class _ProfilePageState extends State<ProfilePage>
           _myReviewProductIdsNotOnHomeFirstPage.clear();
           _productIdsReportedByMeFromServer.clear();
         } else {
-          _reviewProductHints.removeWhere((k, _) => !pids.contains(k));
+          // Hint cache'i koru: sayfalar arası geçişte görseller anında gelsin.
         }
       });
       _rememberWarmProfile();
-      _sortMyReviews();
-      unawaited(_reconcileMyReviewsEnrichment(reviews, token));
+      unawaited(_precacheMyReviewThumbnails(reviews));
+      unawaited(_prefetchNeighborMyReviewsPages(page.number, token));
+      if (!isPageChangeRequest) {
+        unawaited(_reconcileMyReviewsEnrichment(reviews, token));
+      }
     } catch (e) {
-      if (mounted) {
-        if (background && _myReviews.isNotEmpty) {
-          _isLoadingMyReviews = false;
-          return;
-        }
-        setState(() {
-          _myReviewsError = ErrorHandler.getUserFriendlyMessage(e);
-          _isLoadingMyReviews = false;
-        });
+      if (!mounted) return;
+      if (background && _myReviews.isNotEmpty && !isPageChangeRequest) {
+        setState(() => _isLoadingMyReviews = false);
+        return;
       }
+      setState(() {
+        _myReviewsError = ErrorHandler.getUserFriendlyMessage(e);
+        _isLoadingMyReviews = false;
+        _isMyReviewsPageSwitching = false;
+      });
     }
-  }
-
-  List<ReviewDto> _orderMyReviewsList(List<ReviewDto> source) {
-    if (source.isEmpty) return source;
-    final sorted = List<ReviewDto>.from(source);
-    sorted.sort((a, b) {
-      final da =
-          parseBackendDateTimeToLocal(a.createdAt) ??
-          DateTime.fromMillisecondsSinceEpoch(0);
-      final db =
-          parseBackendDateTimeToLocal(b.createdAt) ??
-          DateTime.fromMillisecondsSinceEpoch(0);
-      if (_selectedDateSort == 'Newest') {
-        return db.compareTo(da);
-      }
-      return da.compareTo(db);
-    });
-    return sorted;
   }
 
   Future<({
@@ -501,12 +637,13 @@ class _ProfilePageState extends State<ProfilePage>
         isNotListedImpliedByEmptyProductImage(hint.imageURL)) {
       return true;
     }
-    // Ana sayfada (ilk 50) yok + görsel yok/prefetch yok: askıdaki ürün tipik örüntü
+    // Ana sayfada (ilk 50) yok sinyalini sadece hint de geldiyse uygula.
+    // Hint henüz yokken satırı gizlemek, sayfa değişiminde "No reviews yet" flash'ı yapıyordu.
     if (_myReviewProductIdsNotOnHomeFirstPage.contains(
           review.productId,
         ) &&
-        (hint == null ||
-            isNotListedImpliedByEmptyProductImage(hint.imageURL))) {
+        hint != null &&
+        isNotListedImpliedByEmptyProductImage(hint.imageURL)) {
       return true;
     }
     return false;
@@ -551,6 +688,17 @@ class _ProfilePageState extends State<ProfilePage>
       if (!mounted || !ok) return;
       setState(() {
         _myReviews.removeWhere((r) => r.id == review.id);
+        if (_myReviewsServerTotal > 0) {
+          _myReviewsServerTotal -= 1;
+        }
+        _myReviewsTotalPages =
+            ((_myReviewsServerTotal + _myReviewsPageSize - 1) ~/ _myReviewsPageSize)
+                .clamp(0, 999999);
+        if (_myReviewsCurrentPageIndex >= _myReviewsTotalPages &&
+            _myReviewsTotalPages > 0) {
+          _myReviewsCurrentPageIndex = _myReviewsTotalPages - 1;
+        }
+        _myReviewsPageCache.clear();
       });
       ReviewMemoryCache.instance.removeReviewFromProduct(
         review.productId,
@@ -563,7 +711,7 @@ class _ProfilePageState extends State<ProfilePage>
   }
 
   Widget _buildMyReviewsTab() {
-    if (_isLoadingMyReviews) {
+    if (_isLoadingMyReviews && _myReviews.isEmpty) {
       return Column(
         children: [
           const ReviewCardSkeleton(),
@@ -602,56 +750,170 @@ class _ProfilePageState extends State<ProfilePage>
         ),
       );
     }
-    return ListView.separated(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
-      itemCount: visibleMyReviews.length,
-      separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.medium),
-      itemBuilder: (context, index) {
-        final review = visibleMyReviews[index];
-        final hint = _reviewProductHints[review.productId];
-        final youReportedReview = ReviewReportStorage.hasReportedSync(
-          review.id,
-        );
-        final youReportedProduct =
-            ProductReportStorage.hasReportedSync(review.productId) ||
-            _productIdsReportedByMeFromServer.contains(review.productId);
-        return ProfileReviewRowCard(
-          key: ValueKey(review.id),
-          review: review,
-          productImageUrl: hint?.imageURL,
-          youReportedThisReview: youReportedReview,
-          youReportedThisProduct: youReportedProduct,
-          onDelete: () => _onDeleteMyReview(review),
-          onTap: () async {
-            final cached =
-                ProductMemoryCache.instance.peek(review.productId) ??
-                _reviewProductHints[review.productId];
-            final product = _productForReviewDetail(review, cached);
-            final result = await Navigator.push<dynamic>(
-              context,
-              SlideRightRoute(
-                page: ReviewDetailPage(
-                  review: review,
-                  product: product,
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+          itemCount: visibleMyReviews.length,
+          separatorBuilder: (_, __) =>
+              const SizedBox(height: AppSpacing.medium),
+          itemBuilder: (context, index) {
+            final review = visibleMyReviews[index];
+            final hint = _reviewProductHints[review.productId];
+            final youReportedReview = ReviewReportStorage.hasReportedSync(
+              review.id,
+            );
+            final youReportedProduct =
+                ProductReportStorage.hasReportedSync(review.productId) ||
+                _productIdsReportedByMeFromServer.contains(review.productId);
+            return ProfileReviewRowCard(
+              key: ValueKey(review.id),
+              review: review,
+              productImageUrl: hint?.imageURL,
+              youReportedThisReview: youReportedReview,
+              youReportedThisProduct: youReportedProduct,
+              onDelete: () => _onDeleteMyReview(review),
+              onTap: () async {
+                final cached =
+                    ProductMemoryCache.instance.peek(review.productId) ??
+                    _reviewProductHints[review.productId];
+                final product = _productForReviewDetail(review, cached);
+                final result = await Navigator.push<dynamic>(
+                  context,
+                  SlideRightRoute(
+                    page: ReviewDetailPage(
+                      review: review,
+                      product: product,
+                    ),
+                  ),
+                );
+                if (!mounted) return;
+                if (result == ReviewDeleteFlow.popResultDeleted) {
+                  setState(() {
+                    _myReviews.removeWhere((r) => r.id == review.id);
+                    if (_myReviewsServerTotal > 0) {
+                      _myReviewsServerTotal -= 1;
+                    }
+                    _myReviewsTotalPages = ((_myReviewsServerTotal +
+                                _myReviewsPageSize -
+                                1) ~/
+                            _myReviewsPageSize)
+                        .clamp(0, 999999);
+                    if (_myReviewsCurrentPageIndex >= _myReviewsTotalPages &&
+                        _myReviewsTotalPages > 0) {
+                      _myReviewsCurrentPageIndex = _myReviewsTotalPages - 1;
+                    }
+                    _myReviewsPageCache.clear();
+                  });
+                  ReviewMemoryCache.instance.removeReviewFromProduct(
+                    review.productId,
+                    review.id,
+                  );
+                  _rememberWarmProfile();
+                }
+              },
+            );
+          },
+        ),
+        if (_myReviewsTotalPages > 1)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.xLarge,
+              AppSpacing.small,
+              AppSpacing.xLarge,
+              AppSpacing.large,
+            ),
+            child: _buildMyReviewsPagination(),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildMyReviewsPagination() {
+    final current = _myReviewsCurrentPageIndex + 1; // UI 1-based
+    final total = _myReviewsTotalPages;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          TextButton(
+            onPressed: current > 1
+                ? (_isMyReviewsPageSwitching
+                    ? null
+                    : () => unawaited(
+                          _loadMyReviews(
+                            background: true,
+                            targetPageIndex: _myReviewsCurrentPageIndex - 1,
+                          ),
+                        ))
+                : null,
+            child: const Text('Prev'),
+          ),
+          if (_isMyReviewsPageSwitching)
+            const Padding(
+              padding: EdgeInsets.only(right: 8),
+              child: SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.8,
+                  color: AppColors.primary,
+                ),
+              ),
+            ),
+          ...List.generate(total, (i) {
+            final pageNo = i + 1;
+            final selected = pageNo == current;
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              child: OutlinedButton(
+                onPressed: (selected || _isMyReviewsPageSwitching)
+                    ? null
+                    : () => unawaited(
+                          _loadMyReviews(
+                            background: true,
+                            targetPageIndex: i,
+                          ),
+                        ),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(36, 34),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  backgroundColor:
+                      selected ? AppColors.primary : Colors.transparent,
+                  side: BorderSide(
+                    color: selected ? AppColors.primary : AppColors.border,
+                  ),
+                ),
+                child: Text(
+                  '$pageNo',
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: selected ? Colors.white : AppColors.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             );
-            if (!mounted) return;
-            if (result == ReviewDeleteFlow.popResultDeleted) {
-              setState(() {
-                _myReviews.removeWhere((r) => r.id == review.id);
-              });
-              ReviewMemoryCache.instance.removeReviewFromProduct(
-                review.productId,
-                review.id,
-              );
-              _rememberWarmProfile();
-            }
-          },
-        );
-      },
+          }),
+          TextButton(
+            onPressed: current < total
+                ? (_isMyReviewsPageSwitching
+                    ? null
+                    : () => unawaited(
+                          _loadMyReviews(
+                            background: true,
+                            targetPageIndex: _myReviewsCurrentPageIndex + 1,
+                          ),
+                        ))
+                : null,
+            child: const Text('Next'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1062,25 +1324,6 @@ class _ProfilePageState extends State<ProfilePage>
     setState(() {});
   }
 
-  void _sortMyReviews() {
-    if (_myReviews.isEmpty) return;
-    final sorted = List<ReviewDto>.from(_myReviews);
-    sorted.sort((a, b) {
-      final da =
-          parseBackendDateTimeToLocal(a.createdAt) ??
-          DateTime.fromMillisecondsSinceEpoch(0);
-      final db =
-          parseBackendDateTimeToLocal(b.createdAt) ??
-          DateTime.fromMillisecondsSinceEpoch(0);
-      if (_selectedDateSort == 'Newest') {
-        return db.compareTo(da);
-      }
-      return da.compareTo(db);
-    });
-    _myReviews = sorted;
-    setState(() {});
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -1322,7 +1565,9 @@ class _ProfilePageState extends State<ProfilePage>
                   ),
                   Expanded(
                     child: _StatItem(
-                      count: _myReviewsVisibleInTab().length,
+                      count: _myReviewsServerTotal > 0
+                          ? _myReviewsServerTotal
+                          : _myReviewsVisibleInTab().length,
                       label: 'Reviews',
                     ),
                   ),
@@ -1384,9 +1629,19 @@ class _ProfilePageState extends State<ProfilePage>
                     value: _selectedDateSort,
                     onChanged: (value) {
                       if (value == null) return;
-                      setState(() => _selectedDateSort = value);
+                      setState(() {
+                        _selectedDateSort = value;
+                        _myReviewsCurrentPageIndex = 0;
+                        _myReviewsPageCache.clear();
+                      });
                       if (_tabController.index == 0) {
-                        _sortMyReviews();
+                        unawaited(
+                          _loadMyReviews(
+                            background: true,
+                            refreshProductState: true,
+                            targetPageIndex: 0,
+                          ),
+                        );
                       } else {
                         _sortWishlist();
                       }
@@ -1402,7 +1657,7 @@ class _ProfilePageState extends State<ProfilePage>
               _buildWishlistTab(),
             const SizedBox(height: AppSpacing.xxLarge),
           ],
-        ),
+          ),
         ),
       ),
       bottomNavigationBar: _buildBottomNavigationBar(),

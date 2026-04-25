@@ -125,6 +125,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   bool _showScrollToTop = false;
   double? _pendingRestoreOffset;
   int _restoreScrollAttemptsLeft = 0;
+  String _homeViewStateUserId = '';
 
   Route _noAnimationRoute(Widget page) {
     return PageRouteBuilder(
@@ -139,6 +140,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final offset = _scrollController.offset;
     if (_filteredProducts.isEmpty) return;
     HomeViewStateCache.instance.set(
+      _homeViewStateUserId,
       HomeViewState(
         products: _filteredProducts,
         currentPage: _currentPage,
@@ -224,7 +226,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   @override
   void initState() {
     super.initState();
-    final viewSnap = HomeViewStateCache.instance.peek();
+    _homeViewStateUserId = CurrentUserCache.instance.userId?.trim() ?? '';
+    final viewSnap = HomeViewStateCache.instance.peek(_homeViewStateUserId);
     _scrollController = ScrollController(
       initialScrollOffset: viewSnap?.scrollOffset ?? 0.0,
     );
@@ -1890,6 +1893,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         likeCount: likeCount,
         reviewCount: rc,
         rating: computedRating,
+        hasPhotoReview: anyVisibleReviewHasPhoto(visible),
       );
       if (!mounted) return;
       setState(() {
@@ -2369,27 +2373,25 @@ class _SubChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final displayTitle = _formatCategoryLabel(title);
-    return GestureDetector(
+    final textColor = selected ? AppColors.textPrimary : AppColors.textSecondary;
+    final underlineColor = selected
+        ? AppColors.primary.withValues(alpha: 0.9)
+        : AppColors.textSecondary.withValues(alpha: 0.35);
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        curve: Curves.easeOut,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-        decoration: BoxDecoration(
-          color: selected ? iconColor : iconColor.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: selected ? iconColor : iconColor.withValues(alpha: 0.3),
-            width: 1.1,
-          ),
-        ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         child: Text(
           displayTitle,
           style: TextStyle(
-            color: selected ? Colors.white : iconColor,
-            fontSize: 12,
+            color: textColor,
+            fontSize: 13,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
             letterSpacing: 0.1,
+            decoration: TextDecoration.underline,
+            decorationColor: underlineColor,
+            decorationThickness: selected ? 2.2 : 1.0,
           ),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,

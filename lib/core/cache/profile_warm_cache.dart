@@ -5,6 +5,8 @@ import '../../features/auth/data/models/user_response_dto.dart';
 class ProfileWarmSnapshot {
   final UserResponseDto user;
   final List<ReviewDto> myReviews;
+  /// Sunucu toplam yorum sayısı (sayfalı /api/reviews/me); null → eski önbellek.
+  final int? myReviewsServerTotal;
   final List<ProductDto> wishlist;
   final Map<String, ProductDto> reviewProductHints;
   final int followerCount;
@@ -13,6 +15,7 @@ class ProfileWarmSnapshot {
   const ProfileWarmSnapshot({
     required this.user,
     required this.myReviews,
+    this.myReviewsServerTotal,
     required this.wishlist,
     this.reviewProductHints = const {},
     this.followerCount = 0,
@@ -32,6 +35,7 @@ class ProfileWarmCache {
   void remember({
     required UserResponseDto user,
     required List<ReviewDto> myReviews,
+    int? myReviewsServerTotal,
     required List<ProductDto> wishlist,
     Map<String, ProductDto> reviewProductHints = const {},
     int followerCount = 0,
@@ -40,6 +44,7 @@ class ProfileWarmCache {
     _snapshot = ProfileWarmSnapshot(
       user: user,
       myReviews: List<ReviewDto>.from(myReviews),
+      myReviewsServerTotal: myReviewsServerTotal,
       wishlist: List<ProductDto>.from(wishlist),
       reviewProductHints: Map<String, ProductDto>.from(reviewProductHints),
       followerCount: followerCount,

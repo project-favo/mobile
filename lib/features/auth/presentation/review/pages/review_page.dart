@@ -618,6 +618,49 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
         .trim();
   }
 
+  /// E-ticaret tarzı minimal kategori yolu (Trendyol / Amazon breadcrumb hissi).
+  Widget _buildProductCategoryBreadcrumb() {
+    final segments = _productTagHierarchy();
+    if (segments.isEmpty) return const SizedBox.shrink();
+
+    return Semantics(
+      label: 'Category: ${segments.join(' → ')}',
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < segments.length; i++) ...[
+            if (i > 0) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: AppColors.hint.withValues(alpha: 0.9),
+                ),
+              ),
+            ],
+            Text(
+              segments[i],
+              style: AppTextStyles.bodySmall.copyWith(
+                color: i == segments.length - 1
+                    ? AppColors.textPrimary
+                    : AppColors.textSecondary,
+                fontWeight:
+                    i == segments.length - 1 ? FontWeight.w600 : FontWeight.w500,
+                fontSize: 12.5,
+                height: 1.2,
+                letterSpacing: 0.01,
+              ),
+            ),
+          ],
+        ],
+        ),
+      ),
+    );
+  }
+
   bool _shouldShowDescriptionToggle({
     required String text,
     required TextStyle style,
@@ -1769,41 +1812,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                           ),
                         ),
                         const SizedBox(height: AppSpacing.medium),
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children:
-                                _productTagHierarchy().map((tag) {
-                                  return Padding(
-                                    padding: const EdgeInsets.only(right: 6),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 10,
-                                        vertical: 5,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: AppColors.background,
-                                        borderRadius: BorderRadius.circular(999),
-                                        border: Border.all(
-                                          color: AppColors.border.withValues(
-                                            alpha: 0.9,
-                                          ),
-                                        ),
-                                      ),
-                                      child: Text(
-                                        tag,
-                                        style: AppTextStyles.bodySmall.copyWith(
-                                          color: AppColors.textSecondary,
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 13,
-                                          letterSpacing: 0.1,
-                                        ),
-                                      ),
-                                    ),
-                                  );
-                                }).toList(),
-                          ),
-                        ),
+                        _buildProductCategoryBreadcrumb(),
                         const SizedBox(height: AppSpacing.small),
                         if ((_currentProduct.description ?? '').trim().isEmpty)
                           Text(
