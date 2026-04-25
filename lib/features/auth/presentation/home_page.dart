@@ -29,6 +29,7 @@ import '../../../features/activity/data/friends_feed_repository.dart';
 import '../../../features/activity/data/friends_feed_dto.dart';
 import '../../../features/activity/data/friends_feed_activity_mapper.dart';
 import '../widgets/product_card.dart';
+import '../../../core/widgets/custom_snack_bar.dart';
 import 'messages/conversation_list_page.dart';
 import 'messages/ai_chat_page.dart';
 import 'search_page.dart';
@@ -463,7 +464,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     return out;
   }
 
-  /// Ürün kartı arkadaş baloncuğu: review/like; kullanıcı [user.id] ile tekilleştir (ortak URL).
+  /// Ürün kartı arkadaş baloncuğu: sadece review bırakan takip edilen kullanıcılar.
   /// Taze harita [_kMaxFriendReviewBubblesPerProduct] ile sınırlanır; birleşik sırada en fazla [_kMaxFriendLikerKeysPerProduct].
   Map<String, List<String>> _buildFriendLikersMapForItems(
     Iterable<ActivityItem> source,
@@ -472,8 +473,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final seenKeysByProduct = <String, Set<String>>{};
     for (final item in source) {
       if (item.isActorInactive) continue;
-      // Review veya ürün beğenisi: arkadaş feed’inde tip farklı gelebiliyor; ikisini de göster.
-      if (item.type != ActivityType.review && item.type != ActivityType.like) {
+      if (item.type != ActivityType.review) {
         continue;
       }
       final productId = item.targetContent?.productId;
@@ -796,14 +796,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _isFiltering = false;
         _filteredProducts = [];
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
+      CustomSnackBar.show(
+        context,
+        message:
             'Failed to load products: ${ErrorHandler.getUserFriendlyMessage(e)}',
-          ),
-          backgroundColor: AppColors.error,
-          duration: const Duration(seconds: 3),
-        ),
+        variant: CustomSnackBarVariant.error,
+        duration: const Duration(seconds: 3),
       );
     }
   }
@@ -916,11 +914,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               final messenger = ScaffoldMessenger.of(context);
               final user = FirebaseAuth.instance.currentUser;
               if (user == null) {
-                messenger.showSnackBar(
-                  const SnackBar(
-                    content: Text('Please login to like products'),
-                    backgroundColor: AppColors.error,
-                  ),
+                CustomSnackBar.showWithMessenger(
+                  messenger,
+                  message: 'Please login to like products',
+                  variant: CustomSnackBarVariant.error,
                 );
                 return;
               }
@@ -974,11 +971,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                     });
                   }
                   if (mounted) {
-                    messenger.showSnackBar(
-                      SnackBar(
-                        content: Text(ErrorHandler.getUserFriendlyMessage(e)),
-                        backgroundColor: AppColors.error,
-                      ),
+                    CustomSnackBar.showWithMessenger(
+                      messenger,
+                      message: ErrorHandler.getUserFriendlyMessage(e),
+                      variant: CustomSnackBarVariant.error,
                     );
                   }
                 }
@@ -1124,11 +1120,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 final messenger = ScaffoldMessenger.of(context);
                 final user = FirebaseAuth.instance.currentUser;
                 if (user == null) {
-                  messenger.showSnackBar(
-                    const SnackBar(
-                      content: Text('Please login to like products'),
-                      backgroundColor: AppColors.error,
-                    ),
+                  CustomSnackBar.showWithMessenger(
+                    messenger,
+                    message: 'Please login to like products',
+                    variant: CustomSnackBarVariant.error,
                   );
                   return;
                 }
@@ -1186,11 +1181,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                       });
                     }
                     if (mounted) {
-                      messenger.showSnackBar(
-                        SnackBar(
-                          content: Text(ErrorHandler.getUserFriendlyMessage(e)),
-                          backgroundColor: AppColors.error,
-                        ),
+                      CustomSnackBar.showWithMessenger(
+                        messenger,
+                        message: ErrorHandler.getUserFriendlyMessage(e),
+                        variant: CustomSnackBarVariant.error,
                       );
                     }
                   }

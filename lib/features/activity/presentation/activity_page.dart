@@ -16,6 +16,7 @@ import '../../../core/utils/content_unavailable_dialog.dart';
 import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/exceptions.dart';
 import '../../../core/widgets/feed_screen_tab_bar.dart';
+import '../../../core/widgets/custom_snack_bar.dart';
 import '../../../core/utils/session_helper.dart';
 import '../../../core/utils/user_profile_navigation.dart';
 import '../../../core/widgets/main_bottom_nav_items.dart';
@@ -327,11 +328,10 @@ class _ActivityPageState extends State<ActivityPage>
       if (_activitySuggestProductOrReviewGone(e)) {
         await _showProductOrReviewUnavailableDialog(context);
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(ErrorHandler.getUserFriendlyMessage(e)),
-            backgroundColor: AppColors.error,
-          ),
+        CustomSnackBar.show(
+          context,
+          message: ErrorHandler.getUserFriendlyMessage(e),
+          variant: CustomSnackBarVariant.error,
         );
       }
     }
@@ -346,11 +346,10 @@ class _ActivityPageState extends State<ActivityPage>
         }
       } catch (e) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(ErrorHandler.getUserFriendlyMessage(e)),
-              backgroundColor: AppColors.error,
-            ),
+          CustomSnackBar.show(
+            context,
+            message: ErrorHandler.getUserFriendlyMessage(e),
+            variant: CustomSnackBarVariant.error,
           );
         }
       }
@@ -398,11 +397,10 @@ class _ActivityPageState extends State<ActivityPage>
       await _controller.toggleFollow(userId);
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(ErrorHandler.getUserFriendlyMessage(e)),
-            backgroundColor: AppColors.error,
-          ),
+        CustomSnackBar.show(
+          context,
+          message: ErrorHandler.getUserFriendlyMessage(e),
+          variant: CustomSnackBarVariant.error,
         );
       }
     }

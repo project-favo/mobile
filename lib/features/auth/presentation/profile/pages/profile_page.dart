@@ -36,6 +36,7 @@ import '../../../../../core/routes/custom_page_transitions.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/widgets/custom_refresh_indicator.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
+import '../../../../../core/widgets/custom_snack_bar.dart';
 import '../../../../../core/widgets/app_button.dart';
 import '../../../../../core/utils/in_flight_id_lock.dart';
 import '../../../../../core/utils/product_report_storage.dart';
@@ -1026,11 +1027,10 @@ class _ProfilePageState extends State<ProfilePage>
           _wishlistProducts[idx] = previous;
         }
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(ErrorHandler.getUserFriendlyMessage(e)),
-          backgroundColor: AppColors.error,
-        ),
+      CustomSnackBar.show(
+        context,
+        message: ErrorHandler.getUserFriendlyMessage(e),
+        variant: CustomSnackBarVariant.error,
       );
     } finally {
       _wishlistProductLikeLock.leave(product.id);

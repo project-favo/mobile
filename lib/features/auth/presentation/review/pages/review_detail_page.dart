@@ -24,6 +24,7 @@ import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/utils/review_report_storage.dart';
 import '../../../../../core/network/api_client.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
+import '../../../../../core/widgets/custom_snack_bar.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
 import 'review_page.dart';
 import '../../home_page.dart';
@@ -770,11 +771,10 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Please login to send messages'),
-            backgroundColor: AppColors.error,
-          ),
+        CustomSnackBar.show(
+          context,
+          message: 'Please login to send messages',
+          variant: CustomSnackBarVariant.error,
         );
       }
       return;
@@ -820,30 +820,27 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
                     Navigator.of(context).pop();
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       if (!pageContext.mounted) return;
-                      ScaffoldMessenger.of(pageContext).showSnackBar(
-                        SnackBar(
-                          content: Text(
+                      CustomSnackBar.show(
+                        pageContext,
+                        message:
                             'Message sent to @${_currentReview.ownerUserName}',
-                          ),
-                        ),
+                        variant: CustomSnackBarVariant.success,
                       );
                     });
                   });
                 } catch (e) {
                   final msg = ErrorHandler.getUserFriendlyMessage(e);
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(msg),
-                        backgroundColor: AppColors.error,
-                      ),
+                    CustomSnackBar.show(
+                      context,
+                      message: msg,
+                      variant: CustomSnackBarVariant.error,
                     );
                   } else if (mounted && pageContext.mounted) {
-                    ScaffoldMessenger.of(pageContext).showSnackBar(
-                      SnackBar(
-                        content: Text(msg),
-                        backgroundColor: AppColors.error,
-                      ),
+                    CustomSnackBar.show(
+                      pageContext,
+                      message: msg,
+                      variant: CustomSnackBarVariant.error,
                     );
                   }
                   if (context.mounted) {
@@ -1041,11 +1038,10 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Please login to upvote reviews'),
-            backgroundColor: AppColors.error,
-          ),
+        CustomSnackBar.show(
+          context,
+          message: 'Please login to upvote reviews',
+          variant: CustomSnackBarVariant.error,
         );
       }
       return;
@@ -1181,11 +1177,10 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
         }
         if (mounted) {
           final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(errorMessage),
-              backgroundColor: AppColors.error,
-            ),
+          CustomSnackBar.show(
+            context,
+            message: errorMessage,
+            variant: CustomSnackBarVariant.error,
           );
         }
       } else {
@@ -1212,11 +1207,10 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
 
         if (mounted) {
           final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(errorMessage),
-              backgroundColor: AppColors.error,
-            ),
+          CustomSnackBar.show(
+            context,
+            message: errorMessage,
+            variant: CustomSnackBarVariant.error,
           );
         }
       }

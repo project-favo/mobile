@@ -6,6 +6,7 @@ import '../../../../../core/theme/app_decorations.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/utils/product_rating_display.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
+import '../../../../../core/widgets/custom_snack_bar.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/repositories/product_repository.dart';
 import 'product_comparison_page.dart';
@@ -123,8 +124,10 @@ class _CompareProductSelectPageState extends State<CompareProductSelectPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _isSelectingProduct = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not load product: ${e.toString()}')),
+      CustomSnackBar.show(
+        context,
+        message: 'Could not load product: ${e.toString()}',
+        variant: CustomSnackBarVariant.error,
       );
     }
   }

@@ -19,6 +19,7 @@ import '../../../../../core/utils/exceptions.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
+import '../../../../../core/widgets/custom_snack_bar.dart';
 import '../../../data/models/notification_dto.dart';
 import '../../../data/services/auth_service.dart';
 import '../../../data/utils/notification_remote_user_filter.dart';
@@ -262,11 +263,10 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
       await NotificationRealtimeService.instance.refreshUnread();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(ErrorHandler.getUserFriendlyMessage(e)),
-          backgroundColor: AppColors.error,
-        ),
+      CustomSnackBar.show(
+        context,
+        message: ErrorHandler.getUserFriendlyMessage(e),
+        variant: CustomSnackBarVariant.error,
       );
     } finally {
       if (mounted) setState(() => _markingAll = false);
@@ -349,11 +349,10 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
         if (_suggestsProductOrReviewGone(e)) {
           await _showProductOrReviewUnavailableDialog();
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(ErrorHandler.getUserFriendlyMessage(e)),
-              backgroundColor: AppColors.error,
-            ),
+          CustomSnackBar.show(
+            context,
+            message: ErrorHandler.getUserFriendlyMessage(e),
+            variant: CustomSnackBarVariant.error,
           );
         }
       }
@@ -437,11 +436,10 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
       return true;
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(ErrorHandler.getUserFriendlyMessage(e)),
-            backgroundColor: AppColors.error,
-          ),
+        CustomSnackBar.show(
+          context,
+          message: ErrorHandler.getUserFriendlyMessage(e),
+          variant: CustomSnackBarVariant.error,
         );
       }
       return false;

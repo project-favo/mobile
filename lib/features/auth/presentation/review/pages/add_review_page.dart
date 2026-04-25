@@ -10,6 +10,7 @@ import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/utils/session_helper.dart';
+import '../../../../../core/widgets/custom_snack_bar.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/models/review_dto.dart';
 import '../../../data/repositories/review_repository.dart';
@@ -73,30 +74,22 @@ class _AddReviewPageState extends State<AddReviewPage> {
 
   void _showPhotoLimitSnackBar() {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text('You can add up to $_maxReviewPhotos photos.'),
-          backgroundColor: AppColors.error,
-          duration: const Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+    CustomSnackBar.show(
+      context,
+      message: 'You can add up to $_maxReviewPhotos photos.',
+      variant: CustomSnackBarVariant.neutral,
+      duration: const Duration(seconds: 2),
+    );
   }
 
   void _showErrorSnackBar(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: AppColors.error,
-          duration: const Duration(seconds: 3),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+    CustomSnackBar.show(
+      context,
+      message: message,
+      variant: CustomSnackBarVariant.error,
+      duration: const Duration(seconds: 3),
+    );
   }
 
   void _applyReviewToForm(ReviewDto r) {

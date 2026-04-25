@@ -15,6 +15,7 @@ import '../../../../../core/utils/resolve_media_url.dart';
 import 'edit_profile_page.dart';
 import 'change_password_page.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
+import '../../../../../core/widgets/custom_snack_bar.dart';
 import '../../backend_email_verification_page.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -167,11 +168,10 @@ class _SettingsPageState extends State<SettingsPage> {
     } catch (e) {
       if (context.mounted) {
         final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(errorMessage),
-            backgroundColor: AppColors.error,
-          ),
+        CustomSnackBar.show(
+          context,
+          message: errorMessage,
+          variant: CustomSnackBarVariant.error,
         );
       }
     }
@@ -259,19 +259,17 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       await _authService.resendVerification();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('A new verification email was sent.'),
-          backgroundColor: AppColors.success,
-        ),
+      CustomSnackBar.show(
+        context,
+        message: 'A new verification email was sent.',
+        variant: CustomSnackBarVariant.success,
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(ErrorHandler.getUserFriendlyMessage(e)),
-          backgroundColor: AppColors.error,
-        ),
+      CustomSnackBar.show(
+        context,
+        message: ErrorHandler.getUserFriendlyMessage(e),
+        variant: CustomSnackBarVariant.error,
       );
     } finally {
       if (mounted) setState(() => _emailVerifyBusy = false);
@@ -435,11 +433,10 @@ class _SettingsPageState extends State<SettingsPage> {
     } catch (e) {
       if (context.mounted) {
         final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(errorMessage),
-            backgroundColor: AppColors.error,
-          ),
+        CustomSnackBar.show(
+          context,
+          message: errorMessage,
+          variant: CustomSnackBarVariant.error,
         );
       }
     }
