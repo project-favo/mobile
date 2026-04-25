@@ -85,14 +85,16 @@ class _ChatDetailPageState extends State<ChatDetailPage>
   @override
   void didChangeMetrics() {
     super.didChangeMetrics();
-    // Klavye açılıp kapanınca viewport yeniden boyanıyor; birkaç kare boyunca
-    // maxScrollExtent güncellenir, tek seferde jumpTo yetmiyor.
-    if (!_bootstrapping &&
-        !_messagesLoading &&
-        _errorMessage == null &&
-        _messages.isNotEmpty) {
-      _scrollToBottom();
-    }
+    // Klavye / güvenli alan güncellemesi layout sırasında olur; aynı karede scroll tetikleme.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!_bootstrapping &&
+          !_messagesLoading &&
+          _errorMessage == null &&
+          _messages.isNotEmpty) {
+        _scrollToBottom();
+      }
+    });
   }
 
   void _exitChatUserUnavailable() {
@@ -775,6 +777,7 @@ class _ChatDetailPageState extends State<ChatDetailPage>
   }
 
   void _scrollToBottom() {
+    if (!mounted) return;
     void jump() {
       if (!mounted || !_scrollController.hasClients) return;
       final max = _scrollController.position.maxScrollExtent;
@@ -783,10 +786,13 @@ class _ChatDetailPageState extends State<ChatDetailPage>
     }
 
     // Ardışık karelerde tekrarla: klavye animasyonu sırasında extent her karede artabilir.
+    // [mounted] yoksa zinciri kes — dispose sonrası kare planlaması Inherited assert patlatır.
     void scheduleChained(int remaining) {
       if (remaining <= 0) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
         jump();
+        if (!mounted) return;
         scheduleChained(remaining - 1);
       });
     }

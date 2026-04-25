@@ -39,6 +39,131 @@ bool _actorDeactivatedFromFeedJson(Map<String, dynamic> json) {
   return false;
 }
 
+Map<String, dynamic>? _asStringKeyedMap(dynamic v) {
+  if (v is Map<String, dynamic>) return v;
+  if (v is Map) return Map<String, dynamic>.from(v);
+  return null;
+}
+
+String _firstNonEmptyIn(Map<String, dynamic> m, List<String> keys) {
+  for (final k in keys) {
+    final raw = m[k];
+    if (raw == null) continue;
+    final val = raw.toString().trim();
+    if (val.isNotEmpty) return val;
+  }
+  return '';
+}
+
+String? _nullableFirstNonEmptyIn(Map<String, dynamic> m, List<String> keys) {
+  final v = _firstNonEmptyIn(m, keys);
+  return v.isEmpty ? null : v;
+}
+
+/// Kök [userId] çoğu API’de bildirim/hedef kullanıcıdır; gerçek aktörü [actor] vb. iç içe nesnelerden oku.
+String _resolveFriendsFeedActorUserId(Map<String, dynamic> json) {
+  final env = _firstNonEmptyIn(json, [
+    'actorUserId',
+    'actorId',
+    'performerId',
+    'fromUserId',
+    'initiatorId',
+    'sourceUserId',
+  ]);
+  if (env.isNotEmpty) return env;
+
+  for (final nk in _nestedKeysForFriendsFeedActor()) {
+    final nested = _asStringKeyedMap(json[nk]);
+    if (nested == null) continue;
+    final id = _firstNonEmptyIn(nested, [
+      'actorUserId',
+      'userId',
+      'id',
+      'firebaseUid',
+      'uid',
+      'actorId',
+    ]);
+    if (id.isNotEmpty) return id;
+  }
+
+  return _firstNonEmptyIn(json, ['userId']);
+}
+
+String _resolveFriendsFeedActorUserName(Map<String, dynamic> json) {
+  final env = _firstNonEmptyIn(json, ['actorUserName', 'actorName']);
+  if (env.isNotEmpty) return env;
+
+  for (final nk in _nestedKeysForFriendsFeedActor()) {
+    final nested = _asStringKeyedMap(json[nk]);
+    if (nested == null) continue;
+    final name = _firstNonEmptyIn(nested, [
+      'username',
+      'userName',
+      'name',
+      'displayName',
+      'fullName',
+    ]);
+    if (name.isNotEmpty) return name;
+  }
+
+  return _firstNonEmptyIn(json, ['userName', 'username']);
+}
+
+String? _resolveFriendsFeedActorDisplayName(Map<String, dynamic> json) {
+  final env = _nullableFirstNonEmptyIn(json, ['actorDisplayName']);
+  if (env != null) return env;
+
+  for (final nk in _nestedKeysForFriendsFeedActor()) {
+    final nested = _asStringKeyedMap(json[nk]);
+    if (nested == null) continue;
+    final d = _nullableFirstNonEmptyIn(nested, [
+      'displayName',
+      'fullName',
+      'name',
+    ]);
+    if (d != null) return d;
+  }
+
+  return _nullableFirstNonEmptyIn(json, ['displayName']);
+}
+
+String? _resolveFriendsFeedActorProfilePhotoUrl(Map<String, dynamic> json) {
+  final env = _nullableFirstNonEmptyIn(json, [
+    'actorProfilePhotoUrl',
+    'actorAvatarUrl',
+  ]);
+  if (env != null) return env;
+
+  for (final nk in _nestedKeysForFriendsFeedActor()) {
+    final nested = _asStringKeyedMap(json[nk]);
+    if (nested == null) continue;
+    final u = _nullableFirstNonEmptyIn(nested, [
+      'profilePhotoUrl',
+      'profilePhotoURL',
+      'avatarUrl',
+      'avatarURL',
+      'profileImageUrl',
+      'photoUrl',
+      'imageUrl',
+      'picture',
+    ]);
+    if (u != null) return u;
+  }
+
+  return _nullableFirstNonEmptyIn(json, [
+    'profilePhotoUrl',
+    'profilePhotoURL',
+  ]);
+}
+
+List<String> _nestedKeysForFriendsFeedActor() => const [
+      'actor',
+      'actorUser',
+      'fromUser',
+      'performedBy',
+      'user',
+    ];
+
 class FriendsFeedItemDto {
   FriendsFeedItemDto({
     required this.id,
@@ -151,14 +276,11 @@ class FriendsFeedItemDto {
     return FriendsFeedItemDto(
       id: itemId,
       type: firstNonEmpty(['type', 'activityType']),
-      actorUserId: firstNonEmpty(['actorUserId', 'userId', 'actorId']),
-      actorUserName: firstNonEmpty(['actorUserName', 'userName', 'username']),
+      actorUserId: _resolveFriendsFeedActorUserId(json),
+      actorUserName: _resolveFriendsFeedActorUserName(json),
       isActorAccountDeactivated: _actorDeactivatedFromFeedJson(json),
-      actorDisplayName: nullableFirstNonEmpty(['actorDisplayName', 'displayName']),
-      actorProfilePhotoUrl: nullableFirstNonEmpty([
-        'actorProfilePhotoUrl',
-        'profilePhotoUrl',
-      ]),
+      actorDisplayName: _resolveFriendsFeedActorDisplayName(json),
+      actorProfilePhotoUrl: _resolveFriendsFeedActorProfilePhotoUrl(json),
       productId: productIdV,
       productName: productNameV,
       productImageUrl: productImageV,

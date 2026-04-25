@@ -89,6 +89,23 @@ void main() {
       });
       expect(isFriendsFeedItemForUi(fromJson), isFalse);
     });
+
+    test('nested actor wins over root userId for home liker bubbles', () {
+      final dto = FriendsFeedItemDto.fromJson({
+        'id': 'e1',
+        'type': 'REVIEW',
+        'userId': 'recipientOrWrong',
+        'actor': {
+          'userId': 'actualReviewer',
+          'username': 'reviewer1',
+          'profilePhotoUrl': 'https://example.com/reviewer.png',
+        },
+        'productId': 'p1',
+      });
+      expect(dto.actorUserId, 'actualReviewer');
+      expect(dto.actorUserName, 'reviewer1');
+      expect(dto.actorProfilePhotoUrl, 'https://example.com/reviewer.png');
+    });
   });
 
   group('isReviewDataInactiveOrHiddenInMap', () {

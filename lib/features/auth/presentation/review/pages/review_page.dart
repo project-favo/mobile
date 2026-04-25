@@ -1160,15 +1160,21 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                     content: text,
                   );
                   if (!context.mounted) return;
-                  Navigator.of(context).pop();
-                  if (!mounted || !pageContext.mounted) return;
-                  ScaffoldMessenger.of(pageContext).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        'Message sent to @${review.ownerUserName}',
-                      ),
-                    ),
-                  );
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!context.mounted) return;
+                    Navigator.of(context).pop();
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (!pageContext.mounted) return;
+                      ScaffoldMessenger.of(pageContext).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Message sent to @${review.ownerUserName}',
+                          ),
+                        ),
+                      );
+                    });
+                  });
                 } catch (e) {
                   final msg = ErrorHandler.getUserFriendlyMessage(e);
                   if (context.mounted) {

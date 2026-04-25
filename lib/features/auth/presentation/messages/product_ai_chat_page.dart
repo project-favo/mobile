@@ -258,6 +258,7 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       if (!_scrollController.hasClients) return;
       final pos = _scrollController.position;
       if (!pos.hasContentDimensions) return;
