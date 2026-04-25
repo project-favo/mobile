@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../../routes/app_routes.dart';
 import '../../../core/widgets/app_input.dart';
 import '../../../core/widgets/app_button.dart';
+import '../../../core/widgets/custom_snack_bar.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/error_handler.dart';
@@ -176,11 +177,10 @@ class _RegisterPageState extends State<RegisterPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to pick image: ${e.toString()}'),
-            backgroundColor: AppColors.error,
-          ),
+        CustomSnackBar.show(
+          context,
+          message: 'Failed to pick image: ${e.toString()}',
+          variant: CustomSnackBarVariant.error,
         );
       }
     }
@@ -243,11 +243,10 @@ class _RegisterPageState extends State<RegisterPage> {
       return 'data:$mimeType;base64,$base64String';
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to process image: ${e.toString()}'),
-            backgroundColor: AppColors.error,
-          ),
+        CustomSnackBar.show(
+          context,
+          message: 'Failed to process image: ${e.toString()}',
+          variant: CustomSnackBarVariant.error,
         );
       }
       return null;
@@ -293,13 +292,11 @@ class _RegisterPageState extends State<RegisterPage> {
 
     if (!_acknowledgedEmailVerification) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
+        CustomSnackBar.show(
+          context,
+          message:
               'Please confirm you will enter the 5-digit code Favo sends to your email.',
-            ),
-            backgroundColor: AppColors.error,
-          ),
+          variant: CustomSnackBarVariant.error,
         );
       }
       return;

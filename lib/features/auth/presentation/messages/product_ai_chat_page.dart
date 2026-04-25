@@ -13,6 +13,7 @@ import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/utils/resolve_media_url.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
+import '../../../../../core/widgets/custom_snack_bar.dart';
 import '../../data/models/product_dto.dart';
 import '../../data/models/tag_dto.dart';
 import '../../data/services/auth_service.dart';
@@ -174,13 +175,10 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
         if (code == 404) {
           if (!mounted) return;
           setState(() => _isSending = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Product not found or no longer available.',
-              ),
-              backgroundColor: AppColors.error,
-            ),
+          CustomSnackBar.show(
+            context,
+            message: 'Product not found or no longer available.',
+            variant: CustomSnackBarVariant.error,
           );
           return;
         }
@@ -221,8 +219,10 @@ class _ProductAiChatPageState extends State<ProductAiChatPage>
       setState(() {
         _isSending = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: AppColors.error),
+      CustomSnackBar.show(
+        context,
+        message: msg,
+        variant: CustomSnackBarVariant.error,
       );
     }
   }

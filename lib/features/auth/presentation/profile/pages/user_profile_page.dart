@@ -18,6 +18,7 @@ import '../../../../../core/utils/review_report_storage.dart';
 import '../../../../../core/utils/app_datetime.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
+import '../../../../../core/widgets/custom_snack_bar.dart';
 import '../../../../../core/cache/current_user_cache.dart';
 import '../../../../../core/cache/product_memory_cache.dart';
 import '../../../../../core/utils/resolve_media_url.dart';
@@ -857,11 +858,10 @@ class _UserProfilePageState extends State<UserProfilePage>
       Navigator.pushReplacementNamed(context, AppRoutes.login);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.toString().replaceFirst('Exception: ', '')),
-          backgroundColor: AppColors.error,
-        ),
+      CustomSnackBar.show(
+        context,
+        message: e.toString().replaceFirst('Exception: ', ''),
+        variant: CustomSnackBarVariant.error,
       );
     } finally {
       if (mounted) setState(() => _isFollowLoading = false);

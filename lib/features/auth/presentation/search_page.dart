@@ -28,6 +28,7 @@ import '../data/services/auth_service.dart';
 import '../data/services/review_prefetch_service.dart';
 import '../widgets/product_card.dart';
 import '../../../core/widgets/skeleton_loader.dart';
+import '../../../core/widgets/custom_snack_bar.dart';
 import '../../../core/widgets/profile_avatar.dart';
 import 'home_page.dart';
 import 'friend_feed_page.dart';
@@ -513,11 +514,10 @@ class _SearchPageState extends State<SearchPage> {
     final messenger = ScaffoldMessenger.of(context);
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Please login to like products'),
-          backgroundColor: AppColors.error,
-        ),
+      CustomSnackBar.showWithMessenger(
+        messenger,
+        message: 'Please login to like products',
+        variant: CustomSnackBarVariant.error,
       );
       return;
     }
@@ -574,11 +574,10 @@ class _SearchPageState extends State<SearchPage> {
             final latest = latestIndex != -1 ? _searchResults[latestIndex] : current;
             _replaceProductInLocalLists(id, latest.copyWith(isLiked: beforeLike));
           });
-          messenger.showSnackBar(
-            SnackBar(
-              content: Text(ErrorHandler.getUserFriendlyMessage(e)),
-              backgroundColor: AppColors.error,
-            ),
+          CustomSnackBar.showWithMessenger(
+            messenger,
+            message: ErrorHandler.getUserFriendlyMessage(e),
+            variant: CustomSnackBarVariant.error,
           );
         }
       }
@@ -818,11 +817,10 @@ class _SearchPageState extends State<SearchPage> {
         _isLoadingCategories = false;
       });
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(ErrorHandler.getUserFriendlyMessage(e)),
-          backgroundColor: AppColors.error,
-        ),
+      CustomSnackBar.show(
+        context,
+        message: ErrorHandler.getUserFriendlyMessage(e),
+        variant: CustomSnackBarVariant.error,
       );
     }
   }

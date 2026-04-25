@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../../core/theme/app_colors.dart';
+import '../../../../../core/widgets/custom_snack_bar.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/utils/exceptions.dart';
 import '../../../../../core/utils/review_report_storage.dart';
@@ -24,33 +25,30 @@ Future<void> openReviewReportFlow(
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please sign in to report a review'),
-          backgroundColor: AppColors.error,
-        ),
+      CustomSnackBar.show(
+        context,
+        message: 'Please sign in to report a review',
+        variant: CustomSnackBarVariant.error,
       );
       return;
     }
     await ReviewReportStorage.hydrateForCurrentUser();
     if (!context.mounted) return;
     if (ReviewReportStorage.hasReportedSync(reviewId)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Already reported'),
-          backgroundColor: AppColors.textSecondary,
-        ),
+      CustomSnackBar.show(
+        context,
+        message: 'Already reported',
+        variant: CustomSnackBarVariant.neutral,
       );
       return;
     }
     final token = await sessionHelper.ensureSession();
     if (!context.mounted) return;
     if (token == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please sign in to report'),
-          backgroundColor: AppColors.error,
-        ),
+      CustomSnackBar.show(
+        context,
+        message: 'Please sign in to report',
+        variant: CustomSnackBarVariant.error,
       );
       return;
     }
@@ -65,37 +63,29 @@ Future<void> openReviewReportFlow(
       );
       await ReviewReportStorage.markReported(reviewId);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Reported'),
-            backgroundColor: AppColors.primary,
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.all(12),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
+        CustomSnackBar.show(
+          context,
+          message: 'Reported',
+          variant: CustomSnackBarVariant.primary,
         );
       }
     } catch (e) {
       if (e is ReviewAlreadyReportedException) {
         await ReviewReportStorage.markReported(reviewId);
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Already reported'),
-              backgroundColor: AppColors.textSecondary,
-            ),
+          CustomSnackBar.show(
+            context,
+            message: 'Already reported',
+            variant: CustomSnackBarVariant.neutral,
           );
         }
         return;
       }
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(ErrorHandler.getUserFriendlyMessage(e)),
-            backgroundColor: AppColors.error,
-          ),
+        CustomSnackBar.show(
+          context,
+          message: ErrorHandler.getUserFriendlyMessage(e),
+          variant: CustomSnackBarVariant.error,
         );
       }
     }

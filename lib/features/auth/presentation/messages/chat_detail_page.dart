@@ -25,6 +25,7 @@ import '../../../../core/cache/chat_outgoing_user_cache.dart';
 import '../../../../core/cache/current_user_cache.dart';
 import '../../../../core/cache/message_list_cache.dart';
 import '../../../../core/utils/user_profile_navigation.dart';
+import '../../../../core/widgets/custom_snack_bar.dart';
 
 class ChatDetailPage extends StatefulWidget {
   final ConversationDto conversation;
@@ -370,11 +371,10 @@ class _ChatDetailPageState extends State<ChatDetailPage>
     if (text.isEmpty || _sendInFlight) return;
     final uid = _currentUserId;
     if (uid == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please wait, loading your profile…'),
-          backgroundColor: AppColors.error,
-        ),
+      CustomSnackBar.show(
+        context,
+        message: 'Please wait, loading your profile…',
+        variant: CustomSnackBarVariant.neutral,
       );
       return;
     }
@@ -430,11 +430,10 @@ class _ChatDetailPageState extends State<ChatDetailPage>
         _messages = _messages.where((m) => m.id != tempId).toList();
       });
       final msg = ErrorHandler.getUserFriendlyMessage(e);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(msg),
-          backgroundColor: AppColors.error,
-        ),
+      CustomSnackBar.show(
+        context,
+        message: msg,
+        variant: CustomSnackBarVariant.error,
       );
     } finally {
       _sendInFlight = false;

@@ -10,6 +10,7 @@ import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
+import '../../../../../core/widgets/custom_snack_bar.dart';
 import '../../../../../core/utils/resolve_media_url.dart';
 import '../../../../../core/network/api_client.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
@@ -188,8 +189,10 @@ class _AiChatPageState extends State<AiChatPage>
       setState(() {
         _isSending = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: AppColors.error),
+      CustomSnackBar.show(
+        context,
+        message: msg,
+        variant: CustomSnackBarVariant.error,
       );
     }
   }

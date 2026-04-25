@@ -7,6 +7,7 @@ import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/username_input_rules.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_input.dart';
+import '../../../core/widgets/custom_snack_bar.dart';
 import '../data/models/register_request_dto.dart';
 import '../data/services/auth_service.dart';
 import 'backend_email_verification_page.dart';
@@ -128,11 +129,10 @@ class _CompleteAppProfilePageState extends State<CompleteAppProfilePage> {
     final fb = FirebaseAuth.instance.currentUser;
     if (fb == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Session not found. Please sign in again.'),
-            backgroundColor: AppColors.error,
-          ),
+        CustomSnackBar.show(
+          context,
+          message: 'Session not found. Please sign in again.',
+          variant: CustomSnackBarVariant.error,
         );
       }
       return;

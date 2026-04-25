@@ -9,6 +9,7 @@ import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/widgets/app_input.dart';
+import '../../../../../core/widgets/custom_snack_bar.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/utils/app_datetime.dart';
 import '../../../../../core/utils/user_display_name_prefs.dart';
@@ -121,11 +122,10 @@ class _EditProfilePageState extends State<EditProfilePage>
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to pick image: ${e.toString()}'),
-            backgroundColor: AppColors.error,
-          ),
+        CustomSnackBar.show(
+          context,
+          message: 'Failed to pick image: ${e.toString()}',
+          variant: CustomSnackBarVariant.error,
         );
       }
     }
@@ -195,11 +195,10 @@ class _EditProfilePageState extends State<EditProfilePage>
       return 'data:$mimeType;base64,$base64String';
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to process image: ${e.toString()}'),
-            backgroundColor: AppColors.error,
-          ),
+        CustomSnackBar.show(
+          context,
+          message: 'Failed to process image: ${e.toString()}',
+          variant: CustomSnackBarVariant.error,
         );
       }
       return null;

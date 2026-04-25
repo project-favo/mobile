@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../../core/theme/app_colors.dart';
+import '../../../../../core/widgets/custom_snack_bar.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../data/repositories/review_repository.dart';
@@ -46,11 +47,10 @@ class ReviewDeleteFlow {
       final token = await sessionHelper.ensureSession();
       if (token == null) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Please sign in to delete your review'),
-              backgroundColor: AppColors.error,
-            ),
+          CustomSnackBar.show(
+            context,
+            message: 'Please sign in to delete your review',
+            variant: CustomSnackBarVariant.error,
           );
         }
         return false;
@@ -74,11 +74,10 @@ class ReviewDeleteFlow {
       return true;
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(ErrorHandler.getUserFriendlyMessage(e)),
-            backgroundColor: AppColors.error,
-          ),
+        CustomSnackBar.show(
+          context,
+          message: ErrorHandler.getUserFriendlyMessage(e),
+          variant: CustomSnackBarVariant.error,
         );
       }
       return false;
