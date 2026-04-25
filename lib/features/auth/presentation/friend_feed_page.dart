@@ -344,7 +344,6 @@ class _FriendFeedPageState extends State<FriendFeedPage>
           _followingIds.remove(userId);
         }
       });
-      FollowingIdSetCache.instance.applyToggle(userId, following);
     } catch (_) {
       // best effort; ignore race/dup tap errors
     } finally {

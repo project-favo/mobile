@@ -10,6 +10,7 @@ import '../../../../../core/config/api_config.dart';
 import '../../../../../core/config/app_background_timers.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/cache/current_user_cache.dart';
+import '../../../../../core/cache/self_review_like_local_prefs.dart';
 import '../../../../../core/cache/product_memory_cache.dart';
 import '../../../../../core/cache/review_memory_cache.dart';
 import '../../../../../core/utils/exceptions.dart';
@@ -87,6 +88,9 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
   /// In [initState], inactive review/product: show [showContentUnavailableDialog] before the first frame.
   bool _invalidInitialRoute = false;
 
+  /// Sunucu kendi yorumunu beğenmeyi reddederken yerel +1 / liked gösterimi.
+  bool _selfLikeLocalBoost = false;
+
   static const Color _pageBackground = Color(0xFFF4F5F7);
   static const Color _fieldFill = Color(0xFFF9FAFB);
   static const Color _starEmpty = Color(0xFFD1D5DB);
@@ -96,6 +100,23 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
     if (CurrentUserCache.instance.isMyReview(_currentReview)) return true;
     return _viewerUserId != null &&
         _viewerUserId!.trim() == _currentReview.ownerId.trim();
+  }
+
+  ReviewDto get _reviewForLikeBar =>
+      SelfReviewLikeDisplay.mergeServerRowWithBoostMap(
+        _currentReview,
+        _selfLikeLocalBoost ? {_currentReview.id: true} : {},
+      );
+
+  Future<void> _hydrateSelfLikeLocalBoostFromPrefs() async {
+    if (!CurrentUserCache.instance.isMyReview(_currentReview)) return;
+    final uid =
+        (_viewerUserId ?? CurrentUserCache.instance.userId)?.trim() ?? '';
+    if (uid.isEmpty) return;
+    final m = await SelfReviewLikeLocalPrefs.instance.loadBoostMap(uid);
+    final b = m[_currentReview.id] == true;
+    if (!mounted) return;
+    setState(() => _selfLikeLocalBoost = b);
   }
 
   @override
@@ -127,6 +148,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
       _viewerUserId = w.userId;
     }
     unawaited(_loadViewerId());
+    unawaited(_hydrateSelfLikeLocalBoostFromPrefs());
     unawaited(
       ReviewReportStorage.hydrateForCurrentUser().then((_) {
         if (mounted) setState(() {});
@@ -571,11 +593,9 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
   }
 
   bool get _canShowChatIcon {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return false;
-    // ownerId backend user id, elimizde birebir karşılığı yok; username ile basic kontrol yapıyoruz
-    return _currentReview.ownerUserName.toLowerCase() !=
-        (user.email ?? '').split('@').first.toLowerCase();
+    if (FirebaseAuth.instance.currentUser == null) return false;
+    if (_isOwnReview) return false;
+    return true;
   }
 
   /// Review'ı backend'den yeniden yükler (like durumu için)
@@ -610,7 +630,24 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
         if (viewerId != null && viewerId.trim().isNotEmpty) {
           _viewerUserId = viewerId;
         }
+        if (CurrentUserCache.instance.isMyReview(updatedReview) &&
+            updatedReview.isLikedByCurrentUser) {
+          _selfLikeLocalBoost = false;
+        }
       });
+      final uidClear =
+          (viewerId ?? CurrentUserCache.instance.userId)?.trim() ?? '';
+      if (uidClear.isNotEmpty &&
+          CurrentUserCache.instance.isMyReview(updatedReview) &&
+          updatedReview.isLikedByCurrentUser) {
+        unawaited(
+          SelfReviewLikeLocalPrefs.instance.setBoost(
+            uidClear,
+            updatedReview.id,
+            false,
+          ),
+        );
+      }
       if (_mediaListSignature(_currentReview) != oldMediaSig) {
         _mediaFutures.clear();
       }
@@ -629,12 +666,14 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
     if (c.isMyReview(_currentReview) && c.hasUserId) {
       if (!mounted) return;
       setState(() => _viewerUserId = c.userId);
+      unawaited(_hydrateSelfLikeLocalBoostFromPrefs());
       return;
     }
     try {
       final me = await AuthService().getMe();
       if (!mounted) return;
       setState(() => _viewerUserId = me.id);
+      unawaited(_hydrateSelfLikeLocalBoostFromPrefs());
     } catch (_) {}
   }
 
@@ -1014,46 +1053,30 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
 
     if (!_reviewDetailLikeLock.tryEnter()) return;
 
-    // Optimistic update - UI'ı hemen güncelle (loading indicator yok)
-    final previousLikeStatus = _currentReview.isLikedByCurrentUser;
-    final previousLikeCount = _currentReview.likeCount;
+    final serverSnap = _currentReview;
+    final boostBeforeTap = _selfLikeLocalBoost;
+    final displayLikedBeforeTap =
+        serverSnap.isLikedByCurrentUser || boostBeforeTap;
 
-    setState(() {
-      _currentReview = ReviewDto(
-        id: _currentReview.id,
-        title: _currentReview.title,
-        description: _currentReview.description,
-        isCollaborative: _currentReview.isCollaborative,
-        rating: _currentReview.rating,
-        createdAt: _currentReview.createdAt,
-        productId: _currentReview.productId,
-        productName: _currentReview.productName,
-        ownerId: _currentReview.ownerId,
-        ownerUserName: _currentReview.ownerUserName,
-        ownerProfilePhotoUrl: _currentReview.ownerProfilePhotoUrl,
-        mediaList: _currentReview.mediaList,
-        likeCount:
-            previousLikeStatus
-                ? (previousLikeCount > 0 ? previousLikeCount - 1 : 0)
-                : previousLikeCount + 1,
-        isLikedByCurrentUser: !previousLikeStatus,
-        isProductNotListed: _currentReview.isProductNotListed,
-        isReviewInactive: _currentReview.isReviewInactive,
-      );
-    });
-
-    try {
-      // Get token (session already exists via cookies)
-      final firebaseIdToken = await _sessionHelper.getTokenAndSetHeader();
-      if (firebaseIdToken == null) {
-        throw Exception('Failed to get Firebase ID token');
+    if (_isOwnReview) {
+      final target = !displayLikedBeforeTap;
+      setState(() {
+        _selfLikeLocalBoost = target && !serverSnap.isLikedByCurrentUser;
+      });
+      final uidOptimistic =
+          (_viewerUserId ?? CurrentUserCache.instance.userId)?.trim() ?? '';
+      if (uidOptimistic.isNotEmpty) {
+        unawaited(
+          SelfReviewLikeLocalPrefs.instance.setBoost(
+            uidOptimistic,
+            serverSnap.id,
+            _selfLikeLocalBoost,
+          ),
+        );
       }
-
-      // Toggle and confirm with actual server response
-      final newLikeStatus = await _interactionRepository.toggleReviewLike(
-        firebaseIdToken,
-        _currentReview.id,
-      );
+    } else {
+      final previousLikeStatus = _currentReview.isLikedByCurrentUser;
+      final previousLikeCount = _currentReview.likeCount;
 
       setState(() {
         _currentReview = ReviewDto(
@@ -1070,45 +1093,132 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
           ownerProfilePhotoUrl: _currentReview.ownerProfilePhotoUrl,
           mediaList: _currentReview.mediaList,
           likeCount:
+              previousLikeStatus
+                  ? (previousLikeCount > 0 ? previousLikeCount - 1 : 0)
+                  : previousLikeCount + 1,
+          isLikedByCurrentUser: !previousLikeStatus,
+          isProductNotListed: _currentReview.isProductNotListed,
+          isReviewInactive: _currentReview.isReviewInactive,
+        );
+      });
+    }
+
+    final previousLikeStatus = serverSnap.isLikedByCurrentUser;
+    final previousLikeCount = serverSnap.likeCount;
+
+    try {
+      // Get token (session already exists via cookies)
+      final firebaseIdToken = await _sessionHelper.getTokenAndSetHeader();
+      if (firebaseIdToken == null) {
+        throw Exception('Failed to get Firebase ID token');
+      }
+
+      // Toggle and confirm with actual server response
+      final newLikeStatus = await _interactionRepository.toggleReviewLike(
+        firebaseIdToken,
+        serverSnap.id,
+      );
+
+      final uid =
+          (_viewerUserId ?? CurrentUserCache.instance.userId)?.trim() ?? '';
+      if (uid.isNotEmpty && _isOwnReview) {
+        unawaited(
+          SelfReviewLikeLocalPrefs.instance.setBoost(uid, serverSnap.id, false),
+        );
+      }
+
+      setState(() {
+        if (_isOwnReview) {
+          _selfLikeLocalBoost = false;
+        }
+        final base = _isOwnReview ? serverSnap : _currentReview;
+        _currentReview = ReviewDto(
+          id: base.id,
+          title: base.title,
+          description: base.description,
+          isCollaborative: base.isCollaborative,
+          rating: base.rating,
+          createdAt: base.createdAt,
+          productId: base.productId,
+          productName: base.productName,
+          ownerId: base.ownerId,
+          ownerUserName: base.ownerUserName,
+          ownerProfilePhotoUrl: base.ownerProfilePhotoUrl,
+          mediaList: base.mediaList,
+          likeCount:
               newLikeStatus
                   ? (previousLikeCount + 1)
                   : (previousLikeCount > 0 ? previousLikeCount - 1 : 0),
           isLikedByCurrentUser: newLikeStatus,
-          isProductNotListed: _currentReview.isProductNotListed,
-          isReviewInactive: _currentReview.isReviewInactive,
+          isProductNotListed: base.isProductNotListed,
+          isReviewInactive: base.isReviewInactive,
         );
       });
     } catch (e) {
-      // Hata durumunda optimistic update'i geri al
-      setState(() {
-        _currentReview = ReviewDto(
-          id: _currentReview.id,
-          title: _currentReview.title,
-          description: _currentReview.description,
-          isCollaborative: _currentReview.isCollaborative,
-          rating: _currentReview.rating,
-          createdAt: _currentReview.createdAt,
-          productId: _currentReview.productId,
-          productName: _currentReview.productName,
-          ownerId: _currentReview.ownerId,
-          ownerUserName: _currentReview.ownerUserName,
-          ownerProfilePhotoUrl: _currentReview.ownerProfilePhotoUrl,
-          mediaList: _currentReview.mediaList,
-          likeCount: previousLikeCount,
-          isLikedByCurrentUser: previousLikeStatus,
-          isProductNotListed: _currentReview.isProductNotListed,
-          isReviewInactive: _currentReview.isReviewInactive,
-        );
-      });
+      if (_isOwnReview &&
+          interactionErrorLooksLikeCannotLikeOwnReview(e)) {
+        final uid =
+            (_viewerUserId ?? CurrentUserCache.instance.userId)?.trim() ?? '';
+        if (uid.isNotEmpty) {
+          await SelfReviewLikeLocalPrefs.instance.setBoost(
+            uid,
+            serverSnap.id,
+            _selfLikeLocalBoost,
+          );
+        }
+      } else if (_isOwnReview) {
+        final uid =
+            (_viewerUserId ?? CurrentUserCache.instance.userId)?.trim() ?? '';
+        if (uid.isNotEmpty) {
+          await SelfReviewLikeLocalPrefs.instance.setBoost(
+            uid,
+            serverSnap.id,
+            boostBeforeTap,
+          );
+        }
+        if (mounted) {
+          setState(() => _selfLikeLocalBoost = boostBeforeTap);
+        }
+        if (mounted) {
+          final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(errorMessage),
+              backgroundColor: AppColors.error,
+            ),
+          );
+        }
+      } else {
+        setState(() {
+          _currentReview = ReviewDto(
+            id: serverSnap.id,
+            title: serverSnap.title,
+            description: serverSnap.description,
+            isCollaborative: serverSnap.isCollaborative,
+            rating: serverSnap.rating,
+            createdAt: serverSnap.createdAt,
+            productId: serverSnap.productId,
+            productName: serverSnap.productName,
+            ownerId: serverSnap.ownerId,
+            ownerUserName: serverSnap.ownerUserName,
+            ownerProfilePhotoUrl: serverSnap.ownerProfilePhotoUrl,
+            mediaList: serverSnap.mediaList,
+            likeCount: previousLikeCount,
+            isLikedByCurrentUser: previousLikeStatus,
+            isProductNotListed: serverSnap.isProductNotListed,
+            isReviewInactive: serverSnap.isReviewInactive,
+          );
+        });
 
-      if (mounted) {
-        final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(errorMessage),
-            backgroundColor: AppColors.error,
-          ),
-        );
+        if (mounted) {
+          final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(errorMessage),
+              backgroundColor: AppColors.error,
+            ),
+          );
+        }
       }
     } finally {
       _reviewDetailLikeLock.leave();
@@ -1824,22 +1934,22 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
                             onPressed: _toggleLike,
                             style: likeStyle,
                             icon: Icon(
-                              _currentReview.isLikedByCurrentUser
+                              _reviewForLikeBar.isLikedByCurrentUser
                                   ? Icons.thumb_up_rounded
                                   : Icons.thumb_up_alt_outlined,
                               size: 20,
                               color:
-                                  _currentReview.isLikedByCurrentUser
+                                  _reviewForLikeBar.isLikedByCurrentUser
                                       ? AppColors.primary
                                       : AppColors.textSecondary,
                             ),
                             label: Text(
-                              '${_currentReview.likeCount}',
+                              '${_reviewForLikeBar.likeCount}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: AppTextStyles.body.copyWith(
                                 color:
-                                    _currentReview.isLikedByCurrentUser
+                                    _reviewForLikeBar.isLikedByCurrentUser
                                         ? AppColors.primary
                                         : AppColors.textSecondary,
                                 fontWeight: FontWeight.w700,
@@ -1901,22 +2011,22 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
                             onPressed: _toggleLike,
                             style: likeStyle,
                             icon: Icon(
-                              _currentReview.isLikedByCurrentUser
+                              _reviewForLikeBar.isLikedByCurrentUser
                                   ? Icons.thumb_up_rounded
                                   : Icons.thumb_up_alt_outlined,
                               size: 20,
                               color:
-                                  _currentReview.isLikedByCurrentUser
+                                  _reviewForLikeBar.isLikedByCurrentUser
                                       ? AppColors.primary
                                       : AppColors.textSecondary,
                             ),
                             label: Text(
-                              '${_currentReview.likeCount}',
+                              '${_reviewForLikeBar.likeCount}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: AppTextStyles.body.copyWith(
                                 color:
-                                    _currentReview.isLikedByCurrentUser
+                                    _reviewForLikeBar.isLikedByCurrentUser
                                         ? AppColors.primary
                                         : AppColors.textSecondary,
                                 fontWeight: FontWeight.w700,

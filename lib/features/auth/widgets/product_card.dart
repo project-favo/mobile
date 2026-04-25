@@ -260,6 +260,7 @@ class _ProductCardState extends State<ProductCard> {
     // yorum yoksa kartta puan + baloncuğu da gösterme (askıdaki yorum yıldızı kalmasın).
     final int? visibleReviewCount = widget.loadReviewCount ? _reviewCount : null;
     final bool noVisibleReviews = visibleReviewCount != null && visibleReviewCount == 0;
+    // Önce gerçek yorumcular (API); yoksa arkadaş feed — görünür yorum sayısıyla baloncuğu koparma.
     final displayBubbleKeys = widget.loadReviewCount && _reviewerBubbleKeys.isNotEmpty
         ? _reviewerBubbleKeys
         : widget.friendAvatarUrls;

@@ -5,9 +5,11 @@ import '../domain/activity_type.dart';
 import 'friends_feed_dto.dart';
 
 ActivityType activityTypeFromFriendsFeed(String rawType) {
-  final t = rawType.toUpperCase();
-  if (t == 'PRODUCT_LIKE' || t.contains('LIKE')) return ActivityType.like;
+  final t = rawType.toUpperCase().trim();
+  if (t.isEmpty) return ActivityType.review;
+  // Önce review: "…REVIEW…" içinde yanlışlıkla "LIKE" (ör. alt dize) eşleşmesin.
   if (t == 'REVIEW' || t.contains('REVIEW')) return ActivityType.review;
+  if (t == 'PRODUCT_LIKE' || t.contains('LIKE')) return ActivityType.like;
   return ActivityType.review;
 }
 

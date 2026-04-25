@@ -18,6 +18,7 @@ import '../../../../../core/utils/review_report_storage.dart';
 import '../../../../../core/utils/app_datetime.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
+import '../../../../../core/cache/current_user_cache.dart';
 import '../../../../../core/cache/product_memory_cache.dart';
 import '../../../../../core/utils/resolve_media_url.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
@@ -175,16 +176,28 @@ class _UserProfilePageState extends State<UserProfilePage>
 
   /// Kendi kullanıcı kartına gidilmesin; deep link / hata durumunda kapat.
   Future<void> _start() async {
-    try {
-      final me = await _authService.getMe();
+    // Önce önbellekten kontrol et — getMe() ağ çağrısını önler.
+    final cachedMyId = CurrentUserCache.instance.userId?.trim() ?? '';
+    if (cachedMyId.isNotEmpty) {
       if (!mounted) return;
-      if (me.id.trim() == widget.userId.trim()) {
+      if (cachedMyId == widget.userId.trim()) {
         Navigator.of(context).pop();
         return;
       }
-    } on DeactivatedAccountException {
-      return;
-    } catch (_) {}
+      // Önbellekte ID var, kendi profilimiz değil → getMe() atlanabilir.
+    } else {
+      // Önbellek boş: ağ üzerinden kontrol et (uygulama ilk açılışı vb.).
+      try {
+        final me = await _authService.getMe();
+        if (!mounted) return;
+        if (me.id.trim() == widget.userId.trim()) {
+          Navigator.of(context).pop();
+          return;
+        }
+      } on DeactivatedAccountException {
+        return;
+      } catch (_) {}
+    }
     if (!mounted) return;
     UserResponseDto? preloaded = widget.prefillUser;
     UserProfileImageFetch? prefillImg = widget.prefillProfileImage;
@@ -207,15 +220,19 @@ class _UserProfilePageState extends State<UserProfilePage>
     if (preloaded != null && prefillImg != null) {
       preSession = await _sessionHelper.ensureSession();
     } else if (preloaded != null) {
+      // Kullanıcı verisi mevcut ama profil resmi yok → session + resim paralel çek.
       try {
-        preSession = await _sessionHelper.ensureSession();
-        if (!mounted) return;
-        prefillImg = await _authService.fetchUserProfileImage(wid);
+        final pair = await Future.wait<dynamic>([
+          _sessionHelper.ensureSession(),
+          _authService.fetchUserProfileImage(wid),
+        ]);
+        preSession = pair[0] as String?;
+        prefillImg = pair[1] as UserProfileImageFetch?;
       } on TargetUserNotAvailableException {
         if (mounted) _exitToHomeBecauseUserUnavailable();
         return;
       } catch (_) {
-        preSession = await _sessionHelper.ensureSession();
+        preSession ??= await _sessionHelper.ensureSession();
         try {
           prefillImg = await _authService.fetchUserProfileImage(wid);
         } catch (_) {}

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../../../../core/utils/product_listing_flags.dart';
 import '../../../../core/utils/review_visibility_flags.dart';
 import '../../../../core/utils/user_account_flags.dart';
@@ -258,8 +260,10 @@ class ReviewMediaRequestDto {
     if (id != null && id.isNotEmpty) {
       return {'id': id};
     }
+    // Base64 string olarak gönder: Jackson backend'de byte[]'a otomatik dönüştürür.
+    // Integer dizi yerine base64 ~2.5x daha küçük → serializasyon ve upload çok daha hızlı.
     return {
-      'imageData': imageData!,
+      'imageData': base64Encode(imageData!),
       'mimeType': mimeType ?? 'image/jpeg',
     };
   }

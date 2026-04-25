@@ -35,6 +35,15 @@ class _LoginPageState extends State<LoginPage> {
   String? _authError; // Backend'den gelen authentication error
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      FocusManager.instance.primaryFocus?.unfocus();
+    });
+  }
+
+  @override
   void dispose() {
     _email.dispose();
     _password.dispose();
