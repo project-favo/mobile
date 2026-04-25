@@ -109,6 +109,21 @@ class ProfileReviewRowCard extends StatelessWidget {
                   fontWeight: FontWeight.w600,
                 ),
               ),
+              if (review.mediaList.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Icon(
+                    Icons.photo_camera_outlined,
+                    size: 13,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ],
             ],
           ),
         ],

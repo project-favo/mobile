@@ -2282,6 +2282,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                         likeCount: displayReview.likeCount,
                         isLiked: displayReview.isLikedByCurrentUser,
                         isCurrentUser: _isMyReview(review),
+                        hasMedia: review.mediaList.isNotEmpty,
                         showChatIcon:
                             _currentUsername != null &&
                             isProductEntityActive(_currentProduct) &&

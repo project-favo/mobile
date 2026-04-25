@@ -24,6 +24,9 @@ class ReviewCard extends StatelessWidget {
   /// Bu review için kullanıcı rapor gönderdiyse bayrak dolu gösterilir
   final bool hasReportedReview;
 
+  /// Fotoğraflı yorum: rating yanında kamera ikonu gösterilir.
+  final bool hasMedia;
+
   const ReviewCard({
     super.key,
     required this.username,
@@ -42,6 +45,7 @@ class ReviewCard extends StatelessWidget {
     this.isCurrentUser = false,
     this.reviewDateLabel,
     this.hasReportedReview = false,
+    this.hasMedia = false,
   });
 
   @override
@@ -130,6 +134,21 @@ class ReviewCard extends StatelessWidget {
                     color: AppColors.textPrimary,
                   ),
                 ),
+                if (hasMedia) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Icon(
+                      Icons.photo_camera_outlined,
+                      size: 13,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: AppSpacing.small),
