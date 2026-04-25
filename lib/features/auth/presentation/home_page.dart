@@ -18,6 +18,7 @@ import '../../../core/utils/in_flight_id_lock.dart';
 import '../../../core/cache/following_id_set_cache.dart';
 import '../../../core/cache/home_feed_cache.dart';
 import '../../../core/cache/home_top_picks_cache.dart';
+import '../../../core/cache/home_view_state_cache.dart';
 import '../../../core/config/app_background_timers.dart';
 import '../../../core/cache/search_warm_cache.dart';
 import '../../../core/cache/friend_feed_memory_cache.dart';
@@ -46,6 +47,7 @@ import '../data/services/review_prefetch_service.dart';
 import '../data/models/tag_dto.dart';
 import '../data/models/product_dto.dart';
 import '../data/models/product_search_result_dto.dart';
+import '../data/models/feed_sort_option.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -57,6 +59,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
   static const int _kMaxFriendReviewBubblesPerProduct = 5;
   static const int _kMaxFriendLikerKeysPerProduct = 8;
+  static const double _kScrollToTopThreshold = 520;
 
   // BottomNavigationBar index mapping:
   // 0: search, 1: add (placeholder), 2: home, 3: activity, 4: profile
@@ -86,12 +89,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   int _totalPages = 0;
   int _totalElements = 0;
   String? _activeCategoryPathPrefix;
+  FeedSortOption _activeSortOption = FeedSortOption.newest;
   bool _isLoading = true;
   bool _isFiltering = false;
   bool _isLoadingMore = false; // Infinite scroll: sonraki sayfa yüklenirken
   bool _isLoadingSubTags = false;
   String? _errorMessage;
-  final ScrollController _scrollController = ScrollController();
+  late final ScrollController _scrollController;
   bool _notificationSvcAttached = false;
 
   // --- Friend likers: API + [FriendFeedMemoryCache] + disk; pushReplacement sonrası da toparlanır.
@@ -118,6 +122,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   int _friendFeedRefreshPollTick = 0;
   int _searchReqSeq = 0;
   bool _isSearchLoading = false;
+  bool _showScrollToTop = false;
+  double? _pendingRestoreOffset;
+  int _restoreScrollAttemptsLeft = 0;
 
   Route _noAnimationRoute(Widget page) {
     return PageRouteBuilder(
@@ -125,6 +132,57 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       transitionDuration: Duration.zero,
       reverseTransitionDuration: Duration.zero,
     );
+  }
+
+  void _rememberHomeViewState() {
+    if (!_scrollController.hasClients) return;
+    final offset = _scrollController.offset;
+    if (_filteredProducts.isEmpty) return;
+    HomeViewStateCache.instance.set(
+      HomeViewState(
+        products: _filteredProducts,
+        currentPage: _currentPage,
+        totalPages: _totalPages,
+        totalElements: _totalElements,
+        selectedCategoryIndex: _selectedCategoryIndex,
+        selectedSubCategoryIndex: _selectedSubCategoryIndex,
+        activeCategoryPathPrefix: _activeCategoryPathPrefix,
+        activeSortOption: _activeSortOption,
+        scrollOffset: offset,
+        isBannerCollapsed: _isBannerCollapsed,
+      ),
+    );
+  }
+
+  void _navigateFromHome(Widget page) {
+    _rememberHomeViewState();
+    Navigator.pushReplacement(context, _noAnimationRoute(page));
+  }
+
+  void _scheduleRestoreScrollOffset() {
+    if (_pendingRestoreOffset == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _pendingRestoreOffset == null) return;
+      if (!_scrollController.hasClients) {
+        if (_restoreScrollAttemptsLeft > 0) {
+          _restoreScrollAttemptsLeft--;
+          _scheduleRestoreScrollOffset();
+        }
+        return;
+      }
+      final target = _pendingRestoreOffset!;
+      final maxx = _scrollController.position.maxScrollExtent;
+      if (maxx <= 0 && target > 0) {
+        if (_restoreScrollAttemptsLeft > 0) {
+          _restoreScrollAttemptsLeft--;
+          _scheduleRestoreScrollOffset();
+        }
+        return;
+      }
+      _scrollController.jumpTo(target.clamp(0.0, maxx));
+      _pendingRestoreOffset = null;
+      _restoreScrollAttemptsLeft = 0;
+    });
   }
 
   BottomNavigationBar _buildBottomNavigationBar() {
@@ -140,34 +198,22 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       unselectedFontSize: 0,
       onTap: (index) {
         if (index == 0) {
-          Navigator.pushReplacement(
-            context,
-            _noAnimationRoute(const SearchPage()),
-          );
+          _navigateFromHome(const SearchPage());
           return;
         }
         if (index == 1) {
-          Navigator.pushReplacement(
-            context,
-            _noAnimationRoute(const FriendFeedPage()),
-          );
+          _navigateFromHome(const FriendFeedPage());
           return;
         }
         if (index == 2) {
           return;
         }
         if (index == 3) {
-          Navigator.pushReplacement(
-            context,
-            _noAnimationRoute(const ActivityPage()),
-          );
+          _navigateFromHome(const ActivityPage());
           return;
         }
         if (index == 4) {
-          Navigator.pushReplacement(
-            context,
-            _noAnimationRoute(const ProfilePage()),
-          );
+          _navigateFromHome(const ProfilePage());
           return;
         }
       },
@@ -178,6 +224,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   @override
   void initState() {
     super.initState();
+    final viewSnap = HomeViewStateCache.instance.peek();
+    _scrollController = ScrollController(
+      initialScrollOffset: viewSnap?.scrollOffset ?? 0.0,
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_hookNotificationsIfSignedIn());
     });
@@ -191,7 +241,25 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     // Ana grid: önce HomeFeedCache (disk + splash aynı API), yok eski SearchWarmCache.
     final homeSnap = HomeFeedCache.instance.peek();
     final warmTags = SearchWarmCache.instance.peekRootTags();
-    if (homeSnap != null && homeSnap.content.isNotEmpty) {
+    if (viewSnap != null) {
+      _tags = warmTags;
+      _filteredProducts = List<ProductDto>.from(viewSnap.products);
+      _currentPage = viewSnap.currentPage;
+      _totalPages = viewSnap.totalPages;
+      _totalElements = viewSnap.totalElements;
+      _selectedCategoryIndex = viewSnap.selectedCategoryIndex;
+      _selectedSubCategoryIndex = viewSnap.selectedSubCategoryIndex;
+      _activeCategoryPathPrefix = viewSnap.activeCategoryPathPrefix;
+      _activeSortOption = viewSnap.activeSortOption;
+      _isBannerCollapsed = viewSnap.isBannerCollapsed;
+      _isLoading = false;
+      _isFiltering = false;
+      _errorMessage = null;
+      _pendingRestoreOffset = viewSnap.scrollOffset;
+      _restoreScrollAttemptsLeft = 18;
+      _scheduleRestoreScrollOffset();
+      unawaited(_loadData(background: true, preserveLoadedProducts: true));
+    } else if (homeSnap != null && homeSnap.content.isNotEmpty) {
       _tags = warmTags;
       _filteredProducts = List<ProductDto>.from(homeSnap.content);
       _currentPage = homeSnap.number;
@@ -260,6 +328,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   @override
   void dispose() {
+    _rememberHomeViewState();
     FollowingIdSetCache.instance.removeListener(_onFollowingChangedForFriendLikers);
     MessageUnreadService.instance.detach();
     if (_notificationSvcAttached) {
@@ -653,12 +722,30 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   /// Infinite scroll: listenere yaklaşınca sonraki sayfayı yükle
   void _onScroll() {
+    final hasClients = _scrollController.hasClients;
+    final shouldShow =
+        hasClients && _scrollController.offset > _kScrollToTopThreshold;
+    if (shouldShow != _showScrollToTop && mounted) {
+      setState(() {
+        _showScrollToTop = shouldShow;
+      });
+    }
+
     if (_isFiltering || _isLoadingMore || _filteredProducts.isEmpty) return;
     if (_currentPage + 1 >= _totalPages) return;
     final pos = _scrollController.position;
     if (pos.pixels >= pos.maxScrollExtent - 200) {
       _loadMoreProducts();
     }
+  }
+
+  Future<void> _scrollToTop() async {
+    if (!_scrollController.hasClients) return;
+    await _scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 380),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   Future<void> _loadMoreProducts() async {
@@ -691,19 +778,29 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         page: 0,
         size: 10,
         firebaseIdToken: token,
+        sortBy: _activeSortOption.apiValue,
       );
       if (!mounted) return;
 
-      if (_homeFeedFirstPageUnchanged(result)) return;
+      if (_activeSortOption == FeedSortOption.newest &&
+          _homeFeedFirstPageUnchanged(result)) {
+        return;
+      }
 
       // Aşağıdayken yeni ürün gelse bile listenin başı zıplamasın
       final savedOffset =
           _scrollController.hasClients ? _scrollController.offset : 0.0;
       const keepScrollThreshold = 32.0;
 
+      final mergedProducts = _mergePolledFirstPageKeepLoadedItems(
+        result.content,
+      );
+      if (!mounted) return;
       setState(() {
-        _filteredProducts = result.content;
-        _currentPage = result.number;
+        _filteredProducts = mergedProducts;
+        _currentPage = mergedProducts.length > result.content.length
+            ? _currentPage
+            : result.number;
         _totalPages = result.totalPages;
         _totalElements = result.totalElements;
         _isFiltering = false;
@@ -755,28 +852,32 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           page: page,
           size: 10,
           firebaseIdToken: firebaseIdToken,
+          sortBy: _activeSortOption.apiValue,
         );
       } else {
         result = await _productRepository.getHomeFeed(
           page: page,
           size: 10,
           firebaseIdToken: firebaseIdToken,
+          sortBy: _activeSortOption.apiValue,
         );
       }
+
+      final nextProducts =
+          (append && page > 0)
+              ? [..._filteredProducts, ...result.content]
+              : result.content;
 
       if (!mounted) return;
 
       setState(() {
-        if (append && page > 0) {
-          _filteredProducts = [..._filteredProducts, ...result.content];
-        } else {
-          _filteredProducts = result.content;
-        }
+        _filteredProducts = nextProducts;
         _currentPage = result.number;
         _totalPages = result.totalPages;
         _totalElements = result.totalElements;
         _isFiltering = false;
       });
+      _scheduleRestoreScrollOffset();
 
       if (!append &&
           _activeCategoryPathPrefix == null) {
@@ -805,6 +906,18 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       );
     }
   }
+
+  List<ProductDto> _mergePolledFirstPageKeepLoadedItems(List<ProductDto> firstPage) {
+    // Polling should refresh top rows but never throw away already loaded pages.
+    if (_filteredProducts.isEmpty || _filteredProducts.length <= firstPage.length) {
+      return firstPage;
+    }
+
+    final firstIds = firstPage.map((p) => p.id).toSet();
+    final tail = _filteredProducts.where((p) => !firstIds.contains(p.id)).toList();
+    return [...firstPage, ...tail];
+  }
+
 
   Future<void> _onRootCategoryTap(TagDto rootTag, int rootIndex) async {
     setState(() {
@@ -1636,6 +1749,77 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     );
   }
 
+  Widget _buildSortBar() {
+    if (_activeBannerTab != null || _searchQuery.isNotEmpty) {
+      return const SizedBox.shrink();
+    }
+    return SizedBox(
+      height: 38,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: FeedSortOption.values.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, i) {
+          final option = FeedSortOption.values[i];
+          final isSelected = _activeSortOption == option;
+          return GestureDetector(
+            onTap: () async {
+              if (_activeSortOption == option) return;
+              setState(() {
+                _activeSortOption = option;
+                _isFiltering = true;
+              });
+              await _loadProductsPage(0);
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+              decoration: BoxDecoration(
+                color: isSelected ? AppColors.primary : Colors.transparent,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isSelected
+                      ? AppColors.primary
+                      : AppColors.textSecondary.withValues(alpha: 0.3),
+                  width: 1.2,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _sortOptionIcon(option),
+                    size: 14,
+                    color: isSelected ? Colors.white : AppColors.textSecondary,
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    option.label,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                      color: isSelected ? Colors.white : AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  IconData _sortOptionIcon(FeedSortOption option) => switch (option) {
+        FeedSortOption.newest => Icons.schedule_rounded,
+        FeedSortOption.ratingDesc => Icons.star_rounded,
+        FeedSortOption.ratingAsc => Icons.star_outline_rounded,
+        FeedSortOption.reviewsDesc => Icons.chat_bubble_rounded,
+        FeedSortOption.reviewsAsc => Icons.chat_bubble_outline_rounded,
+      };
+
   /// [ReviewPage] dönüşünde grid, sayı ve favori durumu anında (flash’sız) güncellenir.
   void _applyProductFromReviewExit(ReviewPagePopResult r) {
     final id = r.product.id;
@@ -1714,7 +1898,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     } catch (_) {}
   }
 
-  Future<void> _loadData({bool background = false}) async {
+  Future<void> _loadData({
+    bool background = false,
+    bool preserveLoadedProducts = false,
+  }) async {
     final wasInCategoryMode =
         _activeCategoryPathPrefix != null && _selectedCategoryIndex != -1;
     final previousActivePrefix = _activeCategoryPathPrefix;
@@ -1775,7 +1962,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         unawaited(_loadSubTagsForRoot(rootTag));
       }
       await Future.wait([
-        _loadProductsPage(0),
+        if (!(background && preserveLoadedProducts && _filteredProducts.isNotEmpty))
+          _loadProductsPage(0),
         _loadFriendLikers(),
         if (!wasInCategoryMode) ...[
           _loadTopPicksForTab(HomeTopPicksTab.weeklyLikes),
@@ -2124,13 +2312,36 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 _buildAnimatedBanner(),
               ],
 
+              // SORT BAR
+              if (_searchQuery.isEmpty) ...[
+                const SizedBox(height: 12),
+                _buildSortBar(),
+              ],
+
               // PRODUCT GRID
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
                 child: _buildProductGrid(),
               ),
             ],
+          ),
+        ),
+      ),
+      floatingActionButton: AnimatedSlide(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        offset: _showScrollToTop ? Offset.zero : const Offset(0, 1.4),
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 180),
+          opacity: _showScrollToTop ? 1 : 0,
+          child: FloatingActionButton.small(
+            heroTag: 'home_scroll_to_top',
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
+            elevation: 3,
+            onPressed: _scrollToTop,
+            child: const Icon(Icons.keyboard_arrow_up_rounded, size: 22),
           ),
         ),
       ),

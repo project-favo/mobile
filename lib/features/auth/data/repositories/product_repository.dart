@@ -21,12 +21,17 @@ class ProductRepository {
     int size = 20,
     String? firebaseIdToken,
     bool skipFirebaseAuthOnFeedRequest = false,
+    Map<String, dynamic>? extraQueryParams,
   }) async {
     final safeSize = size.clamp(1, 50);
     try {
       final response = await _apiClient.dio.get(
         path,
-        queryParameters: {'page': page, 'size': safeSize},
+        queryParameters: {
+          'page': page,
+          'size': safeSize,
+          ...?extraQueryParams,
+        },
         options:
             skipFirebaseAuthOnFeedRequest
                 ? Options(extra: const {kDioExtraSkipFirebaseAuth: true})
@@ -66,17 +71,19 @@ class ProductRepository {
     }
   }
 
-  /// Paginated home feed from GET /api/products/home?page={page}&size={size}
+  /// Paginated home feed from GET /api/products/home?page={page}&size={size}&sortBy={sortBy}
   Future<ProductSearchResultDto> getHomeFeed({
     required int page,
     int size = 20,
     String? firebaseIdToken,
+    String sortBy = 'newest',
   }) async {
     return _getEnrichedPagedFeed(
       path: '/api/products/home',
       page: page,
       size: size,
       firebaseIdToken: firebaseIdToken,
+      extraQueryParams: {'sortBy': sortBy},
     );
   }
 
@@ -218,12 +225,13 @@ class ProductRepository {
   }
 
   /// Paginated category/search from
-  /// GET /api/products/search?categoryPathPrefix=...&page={page}&size={size}
+  /// GET /api/products/search?categoryPathPrefix=...&page={page}&size={size}&sortBy={sortBy}
   Future<ProductSearchResultDto> searchProducts({
     required String categoryPathPrefix,
     required int page,
     int size = 20,
     String? firebaseIdToken,
+    String sortBy = 'newest',
   }) async {
     try {
       final response = await _apiClient.dio.get(
@@ -232,6 +240,7 @@ class ProductRepository {
           'categoryPathPrefix': categoryPathPrefix,
           'page': page,
           'size': size,
+          'sortBy': sortBy,
         },
       );
 
