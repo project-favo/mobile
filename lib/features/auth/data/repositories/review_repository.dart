@@ -282,6 +282,12 @@ class ReviewRepository {
       return dto;
     } on DioException catch (e) {
       if (e.response != null) {
+        final code = e.response?.statusCode;
+        if (code == 409) {
+          throw Exception(
+            'You have already reviewed this product. Edit your existing review instead.',
+          );
+        }
         final errorData = e.response?.data;
         final errorMessage = errorData is Map
             ? (errorData['message'] ?? errorData['error'] ?? 'Failed to create review')

@@ -742,8 +742,20 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
   bool _isMyReview(ReviewDto review) {
     if (CurrentUserCache.instance.isMyReview(review)) return true;
     final id = _currentUserId;
-    if (id == null) return false;
+    if (id == null || id.trim().isEmpty) return false;
     return review.ownerId.trim() == id.trim();
+  }
+
+  /// Mevcut kullanıcının bu ürüne ait aktif review'u (varsa).
+  ReviewDto? get _myReview {
+    final id = _currentUserId;
+    final cacheOk = CurrentUserCache.instance.hasUserId;
+    if ((id == null || id.trim().isEmpty) && !cacheOk) return null;
+    try {
+      return _reviews.firstWhere((r) => _isMyReview(r));
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> _syncSelfLikeBoostFromPrefsAndServer() async {
@@ -1999,11 +2011,13 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                                     ),
                                   ),
                                   onPressed: () async {
+                                    final my = _myReview;
                                     final result = await Navigator.push(
                                       context,
                                       SlideUpRoute(
                                         page: AddReviewPage(
                                           product: _currentProduct,
+                                          reviewToEdit: my,
                                         ),
                                       ),
                                     );
@@ -2014,7 +2028,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                                       ]);
                                     }
                                   },
-                                  child: const Text('Add a Review'),
+                                  child: Text(_myReview != null ? 'Edit your review' : 'Add a Review'),
                                 ),
                               ),
                             ),
