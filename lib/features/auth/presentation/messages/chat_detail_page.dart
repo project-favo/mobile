@@ -15,6 +15,7 @@ import '../../../../core/utils/session_helper.dart';
 import '../../../../core/config/api_config.dart';
 import '../../../../core/config/app_background_timers.dart';
 import '../../../../core/utils/resolve_media_url.dart';
+import '../../../../core/utils/load_profile_image_bytes.dart';
 import '../../data/repositories/message_repository.dart';
 import '../../data/models/conversation_dto.dart';
 import '../../data/models/message_dto.dart';
@@ -230,8 +231,8 @@ class _ChatDetailPageState extends State<ChatDetailPage>
               (bytes != null && bytes.isNotEmpty);
           if (hasListAvatar && mounted) {
             setState(() {
-              _resolvedOtherUrl ??= url;
-              _resolvedOtherBytes ??= bytes;
+              _resolvedOtherUrl = url;
+              _resolvedOtherBytes = bytes;
             });
           }
           return;
@@ -241,14 +242,6 @@ class _ChatDetailPageState extends State<ChatDetailPage>
         break;
       }
     }
-  }
-
-  bool _otherParticipantHasLoadableVisual(ConversationUserDto op) {
-    final url = op.profilePhotoUrl?.trim();
-    if (url != null && url.isNotEmpty) return true;
-    final inline = _inlineOtherBytes;
-    if (inline != null && inline.isNotEmpty) return true;
-    return false;
   }
 
   Future<void> _enrichOtherParticipant() async {
@@ -266,6 +259,9 @@ class _ChatDetailPageState extends State<ChatDetailPage>
       if (!mounted) return;
       if (pix != null) {
         if (pix.isNotFound) {
+          evictProfileImageBytesCacheForRaw(
+            _resolvedOtherUrl ?? op.profilePhotoUrl,
+          );
           setState(() {
             _resolvedOtherUrl = null;
             _resolvedOtherBytes = null;
@@ -273,27 +269,48 @@ class _ChatDetailPageState extends State<ChatDetailPage>
           return;
         }
         if (pix.hasImage) {
-          setState(() {
-            if (pix.memoryBytes != null) {
-              _resolvedOtherBytes = pix.memoryBytes;
-              _resolvedOtherUrl = null;
-            } else {
-              _resolvedOtherUrl = pix.imageUrl;
-              _resolvedOtherBytes = null;
+          final prevUrl = _resolvedOtherUrl ?? op.profilePhotoUrl;
+          if (pix.memoryBytes != null) {
+            evictProfileImageBytesCacheForRaw(prevUrl);
+            if (mounted) {
+              setState(() {
+                _resolvedOtherBytes = pix.memoryBytes;
+                _resolvedOtherUrl = null;
+              });
             }
-          });
+          } else {
+            final nextUrl = pix.imageUrl?.trim();
+            if (nextUrl != null && nextUrl.isNotEmpty) {
+              if (prevUrl != nextUrl) {
+                evictProfileImageBytesCacheForRaw(prevUrl);
+              }
+              evictProfileImageBytesCacheForRaw(nextUrl);
+            }
+            if (mounted) {
+              setState(() {
+                _resolvedOtherUrl = pix.imageUrl;
+                _resolvedOtherBytes = null;
+              });
+            }
+          }
           return;
         }
       }
-      if (_otherParticipantHasLoadableVisual(op)) return;
       final bytes = decodeProfilePhotoBytes(u.profilePhotoData);
       final url = u.profileImageUrl?.trim();
       if ((url != null && url.isNotEmpty) ||
           (bytes != null && bytes.isNotEmpty)) {
-        setState(() {
-          _resolvedOtherUrl = url;
-          _resolvedOtherBytes = bytes;
-        });
+        final prevUrl = _resolvedOtherUrl ?? op.profilePhotoUrl;
+        if (url != null && url.isNotEmpty) {
+          if (prevUrl != url) evictProfileImageBytesCacheForRaw(prevUrl);
+          evictProfileImageBytesCacheForRaw(url);
+        }
+        if (mounted) {
+          setState(() {
+            _resolvedOtherUrl = url;
+            _resolvedOtherBytes = bytes;
+          });
+        }
       }
     } on TargetUserNotAvailableException catch (_) {
       if (mounted) _exitChatUserUnavailable();

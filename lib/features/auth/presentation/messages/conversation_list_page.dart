@@ -65,28 +65,18 @@ class _ConversationListPageState extends State<ConversationListPage> {
       final page = await _messageRepository.getConversations(page: 0, size: 20);
       if (!mounted) return;
       final sorted = _filterAndSort(page.content);
-      // Sadece gerçek değişiklik varsa rebuild et
-      bool changed = sorted.length != _conversations.length;
-      if (!changed) {
-        for (int i = 0; i < sorted.length; i++) {
-          final n = sorted[i];
-          final o = _conversations[i];
-          if (n.id != o.id ||
-              n.lastMessage != o.lastMessage ||
-              n.unreadCount != o.unreadCount) {
-            changed = true;
-            break;
-          }
-        }
-      }
+      final changed = _conversationsMeaningfullyChanged(sorted, _conversations);
       // Unread badge'ini her zaman güncelle
       final unread = sorted.where((c) => c.unreadCount > 0).length;
       MessageUnreadService.instance.unreadCount.value = unread;
 
       if (changed && mounted) {
+        _evictAvatarCachesIfParticipantVisualChanged(sorted, _conversations);
         ConversationListCache.instance.remember(sorted);
+        _dropExtrasShadowedByDto(sorted);
         setState(() => _conversations = sorted);
         _enrichConversationAvatars(sorted);
+        _warmAvatarCacheForConversations(sorted);
       }
     } catch (_) {
       // Arka plan poll hatasını sustur
@@ -98,10 +88,13 @@ class _ConversationListPageState extends State<ConversationListPage> {
     // Cache varsa anında göster
     final warm = ConversationListCache.instance.peek();
     if (warm != null && warm.isNotEmpty) {
+      final visible = filterVisibleConversations(warm);
       setState(() {
-        _conversations = filterVisibleConversations(warm);
+        _conversations = visible;
         _isLoading = false;
       });
+      unawaited(_enrichConversationAvatars(visible));
+      _warmAvatarCacheForConversations(visible);
       unawaited(_refreshConversationsInBackground());
       return;
     }
@@ -155,21 +148,90 @@ class _ConversationListPageState extends State<ConversationListPage> {
       final page = await _messageRepository.getConversations(page: 0, size: 20);
       if (!mounted) return;
       final sorted = _filterAndSort(page.content);
+      final changed = _conversationsMeaningfullyChanged(sorted, _conversations);
       ConversationListCache.instance.remember(sorted);
-      bool changed = sorted.length != _conversations.length;
-      if (!changed) {
-        for (int i = 0; i < sorted.length; i++) {
-          final n = sorted[i]; final o = _conversations[i];
-          if (n.id != o.id || n.lastMessage != o.lastMessage || n.unreadCount != o.unreadCount) {
-            changed = true; break;
-          }
-        }
-      }
       if (changed && mounted) {
+        _evictAvatarCachesIfParticipantVisualChanged(sorted, _conversations);
+        _dropExtrasShadowedByDto(sorted);
         setState(() => _conversations = sorted);
         _enrichConversationAvatars(sorted);
+        _warmAvatarCacheForConversations(sorted);
       }
     } catch (_) {}
+  }
+
+  /// Sıra değişse bile aynı konuşma satırını `id` ile eşleyerek karşılaştırır (avatar güncellemesi kaçmasın).
+  bool _conversationsMeaningfullyChanged(
+    List<ConversationDto> next,
+    List<ConversationDto> prev,
+  ) {
+    if (next.length != prev.length) return true;
+    final prevById = {for (final c in prev) c.id: c};
+    for (final n in next) {
+      final o = prevById[n.id];
+      if (o == null) return true;
+      if (o.lastMessage != n.lastMessage || o.unreadCount != n.unreadCount) {
+        return true;
+      }
+      final a = o.otherParticipant;
+      final b = n.otherParticipant;
+      if (a.profilePhotoUrl != b.profilePhotoUrl ||
+          a.profilePhotoData != b.profilePhotoData) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void _evictAvatarCachesIfParticipantVisualChanged(
+    List<ConversationDto> next,
+    List<ConversationDto> prev,
+  ) {
+    final prevById = {for (final c in prev) c.id: c};
+    for (final n in next) {
+      final o = prevById[n.id];
+      if (o == null) continue;
+      final a = o.otherParticipant;
+      final b = n.otherParticipant;
+      if (a.profilePhotoUrl != b.profilePhotoUrl ||
+          a.profilePhotoData != b.profilePhotoData) {
+        evictProfileImageBytesCacheForRaw(a.profilePhotoUrl);
+        evictProfileImageBytesCacheForRaw(b.profilePhotoUrl);
+      }
+    }
+  }
+
+  /// API artık URL / inline veri gönderiyorsa eski [getUserById] eklerinin üstüne binmesin.
+  void _dropExtrasShadowedByDto(List<ConversationDto> list) {
+    for (final c in list) {
+      final op = c.otherParticipant;
+      final u = op.profilePhotoUrl?.trim();
+      if (u != null && u.isNotEmpty) {
+        _avatarExtras.remove(op.id);
+        continue;
+      }
+      final bytes = decodeProfilePhotoBytes(op.profilePhotoData);
+      if (bytes != null && bytes.isNotEmpty) {
+        _avatarExtras.remove(op.id);
+      }
+    }
+  }
+
+  /// Konuşma DTO’sundaki avatar her zaman öncelikli; ekstra sadece API boşken kullanılır.
+  ({String? url, Uint8List? bytes}) _effectiveAvatarFor(ConversationUserDto op) {
+    final extra = _avatarExtras[op.id];
+    final dtoUrl = op.profilePhotoUrl?.trim();
+    final dtoBytes = decodeProfilePhotoBytes(op.profilePhotoData);
+    if (dtoUrl != null && dtoUrl.isNotEmpty) {
+      return (
+        url: dtoUrl,
+        bytes: dtoBytes != null && dtoBytes.isNotEmpty ? dtoBytes : null,
+      );
+    }
+    if (dtoBytes != null && dtoBytes.isNotEmpty) {
+      return (url: null, bytes: dtoBytes);
+    }
+    return (url: extra?.url, bytes: extra?.bytes);
   }
 
   void _warmAvatarCacheForConversations(List<ConversationDto> list) {
@@ -322,7 +384,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
                               const SizedBox(height: 6),
                           itemBuilder: (context, index) {
                             final c = _conversations[index];
-                            final extra = _avatarExtras[c.otherParticipant.id];
+                            final av = _effectiveAvatarFor(c.otherParticipant);
                             final hasUnread = c.unreadCount > 0;
                             final timeParts =
                                 conversationPreviewTimePartsFromBackend(
@@ -337,12 +399,8 @@ class _ConversationListPageState extends State<ConversationListPage> {
                               unreadCount: c.unreadCount,
                               avatar: ProfileAvatar(
                                 radius: 20,
-                                imageUrl: extra?.url ??
-                                    c.otherParticipant.profilePhotoUrl,
-                                memoryBytes: extra?.bytes ??
-                                    decodeProfilePhotoBytes(
-                                      c.otherParticipant.profilePhotoData,
-                                    ),
+                                imageUrl: av.url,
+                                memoryBytes: av.bytes,
                                 fallbackInitial: c.otherParticipant.username,
                               ),
                               onTap: () async {

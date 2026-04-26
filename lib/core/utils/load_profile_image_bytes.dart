@@ -33,6 +33,12 @@ void _rememberProfileImageBytes(String? raw, Uint8List bytes) {
   _profileImageByteCache[k] = bytes;
 }
 
+/// Aynı URL altında güncellenmiş görsel veya yanlış pozitif cache için bayt önbelleğini siler.
+void evictProfileImageBytesCacheForRaw(String? raw) {
+  final k = _profileImageCacheKey(raw);
+  if (k != null) _profileImageByteCache.remove(k);
+}
+
 /// Profil / avatar görselleri için ham byte yükler.
 /// Önce [ApiClient] (Authorization Bearer) ile dener; korumalı dosya uçları için gerekli.
 /// Gerekirse yetkisiz [Dio] ile tekrar dener (herkese açık CDN vb.).

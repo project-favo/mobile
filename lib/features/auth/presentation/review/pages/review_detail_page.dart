@@ -1433,9 +1433,9 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
                                             ),
                                             const SizedBox(height: 6),
                                             Text(
-                                              _currentReview.isCollaborative
-                                                  ? 'Sponsored review · ${_formatDate(_currentReview.createdAt)}'
-                                                  : 'Verified review · ${_formatDate(_currentReview.createdAt)}',
+                                              _formatDate(
+                                                _currentReview.createdAt,
+                                              ),
                                               style: AppTextStyles.bodySmall
                                                   .copyWith(
                                                 color: AppColors.textSecondary,

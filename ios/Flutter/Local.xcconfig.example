@@ -1,0 +1,7 @@
+// Copy to Local.xcconfig (gitignored):
+//   cp ios/Flutter/Local.xcconfig.example ios/Flutter/Local.xcconfig
+//
+// Team ID: Xcode → Settings → Accounts → select Apple ID → Team → copy "Team ID".
+// Local.xcconfig should contain exactly:
+//
+// DEVELOPMENT_TEAM = YOUR_10_CHAR_TEAM_ID
