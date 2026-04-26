@@ -85,6 +85,36 @@ class ReviewRepository {
     }
   }
 
+  /// GET /api/reviews/me/average-rating — giriş yapan kullanıcının tüm yorumlarının
+  /// ortalama rating'i (sayfalama ile aynı DB filtresi; tek satır, hafif).
+  Future<double?> getMyReviewsAverageRating(String firebaseIdToken) async {
+    try {
+      _apiClient.setAuthToken(firebaseIdToken);
+      final response = await _apiClient.dio.get(
+        '/api/reviews/me/average-rating',
+      );
+      if (response.data is Map<String, dynamic>) {
+        final m = response.data as Map<String, dynamic>;
+        final v = m['averageRating'];
+        if (v == null) return null;
+        if (v is num) return v.toDouble();
+        return double.tryParse(v.toString());
+      }
+      return null;
+    } on DioException catch (e) {
+      if (e.response != null) {
+        final errorData = e.response?.data;
+        final errorMessage = errorData is Map
+            ? (errorData['message'] ??
+                errorData['error'] ??
+                'Failed to fetch review average')
+            : errorData?.toString() ?? 'Failed to fetch review average';
+        throw Exception(errorMessage);
+      }
+      throw Exception('Network error: ${e.message}');
+    }
+  }
+
   /// Product'a göre review'ları getirir
   /// GET /api/reviews/product/{productId}
   Future<List<ReviewDto>> getReviewsByProductId(

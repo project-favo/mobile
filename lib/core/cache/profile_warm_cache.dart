@@ -11,6 +11,8 @@ class ProfileWarmSnapshot {
   final Map<String, ProductDto> reviewProductHints;
   final int followerCount;
   final int followingCount;
+  /// GET /api/reviews/me/average-rating (sayfa değişiminde titremesin)
+  final double? myReviewsGlobalAverage;
 
   const ProfileWarmSnapshot({
     required this.user,
@@ -20,6 +22,7 @@ class ProfileWarmSnapshot {
     this.reviewProductHints = const {},
     this.followerCount = 0,
     this.followingCount = 0,
+    this.myReviewsGlobalAverage,
   });
 }
 
@@ -40,6 +43,7 @@ class ProfileWarmCache {
     Map<String, ProductDto> reviewProductHints = const {},
     int followerCount = 0,
     int followingCount = 0,
+    double? myReviewsGlobalAverage,
   }) {
     _snapshot = ProfileWarmSnapshot(
       user: user,
@@ -49,6 +53,7 @@ class ProfileWarmCache {
       reviewProductHints: Map<String, ProductDto>.from(reviewProductHints),
       followerCount: followerCount,
       followingCount: followingCount,
+      myReviewsGlobalAverage: myReviewsGlobalAverage,
     );
   }
 

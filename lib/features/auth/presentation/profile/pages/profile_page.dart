@@ -88,6 +88,8 @@ class _ProfilePageState extends State<ProfilePage>
   String? _myReviewsError;
   static const int _myReviewsPageSize = 5;
   int _myReviewsServerTotal = 0;
+  /// Sunucu: tüm yorumların ort. rating /api/reviews/me/average-rating (sayfadan bağımsız).
+  double? _myReviewsGlobalAverage;
   int _myReviewsCurrentPageIndex = 0;
   int _myReviewsTotalPages = 0;
   final Map<int, List<ReviewDto>> _myReviewsPageCache = {};
@@ -111,6 +113,7 @@ class _ProfilePageState extends State<ProfilePage>
       reviewProductHints: _reviewProductHints,
       followerCount: _followerCount,
       followingCount: _followingCount,
+      myReviewsGlobalAverage: _myReviewsGlobalAverage,
     );
   }
 
@@ -201,6 +204,7 @@ class _ProfilePageState extends State<ProfilePage>
       _reviewProductHints.addAll(warm.reviewProductHints);
       _followerCount = warm.followerCount;
       _followingCount = warm.followingCount;
+      _myReviewsGlobalAverage = warm.myReviewsGlobalAverage;
       _isLoading = false;
       // My Reviews: zenginleştirme bitene kadar iskelet — "önce normal sonra askı" titremesin
       _isLoadingMyReviews = true;
@@ -242,6 +246,15 @@ class _ProfilePageState extends State<ProfilePage>
 
   String _myReviewsSortApiParam() =>
       _selectedDateSort == 'Oldest' ? 'createdAt,asc' : 'createdAt,desc';
+
+  /// Sayfadaki 5 yorumun ortalaması değil; sunucudaki tüm yorumlar (Review avg).
+  Future<void> _syncMyReviewsAverageFromServer(String token) async {
+    try {
+      final avg = await _reviewRepository.getMyReviewsAverageRating(token);
+      if (!mounted) return;
+      setState(() => _myReviewsGlobalAverage = avg);
+    } catch (_) {}
+  }
 
   Future<void> _precacheMyReviewThumbnails(List<ReviewDto> reviews) async {
     if (!mounted || reviews.isEmpty) return;
@@ -397,6 +410,7 @@ class _ProfilePageState extends State<ProfilePage>
         unawaited(_precacheMyReviewThumbnails(reviews));
         unawaited(_reconcileMyReviewsEnrichment(reviews, token));
         unawaited(_prefetchNeighborMyReviewsPages(page.number, token));
+        unawaited(_syncMyReviewsAverageFromServer(token));
         return;
       }
 
@@ -430,6 +444,7 @@ class _ProfilePageState extends State<ProfilePage>
         _rememberWarmProfile();
         unawaited(_precacheMyReviewThumbnails(reviews));
         unawaited(_prefetchNeighborMyReviewsPages(page.number, token));
+        unawaited(_syncMyReviewsAverageFromServer(token));
         return;
       }
 
@@ -457,6 +472,7 @@ class _ProfilePageState extends State<ProfilePage>
       _rememberWarmProfile();
       unawaited(_precacheMyReviewThumbnails(reviews));
       unawaited(_prefetchNeighborMyReviewsPages(page.number, token));
+      unawaited(_syncMyReviewsAverageFromServer(token));
       if (!isPageChangeRequest) {
         unawaited(_reconcileMyReviewsEnrichment(reviews, token));
       }
@@ -667,10 +683,10 @@ class _ProfilePageState extends State<ProfilePage>
   }
 
   String _myReviewsAverageLabel() {
-    final visible = _myReviewsVisibleInTab();
-    if (visible.isEmpty) return '—';
-    final sum = visible.fold<double>(0, (a, r) => a + r.rating);
-    return (sum / visible.length).toStringAsFixed(1);
+    if (_myReviewsServerTotal <= 0) return '—';
+    final avg = _myReviewsGlobalAverage;
+    if (avg == null) return '—';
+    return avg.toStringAsFixed(1);
   }
 
   ProductDto _productForReviewDetail(ReviewDto review, ProductDto? hint) {
@@ -714,6 +730,10 @@ class _ProfilePageState extends State<ProfilePage>
         review.id,
       );
       _rememberWarmProfile();
+      final t = await _sessionHelper.getTokenAndSetHeader();
+      if (t != null && mounted) {
+        unawaited(_syncMyReviewsAverageFromServer(t));
+      }
     } finally {
       _myReviewDeleteLock.leave(review.id);
     }
