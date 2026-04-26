@@ -105,6 +105,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   /// [ProductCard] key parçası — ürün detayından dönünce like sayısı tazelensin.
   final Map<String, int> _productCardResync = {};
   final InFlightIdLock _homeProductLikeLock = InFlightIdLock();
+  final Map<String, bool> _homeQueuedLikeToggleParity = {};
+  static const Duration _homeLikeOverrideTtl = Duration(seconds: 10);
+  final Map<String, ({bool liked, DateTime at})> _homeLikeOverrides = {};
 
   // --- Banner collapse state ---
   bool _isBannerCollapsed = false;
@@ -126,6 +129,133 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   double? _pendingRestoreOffset;
   int _restoreScrollAttemptsLeft = 0;
   String _homeViewStateUserId = '';
+
+  void _putHomeLikeOverride(String productId, bool liked) {
+    if (productId.isEmpty) return;
+    _homeLikeOverrides[productId] = (liked: liked, at: DateTime.now());
+  }
+
+  void _pruneHomeLikeOverrides() {
+    final now = DateTime.now();
+    _homeLikeOverrides.removeWhere(
+      (_, v) => now.difference(v.at) > _homeLikeOverrideTtl,
+    );
+  }
+
+  bool _effectiveHomeLiked(ProductDto p) {
+    _pruneHomeLikeOverrides();
+    final ov = _homeLikeOverrides[p.id];
+    if (ov != null) return ov.liked;
+    return p.isLiked ?? false;
+  }
+
+  List<ProductDto> _applyHomeLikeOverrides(List<ProductDto> source) {
+    if (source.isEmpty) return source;
+    _pruneHomeLikeOverrides();
+    var changed = false;
+    final next = source.map((p) {
+      final ov = _homeLikeOverrides[p.id];
+      if (ov == null) return p;
+      final cur = p.isLiked ?? false;
+      if (cur == ov.liked) return p;
+      changed = true;
+      return p.copyWith(isLiked: ov.liked);
+    }).toList();
+    return changed ? next : source;
+  }
+
+  void _applyHomeLikeStatusLocally(String productId, bool liked) {
+    _putHomeLikeOverride(productId, liked);
+    final fi = _filteredProducts.indexWhere((p) => p.id == productId);
+    if (fi != -1) {
+      _filteredProducts[fi] = _filteredProducts[fi].copyWith(isLiked: liked);
+    }
+    for (final tab in HomeTopPicksTab.values) {
+      final list = _topPicksByTab[tab]!;
+      final i = list.indexWhere((p) => p.id == productId);
+      if (i != -1) {
+        final next = List<ProductDto>.from(list);
+        next[i] = next[i].copyWith(isLiked: liked);
+        _topPicksByTab[tab] = next;
+      }
+    }
+    final si = _searchResults.indexWhere((p) => p.id == productId);
+    if (si != -1) {
+      _searchResults[si] = _searchResults[si].copyWith(isLiked: liked);
+    }
+  }
+
+  Future<void> _toggleHomeProductLike(ProductDto product) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      CustomSnackBar.showWithMessenger(
+        messenger,
+        message: 'Please login to like products',
+        variant: CustomSnackBarVariant.error,
+      );
+      return;
+    }
+    final pid = product.id;
+    if (!_homeProductLikeLock.tryEnter(pid)) {
+      _homeQueuedLikeToggleParity[pid] = !(_homeQueuedLikeToggleParity[pid] ?? false);
+      return;
+    }
+    final beforeLike = _effectiveHomeLiked(product);
+    final optimistic = !beforeLike;
+    applyLocalLikeCountDeltaOnToggle(
+      pid,
+      wasLiked: beforeLike,
+      isNowLiked: optimistic,
+    );
+    if (mounted) {
+      setState(() {
+        _applyHomeLikeStatusLocally(pid, optimistic);
+      });
+    }
+    try {
+      final token = await _sessionHelper.getTokenAndSetHeader();
+      if (token == null) {
+        throw Exception('Failed to get Firebase ID token');
+      }
+      final newLikeStatus = await _interactionRepository.toggleProductLike(token, pid);
+      if (newLikeStatus != optimistic) {
+        applyLocalLikeCountDeltaOnToggle(
+          pid,
+          wasLiked: optimistic,
+          isNowLiked: newLikeStatus,
+        );
+      }
+      if (mounted) {
+        setState(() {
+          _applyHomeLikeStatusLocally(pid, newLikeStatus);
+        });
+      }
+    } catch (e) {
+      applyLocalLikeCountDeltaOnToggle(
+        pid,
+        wasLiked: optimistic,
+        isNowLiked: beforeLike,
+      );
+      if (mounted) {
+        setState(() {
+          _applyHomeLikeStatusLocally(pid, beforeLike);
+        });
+        CustomSnackBar.showWithMessenger(
+          messenger,
+          message: ErrorHandler.getUserFriendlyMessage(e),
+          variant: CustomSnackBarVariant.error,
+        );
+      }
+    } finally {
+      _homeProductLikeLock.leave(pid);
+      final queued = _homeQueuedLikeToggleParity[pid] ?? false;
+      if (queued) {
+        _homeQueuedLikeToggleParity[pid] = false;
+        unawaited(_toggleHomeProductLike(product));
+      }
+    }
+  }
 
   Route _noAnimationRoute(Widget page) {
     return PageRouteBuilder(
@@ -498,7 +628,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       }
     }
     for (final id in ids) {
-      invalidateProductCardSocialCaches(id);
+      // Sayaç cache'ini koru: tab dönüşünde 0 -> gerçek değer flash'ı oluşmasın.
       _productCardResync[id] = (_productCardResync[id] ?? 0) + 1;
     }
   }
@@ -798,10 +928,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final mergedProducts = _mergePolledFirstPageKeepLoadedItems(
         result.content,
       );
+      final mergedWithOverrides = _applyHomeLikeOverrides(mergedProducts);
       if (!mounted) return;
       setState(() {
-        _filteredProducts = mergedProducts;
-        _currentPage = mergedProducts.length > result.content.length
+        _filteredProducts = mergedWithOverrides;
+        _currentPage = mergedWithOverrides.length > result.content.length
             ? _currentPage
             : result.number;
         _totalPages = result.totalPages;
@@ -870,11 +1001,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           (append && page > 0)
               ? [..._filteredProducts, ...result.content]
               : result.content;
+      final nextWithOverrides = _applyHomeLikeOverrides(nextProducts);
 
       if (!mounted) return;
 
       setState(() {
-        _filteredProducts = nextProducts;
+        _filteredProducts = nextWithOverrides;
         _currentPage = result.number;
         _totalPages = result.totalPages;
         _totalElements = result.totalElements;
@@ -1011,7 +1143,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             categoryPath: product.tag.categoryPath,
             rating: product.averageRating ?? 0.0,
             desc: product.description ?? '',
-            isFavorite: product.isLiked ?? false,
+            isFavorite: _effectiveHomeLiked(product),
             loadReviewCount: true,
             friendAvatarUrls: _friendLikersMap[product.id] ?? const [],
             onTap: () async {
@@ -1027,76 +1159,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               }
             },
             onFavoriteTap: () async {
-              final messenger = ScaffoldMessenger.of(context);
-              final user = FirebaseAuth.instance.currentUser;
-              if (user == null) {
-                CustomSnackBar.showWithMessenger(
-                  messenger,
-                  message: 'Please login to like products',
-                  variant: CustomSnackBarVariant.error,
-                );
-                return;
-              }
-              if (!_homeProductLikeLock.tryEnter(product.id)) return;
-              try {
-                final tabProducts = _topPicksByTab[tab]!;
-                final idx = tabProducts.indexWhere((p) => p.id == product.id);
-                final bool beforeLike =
-                    idx != -1 ? (tabProducts[idx].isLiked ?? false) : (product.isLiked ?? false);
-                if (idx != -1) {
-                  applyLocalLikeCountDeltaOnToggle(
-                    product.id,
-                    wasLiked: beforeLike,
-                    isNowLiked: !beforeLike,
-                  );
-                  setState(() {
-                    _topPicksByTab[tab]![idx] =
-                        tabProducts[idx].copyWith(isLiked: !beforeLike);
-                  });
-                }
-                try {
-                  final token = await _sessionHelper.getTokenAndSetHeader();
-                  if (token == null) {
-                    throw Exception('Failed to get Firebase ID token');
-                  }
-                  final newLikeStatus =
-                      await _interactionRepository.toggleProductLike(token, product.id);
-                  if (newLikeStatus != !beforeLike) {
-                    applyLocalLikeCountDeltaOnToggle(
-                      product.id,
-                      wasLiked: !beforeLike,
-                      isNowLiked: newLikeStatus,
-                    );
-                  }
-                  if (idx != -1) {
-                    setState(() {
-                      _topPicksByTab[tab]![idx] =
-                          _topPicksByTab[tab]![idx].copyWith(isLiked: newLikeStatus);
-                    });
-                  }
-                } catch (e) {
-                  if (idx != -1) {
-                    applyLocalLikeCountDeltaOnToggle(
-                      product.id,
-                      wasLiked: !beforeLike,
-                      isNowLiked: beforeLike,
-                    );
-                    setState(() {
-                      _topPicksByTab[tab]![idx] =
-                          _topPicksByTab[tab]![idx].copyWith(isLiked: beforeLike);
-                    });
-                  }
-                  if (mounted) {
-                    CustomSnackBar.showWithMessenger(
-                      messenger,
-                      message: ErrorHandler.getUserFriendlyMessage(e),
-                      variant: CustomSnackBarVariant.error,
-                    );
-                  }
-                }
-              } finally {
-                _homeProductLikeLock.leave(product.id);
-              }
+              await _toggleHomeProductLike(product);
             },
           );
         },
@@ -1150,7 +1213,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             categoryPath: product.tag.categoryPath,
             rating: product.averageRating ?? 0.0,
             desc: product.description ?? '',
-            isFavorite: product.isLiked ?? false,
+            isFavorite: _effectiveHomeLiked(product),
             loadReviewCount: true,
             friendAvatarUrls: _friendLikersMap[product.id] ?? const [],
             onTap: () async {
@@ -1217,7 +1280,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               categoryPath: product.tag.categoryPath,
               rating: product.averageRating ?? 0.0,
               desc: product.description ?? '',
-              isFavorite: product.isLiked ?? false,
+              isFavorite: _effectiveHomeLiked(product),
               loadReviewCount: true,
               friendAvatarUrls: _friendLikersMap[product.id] ?? const [],
               onTap: () async {
@@ -1233,80 +1296,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 }
               },
               onFavoriteTap: () async {
-                final messenger = ScaffoldMessenger.of(context);
-                final user = FirebaseAuth.instance.currentUser;
-                if (user == null) {
-                  CustomSnackBar.showWithMessenger(
-                    messenger,
-                    message: 'Please login to like products',
-                    variant: CustomSnackBarVariant.error,
-                  );
-                  return;
-                }
-                if (!_homeProductLikeLock.tryEnter(product.id)) return;
-                try {
-                  final filteredIndex =
-                      _filteredProducts.indexWhere((p) => p.id == product.id);
-                  final bool beforeLike = filteredIndex != -1
-                      ? (_filteredProducts[filteredIndex].isLiked ?? false)
-                      : (product.isLiked ?? false);
-                  if (filteredIndex != -1) {
-                    applyLocalLikeCountDeltaOnToggle(
-                      product.id,
-                      wasLiked: beforeLike,
-                      isNowLiked: !beforeLike,
-                    );
-                    setState(() {
-                      _filteredProducts[filteredIndex] =
-                          _filteredProducts[filteredIndex]
-                              .copyWith(isLiked: !beforeLike);
-                    });
-                  }
-                  try {
-                    final token = await _sessionHelper.getTokenAndSetHeader();
-                    if (token == null) {
-                      throw Exception('Failed to get Firebase ID token');
-                    }
-                    final newLikeStatus = await _interactionRepository
-                        .toggleProductLike(token, product.id);
-                    if (newLikeStatus != !beforeLike) {
-                      applyLocalLikeCountDeltaOnToggle(
-                        product.id,
-                        wasLiked: !beforeLike,
-                        isNowLiked: newLikeStatus,
-                      );
-                    }
-                    if (filteredIndex != -1) {
-                      setState(() {
-                        _filteredProducts[filteredIndex] =
-                            _filteredProducts[filteredIndex]
-                                .copyWith(isLiked: newLikeStatus);
-                      });
-                    }
-                  } catch (e) {
-                    if (filteredIndex != -1) {
-                      applyLocalLikeCountDeltaOnToggle(
-                        product.id,
-                        wasLiked: !beforeLike,
-                        isNowLiked: beforeLike,
-                      );
-                      setState(() {
-                        _filteredProducts[filteredIndex] =
-                            _filteredProducts[filteredIndex]
-                                .copyWith(isLiked: beforeLike);
-                      });
-                    }
-                    if (mounted) {
-                      CustomSnackBar.showWithMessenger(
-                        messenger,
-                        message: ErrorHandler.getUserFriendlyMessage(e),
-                        variant: CustomSnackBarVariant.error,
-                      );
-                    }
-                  }
-                } finally {
-                  _homeProductLikeLock.leave(product.id);
-                }
+                await _toggleHomeProductLike(product);
               },
             );
           },
@@ -1826,6 +1816,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   /// [ReviewPage] dönüşünde grid, sayı ve favori durumu anında (flash’sız) güncellenir.
   void _applyProductFromReviewExit(ReviewPagePopResult r) {
     final id = r.product.id;
+    _putHomeLikeOverride(id, r.product.isLiked ?? false);
     seedProductCardSocialCaches(
       id,
       likeCount: r.likeCount,
@@ -1895,6 +1886,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         rating: computedRating,
         hasPhotoReview: anyVisibleReviewHasPhoto(visible),
       );
+      _putHomeLikeOverride(productId, updatedProduct.isLiked ?? false);
       if (!mounted) return;
       setState(() {
         _mergeProductFromDetail(productId, updatedProduct, bumpResync: true);

@@ -76,6 +76,10 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
   bool _isRatingExpanded = false;
   bool _isDescriptionExpanded = false;
   final InFlightFlag _productPageLikeLock = InFlightFlag();
+  bool _isProductLikeMutationInFlight = false;
+  bool _queuedProductLikeToggleParity = false;
+  bool? _productLikeUiOverride;
+  int _likeCountFetchSeq = 0;
   final InFlightIdLock _reviewListLikeLock = InFlightIdLock();
   final InFlightIdLock _reviewDeleteLock = InFlightIdLock();
   static const Duration _productListingPollInterval =
@@ -1011,11 +1015,17 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       if (_productPageDataChanged(p, _currentProduct)) {
         if (mounted) {
           setState(() {
-            _currentProduct = p;
+            final likedForUi = _isProductLikeMutationInFlight
+                ? _effectiveProductLiked()
+                : (p.isLiked ?? false);
+            _currentProduct = p.copyWith(isLiked: likedForUi);
             _cachedRatingCounts = null;
+            if (!_isProductLikeMutationInFlight) {
+              _productLikeUiOverride = null;
+            }
           });
         }
-        ProductMemoryCache.instance.remember(p);
+        ProductMemoryCache.instance.remember(_currentProduct);
       }
       if (!mounted) return;
       String? reviewsToken;
@@ -1161,12 +1171,15 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _loadLikeCount() async {
+  Future<void> _loadLikeCount({bool skipDuringLikeMutation = true}) async {
+    if (skipDuringLikeMutation && _isProductLikeMutationInFlight) return;
+    final seq = ++_likeCountFetchSeq;
     try {
       final count = await _interactionRepository.getProductLikeCount(
         _currentProduct.id,
       );
       if (!mounted) return;
+      if (seq != _likeCountFetchSeq) return;
       setState(() {
         _likeCount = count;
       });
@@ -1175,6 +1188,9 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       if (!mounted) return;
     }
   }
+
+  bool _effectiveProductLiked() =>
+      _productLikeUiOverride ?? (_currentProduct.isLiked ?? false);
 
   bool _isUnauthorizedError(Object error) {
     if (error is DioException) {
@@ -1400,13 +1416,22 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       }
       _lastProductOnHomeFirstPage = onHome;
       setState(() {
+        final likedForUi = _isProductLikeMutationInFlight
+            ? _effectiveProductLiked()
+            : (updatedProduct.isLiked ?? false);
         if (!_isLoadingReviews) {
           final nextAvg = _reviews.isEmpty
               ? 0.0
               : _averageRatingFromReviews(_reviews);
-          _currentProduct = updatedProduct.copyWith(averageRating: nextAvg);
+          _currentProduct = updatedProduct.copyWith(
+            averageRating: nextAvg,
+            isLiked: likedForUi,
+          );
         } else {
-          _currentProduct = updatedProduct;
+          _currentProduct = updatedProduct.copyWith(isLiked: likedForUi);
+        }
+        if (!_isProductLikeMutationInFlight) {
+          _productLikeUiOverride = null;
         }
       });
       ProductMemoryCache.instance.remember(_currentProduct);
@@ -1586,12 +1611,21 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       }
       return;
     }
-    if (!_productPageLikeLock.tryEnter()) return;
+    if (!_productPageLikeLock.tryEnter()) {
+      // Spam tap: tek tek kuyruğa dizmek yerine parity tut.
+      // Çift ek dokunuş nötr, tek ek dokunuş bir toggle daha demek.
+      _queuedProductLikeToggleParity = !_queuedProductLikeToggleParity;
+      return;
+    }
 
     // Optimistic update - UI'ı hemen güncelle (loading indicator yok)
-    final previousLikeStatus = _currentProduct.isLiked ?? false;
+    final previousLikeStatus = _effectiveProductLiked();
+    final previousLikeCount = _likeCount;
+    final optimisticLikeStatus = !previousLikeStatus;
+    _isProductLikeMutationInFlight = true;
     setState(() {
-      _currentProduct = _currentProduct.copyWith(isLiked: !previousLikeStatus);
+      _productLikeUiOverride = optimisticLikeStatus;
+      _currentProduct = _currentProduct.copyWith(isLiked: optimisticLikeStatus);
       _likeCount = (_likeCount + (previousLikeStatus ? -1 : 1)).clamp(0, 999999);
     });
 
@@ -1610,13 +1644,19 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
 
       // Backend'den gelen gerçek durumu güncelle
       setState(() {
+        _productLikeUiOverride = newLikeStatus;
         _currentProduct = _currentProduct.copyWith(isLiked: newLikeStatus);
+        final delta =
+            newLikeStatus == previousLikeStatus ? 0 : (newLikeStatus ? 1 : -1);
+        _likeCount = (previousLikeCount + delta).clamp(0, 999999);
       });
+      unawaited(_loadLikeCount(skipDuringLikeMutation: false));
     } catch (e) {
       // Hata durumunda optimistic update'i geri al
       setState(() {
+        _productLikeUiOverride = previousLikeStatus;
         _currentProduct = _currentProduct.copyWith(isLiked: previousLikeStatus);
-        _likeCount = (_likeCount + (previousLikeStatus ? 1 : -1)).clamp(0, 999999);
+        _likeCount = previousLikeCount;
       });
 
       if (mounted) {
@@ -1628,7 +1668,17 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
         );
       }
     } finally {
+      _isProductLikeMutationInFlight = false;
+      if (_queuedProductLikeToggleParity) {
+        // Sonraki queued toggle bu override'ı yeniden yazacak.
+      } else {
+        _productLikeUiOverride = null;
+      }
       _productPageLikeLock.leave();
+      if (_queuedProductLikeToggleParity) {
+        _queuedProductLikeToggleParity = false;
+        unawaited(_toggleLike());
+      }
     }
   }
 
@@ -1739,6 +1789,33 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
             height: 1.1,
           ),
         ),
+        actions: [
+          IconButton(
+            onPressed: !isProductEntityActive(_currentProduct) || _isLoadingProduct
+                ? null
+                : () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ProductAiChatPage(
+                          productId: _currentProduct.id,
+                          productName: _currentProduct.name,
+                        ),
+                      ),
+                    );
+                  },
+            icon: Image.asset(
+              'assets/images/Chatbot.png',
+              width: 26,
+              height: 26,
+              fit: BoxFit.contain,
+              color: (!isProductEntityActive(_currentProduct) || _isLoadingProduct)
+                  ? AppColors.textSecondary.withValues(alpha: 0.45)
+                  : null,
+            ),
+            tooltip: 'Product AI Chat',
+          ),
+        ],
       ),
       body: CustomRefreshIndicator(
         onRefresh: () async {
@@ -1851,7 +1928,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                                         (_isDescriptionExpanded || !canExpand)
                                             ? TextOverflow.visible
                                             : TextOverflow.ellipsis,
-                                    textAlign: TextAlign.start,
+                                    textAlign: TextAlign.justify,
                                     style: descStyle,
                                   ),
                                   if (canExpand) ...[
@@ -1952,12 +2029,12 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                                     onPressed: _toggleLike,
                                     splashRadius: 20,
                                     icon: Icon(
-                                      _currentProduct.isLiked ?? false
+                                      _effectiveProductLiked()
                                           ? Icons.favorite
                                           : Icons.favorite_border,
                                       size: 22,
                                       color:
-                                          _currentProduct.isLiked ?? false
+                                          _effectiveProductLiked()
                                               ? AppColors.primary
                                               : AppColors.textSecondary,
                                     ),
@@ -2002,30 +2079,6 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                                         builder:
                                             (_) => CompareProductSelectPage(
                                               product1: _currentProduct,
-                                            ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                                const SizedBox(width: 8),
-                                _miniIconAction(
-                                  customIcon: Image.asset(
-                                    'assets/images/Chatbot.png',
-                                    width: 24,
-                                    height: 24,
-                                    fit: BoxFit.contain,
-                                  ),
-                                  onTap: !isProductEntityActive(_currentProduct) ||
-                                          _isLoadingProduct
-                                      ? null
-                                      : () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder:
-                                            (_) => ProductAiChatPage(
-                                              productId: _currentProduct.id,
-                                              productName: _currentProduct.name,
                                             ),
                                       ),
                                     );

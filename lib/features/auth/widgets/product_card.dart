@@ -455,7 +455,9 @@ class _ProductCardState extends State<ProductCard> {
                     const SizedBox(width: 4),
                     Expanded(
                       child: Text(
-                        '${_reviewCount ?? 0} ${(_reviewCount ?? 0) == 1 ? 'review' : 'reviews'}',
+                        _reviewCount == null
+                            ? '...'
+                            : '${_reviewCount!} ${_reviewCount == 1 ? 'review' : 'reviews'}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: AppTextStyles.bodySmall.copyWith(
@@ -467,7 +469,7 @@ class _ProductCardState extends State<ProductCard> {
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      '${_likeCount ?? 0}',
+                      _likeCount == null ? '...' : '$_likeCount',
                       style: AppTextStyles.bodySmall.copyWith(
                         color: AppColors.textSecondary,
                         fontSize: 12,
