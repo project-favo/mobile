@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../../../../core/cache/app_session_cache.dart';
+import '../../../../../core/cache/current_user_cache.dart';
 import '../../../../../core/config/app_background_timers.dart';
 import '../../../../../core/cache/product_memory_cache.dart';
 import '../../../../../core/cache/review_memory_cache.dart';
@@ -174,7 +175,18 @@ class _ProfilePageState extends State<ProfilePage>
     unawaited(ProductReportStorage.hydrateForCurrentUser());
     _tabController = TabController(length: 2, vsync: this);
     final warm = ProfileWarmCache.instance.peek();
-    if (warm != null) {
+    final activeUserId = CurrentUserCache.instance.userId?.trim() ?? '';
+    final warmUserId = warm?.user.id.trim() ?? '';
+    final canUseWarm =
+        warm != null &&
+        activeUserId.isNotEmpty &&
+        warmUserId.isNotEmpty &&
+        activeUserId == warmUserId;
+    if (warm != null && !canUseWarm) {
+      // Prevent cross-account profile bleed after logout/login account switch.
+      ProfileWarmCache.instance.clear();
+    }
+    if (canUseWarm) {
       _user = warm.user;
       _cachedProfilePhotoBytes = decodeProfilePhotoBytes(warm.user.profilePhotoData);
       _myReviews = List<ReviewDto>.from(warm.myReviews);
@@ -235,8 +247,9 @@ class _ProfilePageState extends State<ProfilePage>
     if (!mounted || reviews.isEmpty) return;
     final urls = <String>{};
     for (final r in reviews) {
-      final p = _reviewProductHints[r.productId];
-      final resolved = resolveMediaUrl(p?.imageURL);
+      final resolved = resolveMediaUrl(
+        _myReviewImageUrlForRow(r, _reviewProductHints[r.productId]),
+      );
       if (resolved != null && resolved.isNotEmpty) {
         urls.add(resolved);
       }
@@ -390,13 +403,6 @@ class _ProfilePageState extends State<ProfilePage>
       if (blockFirstPaint) {
         final pids =
             reviews.map((r) => r.productId).where((s) => s.isNotEmpty).toSet();
-        for (final id in pids) {
-          _reviewProductHints.remove(id);
-          ProductMemoryCache.instance.remove(id);
-        }
-        _unlistedProductIdsFromFailedFetch.clear();
-        _myReviewProductIdsNotOnHomeFirstPage.clear();
-        _productIdsReportedByMeFromServer.clear();
 
         final enrich = await _enrichMyReviewsData(reviews, token);
         if (!mounted) return;
@@ -407,15 +413,18 @@ class _ProfilePageState extends State<ProfilePage>
           _myReviewsTotalPages = totalPages;
           _isLoadingMyReviews = false;
           _isMyReviewsPageSwitching = false;
+          _reviewProductHints.removeWhere((id, _) => !pids.contains(id));
           for (final e in enrich.hints.entries) {
             _reviewProductHints[e.key] = e.value;
           }
-          _unlistedProductIdsFromFailedFetch.addAll(enrich.unlisted404);
+          _unlistedProductIdsFromFailedFetch
+            ..removeWhere((id) => !pids.contains(id))
+            ..addAll(enrich.unlisted404);
           _myReviewProductIdsNotOnHomeFirstPage
-            ..clear()
+            ..removeWhere((id) => !pids.contains(id))
             ..addAll(enrich.notOnHome);
           _productIdsReportedByMeFromServer
-            ..clear()
+            ..removeWhere((id) => !pids.contains(id))
             ..addAll(enrich.reportedIds);
         });
         _rememberWarmProfile();
@@ -434,13 +443,13 @@ class _ProfilePageState extends State<ProfilePage>
         final pids =
             reviews.map((r) => r.productId).where((s) => s.isNotEmpty).toSet();
         if (!background || refreshProductState) {
-          for (final id in pids) {
-            _reviewProductHints.remove(id);
-            ProductMemoryCache.instance.remove(id);
-          }
-          _unlistedProductIdsFromFailedFetch.clear();
-          _myReviewProductIdsNotOnHomeFirstPage.clear();
-          _productIdsReportedByMeFromServer.clear();
+          _reviewProductHints.removeWhere((id, _) => !pids.contains(id));
+          _unlistedProductIdsFromFailedFetch
+              .removeWhere((id) => !pids.contains(id));
+          _myReviewProductIdsNotOnHomeFirstPage
+              .removeWhere((id) => !pids.contains(id));
+          _productIdsReportedByMeFromServer
+              .removeWhere((id) => !pids.contains(id));
         } else {
           // Hint cache'i koru: sayfalar arası geçişte görseller anında gelsin.
         }
@@ -764,6 +773,7 @@ class _ProfilePageState extends State<ProfilePage>
           itemBuilder: (context, index) {
             final review = visibleMyReviews[index];
             final hint = _reviewProductHints[review.productId];
+            final productImageUrl = _myReviewImageUrlForRow(review, hint);
             final youReportedReview = ReviewReportStorage.hasReportedSync(
               review.id,
             );
@@ -773,7 +783,7 @@ class _ProfilePageState extends State<ProfilePage>
             return ProfileReviewRowCard(
               key: ValueKey(review.id),
               review: review,
-              productImageUrl: hint?.imageURL,
+              productImageUrl: productImageUrl,
               youReportedThisReview: youReportedReview,
               youReportedThisProduct: youReportedProduct,
               onDelete: () => _onDeleteMyReview(review),
@@ -831,6 +841,19 @@ class _ProfilePageState extends State<ProfilePage>
           ),
       ],
     );
+  }
+
+  String? _myReviewImageUrlForRow(ReviewDto review, ProductDto? hint) {
+    final hinted = hint?.imageURL.trim();
+    if (hinted != null && hinted.isNotEmpty) {
+      return hinted;
+    }
+    final cached = ProductMemoryCache.instance.peek(review.productId);
+    final cachedImage = cached?.imageURL.trim();
+    if (cachedImage != null && cachedImage.isNotEmpty) {
+      return cachedImage;
+    }
+    return null;
   }
 
   Widget _buildMyReviewsPagination() {

@@ -596,11 +596,22 @@ class _UserProfilePageState extends State<UserProfilePage>
         }
       }
       setState(() {
+        final reviewProductIds = reviews
+            .map((r) => r.productId.trim())
+            .where((id) => id.isNotEmpty)
+            .toSet();
         _reviews = reviews;
-        _reviewProductHints.clear();
-        _unlistedProductIdsFromFailedFetch.clear();
-        _productIdsReportedByMeFromServer.clear();
-        _reviewProductIdsNotOnHomeFirstPage.clear();
+        // Keep already-known product hints for current reviews to avoid
+        // thumbnail placeholder flash on tab round-trips.
+        _reviewProductHints.removeWhere(
+          (productId, _) => !reviewProductIds.contains(productId),
+        );
+        _unlistedProductIdsFromFailedFetch
+            .removeWhere((id) => !reviewProductIds.contains(id));
+        _productIdsReportedByMeFromServer
+            .removeWhere((id) => !reviewProductIds.contains(id));
+        _reviewProductIdsNotOnHomeFirstPage
+            .removeWhere((id) => !reviewProductIds.contains(id));
         _avatarImageUrl = avatar;
         _isLoadingReviews = false;
       });
@@ -793,9 +804,10 @@ class _UserProfilePageState extends State<UserProfilePage>
 
   Widget _buildUserProfileReviewRow(ReviewDto r) {
     final hint = _reviewProductHints[r.productId];
+    final productImageUrl = _productImageUrlForReview(r, hint);
     return ProfileReviewRowCard(
       review: r,
-      productImageUrl: hint?.imageURL,
+      productImageUrl: productImageUrl,
       youReportedThisReview: ReviewReportStorage.hasReportedSync(r.id),
       youReportedThisProduct:
           ProductReportStorage.hasReportedSync(r.productId) ||
@@ -816,6 +828,19 @@ class _UserProfilePageState extends State<UserProfilePage>
         );
       },
     );
+  }
+
+  String? _productImageUrlForReview(ReviewDto review, ProductDto? hint) {
+    final hinted = hint?.imageURL.trim();
+    if (hinted != null && hinted.isNotEmpty) {
+      return hinted;
+    }
+    final cached = ProductMemoryCache.instance.peek(review.productId);
+    final cachedImage = cached?.imageURL.trim();
+    if (cachedImage != null && cachedImage.isNotEmpty) {
+      return cachedImage;
+    }
+    return null;
   }
 
   String _reviewsAverageLabel() {

@@ -1970,7 +1970,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _bumpProductCardCachesForListedProductIds();
+          // Background refresh while restoring an already-rendered home feed should
+          // not remount all cards; otherwise social meta rows briefly fall back to
+          // loading placeholders on tab return.
+          if (!(background && preserveLoadedProducts)) {
+            _bumpProductCardCachesForListedProductIds();
+          }
           final merged = FriendFeedMemoryCache.instance.peek()?.items;
           final source =
               (merged != null && merged.isNotEmpty)
