@@ -1746,61 +1746,133 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     if (_activeBannerTab != null || _searchQuery.isNotEmpty) {
       return const SizedBox.shrink();
     }
-    return SizedBox(
-      height: 38,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        itemCount: FeedSortOption.values.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (context, i) {
-          final option = FeedSortOption.values[i];
-          final isSelected = _activeSortOption == option;
-          return GestureDetector(
-            onTap: () async {
-              if (_activeSortOption == option) return;
-              setState(() {
-                _activeSortOption = option;
-                _isFiltering = true;
-              });
-              await _loadProductsPage(0);
-            },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOut,
-              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
-              decoration: BoxDecoration(
-                color: isSelected ? AppColors.primary : Colors.transparent,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: isSelected
-                      ? AppColors.primary
-                      : AppColors.textSecondary.withValues(alpha: 0.3),
-                  width: 1.2,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    _sortOptionIcon(option),
-                    size: 14,
-                    color: isSelected ? Colors.white : AppColors.textSecondary,
-                  ),
-                  const SizedBox(width: 5),
-                  Text(
-                    option.label,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                      color: isSelected ? Colors.white : AppColors.textSecondary,
+    return Padding(
+      padding: const EdgeInsets.only(left: 16, right: 12, top: 0, bottom: 0),
+      child: Align(
+        alignment: AlignmentDirectional.centerEnd,
+        child: PopupMenuButton<FeedSortOption>(
+          color: AppColors.surface,
+          surfaceTintColor: Colors.transparent,
+          elevation: 3,
+          shadowColor: Colors.black.withValues(alpha: 0.1),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(
+              color: AppColors.border.withValues(alpha: 0.35),
+            ),
+          ),
+          position: PopupMenuPosition.under,
+          offset: const Offset(0, 6),
+          tooltip: 'Sort feed',
+          padding: EdgeInsets.zero,
+          // [PopupMenuButton.constraints] applies to the *menu* overlay, not the
+          // trigger child. Never use a tight maxHeight here — it would clip the
+          // list to a single thin strip.
+          onSelected: (v) async {
+            if (v == _activeSortOption) return;
+            setState(() {
+              _activeSortOption = v;
+              _isFiltering = true;
+            });
+            await _loadProductsPage(0);
+          },
+          // Menu width: explicitly wider than the small trigger pill (Flutter
+          // otherwise sizes the overlay to the invoker, which looks cramped).
+          menuPadding: const EdgeInsets.symmetric(vertical: 6, horizontal: 0),
+          itemBuilder: (context) {
+            final w = MediaQuery.sizeOf(context).width;
+            final menuItemWidth = (w - 32).clamp(248.0, 320.0);
+            return FeedSortOption.values.map((o) {
+              final selected = o == _activeSortOption;
+              return PopupMenuItem<FeedSortOption>(
+                value: o,
+                height: 46,
+                padding: EdgeInsets.zero,
+                child: SizedBox(
+                  width: menuItemWidth,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 2,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.max,
+                      children: [
+                        Icon(
+                          _sortOptionIcon(o),
+                          size: 19,
+                          color: selected
+                              ? AppColors.primary
+                              : AppColors.textSecondary,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            o.label,
+                            style: AppTextStyles.body.copyWith(
+                              fontSize: 14.5,
+                              fontWeight: selected
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
+                            ),
+                          ),
+                        ),
+                        if (selected)
+                          const Icon(
+                            Icons.check_rounded,
+                            size: 20,
+                            color: AppColors.primary,
+                          ),
+                      ],
                     ),
                   ),
-                ],
+                ),
+              );
+            }).toList();
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            constraints: const BoxConstraints(minHeight: 30, maxHeight: 32),
+            decoration: BoxDecoration(
+              color: AppColors.background,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: AppColors.border.withValues(alpha: 0.4),
               ),
             ),
-          );
-        },
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.sort_rounded,
+                  size: 16,
+                  color: AppColors.textSecondary.withValues(alpha: 0.95),
+                ),
+                const SizedBox(width: 4),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 108),
+                  child: Text(
+                    _activeSortOption.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.bodySmall.copyWith(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                      height: 1.1,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 1),
+                Icon(
+                  Icons.expand_more_rounded,
+                  size: 15,
+                  color: AppColors.textSecondary.withValues(alpha: 0.85),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1808,9 +1880,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   IconData _sortOptionIcon(FeedSortOption option) => switch (option) {
         FeedSortOption.newest => Icons.schedule_rounded,
         FeedSortOption.ratingDesc => Icons.star_rounded,
-        FeedSortOption.ratingAsc => Icons.star_outline_rounded,
         FeedSortOption.reviewsDesc => Icons.chat_bubble_rounded,
-        FeedSortOption.reviewsAsc => Icons.chat_bubble_outline_rounded,
       };
 
   /// [ReviewPage] dönüşünde grid, sayı ve favori durumu anında (flash’sız) güncellenir.
