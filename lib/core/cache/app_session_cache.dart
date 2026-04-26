@@ -18,6 +18,7 @@ import 'conversation_list_cache.dart';
 import '../utils/user_display_name_prefs.dart';
 import '../utils/review_report_storage.dart';
 import '../notifications/app_badge_sync.dart';
+import '../../features/auth/widgets/product_card.dart' show clearAllProductCardSocialCaches;
 
 /// [AuthService.signOut] ve Firebase-only çıkışlarda: hesap değişiminde kalan tüm in-memory
 /// ve (ilgili) disk önbelleklerini temizle.
@@ -47,6 +48,7 @@ void clearAllAppCachesOnLogout() {
   FollowingIdSetCache.instance.invalidate();
   ReviewReportStorage.clearMemory();
   ChatOutgoingUserCache.clear();
+  clearAllProductCardSocialCaches();
   // ignore: discarded_futures
   UserDisplayNamePrefs.instance.removeAllCaseDisplayKeys();
   // Logout: OS / launcher simge badge'ini 0'la; okunmamış toplamı sunucu push ile güncellenecek.

@@ -49,6 +49,7 @@ import 'settings_page.dart';
 import 'follow_list_page.dart';
 import '../widgets/profile_review_row_card.dart';
 import '../../review/widgets/review_delete_flow.dart';
+import '../../../widgets/product_card.dart' show notifyProductCardGridResyncNeeded;
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -733,6 +734,10 @@ class _ProfilePageState extends State<ProfilePage>
       final t = await _sessionHelper.getTokenAndSetHeader();
       if (t != null && mounted) {
         unawaited(_syncMyReviewsAverageFromServer(t));
+      }
+      final pid = review.productId.trim();
+      if (pid.isNotEmpty) {
+        notifyProductCardGridResyncNeeded(pid);
       }
     } finally {
       _myReviewDeleteLock.leave(review.id);

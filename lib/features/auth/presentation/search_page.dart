@@ -129,6 +129,7 @@ class _SearchPageState extends State<SearchPage> {
     unawaited(_loadSocialGraphForSearch());
     unawaited(_preloadUserDirectory());
     _scheduleTopReviewerRefresh();
+    registerProductCardGridResyncHandler(_onProductCardGridResync);
   }
 
   Future<void> _loadCurrentUserIdentity() async {
@@ -448,6 +449,10 @@ class _SearchPageState extends State<SearchPage> {
     }
   }
 
+  void _onProductCardGridResync(String productId) {
+    unawaited(_refreshProductAfterReview(productId));
+  }
+
   Future<void> _primeSocialCountsForProducts(
     List<ProductDto> products, {
     int maxCount = 40,
@@ -597,6 +602,7 @@ class _SearchPageState extends State<SearchPage> {
 
   @override
   void dispose() {
+    unregisterProductCardGridResyncHandler(_onProductCardGridResync);
     if (_notificationSvcAttached) {
       NotificationRealtimeService.instance.detach();
     }

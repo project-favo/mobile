@@ -26,6 +26,8 @@ class _ReviewCountCache {
   static void remove(String productId) {
     _cache.remove(productId);
   }
+
+  static void clearAll() => _cache.clear();
 }
 
 class _LikeCountCache {
@@ -40,6 +42,8 @@ class _LikeCountCache {
   static void remove(String productId) {
     _cache.remove(productId);
   }
+
+  static void clearAll() => _cache.clear();
 }
 
 class _RatingCache {
@@ -54,6 +58,8 @@ class _RatingCache {
   static void remove(String productId) {
     _cache.remove(productId);
   }
+
+  static void clearAll() => _cache.clear();
 }
 
 class _PhotoReviewCache {
@@ -68,6 +74,8 @@ class _PhotoReviewCache {
   static void remove(String productId) {
     _cache.remove(productId);
   }
+
+  static void clearAll() => _cache.clear();
 }
 
 /// Grid’de kalp [isLiked] zenginleştirmeden gelirken like sayısı ayrı uç/önbellekten 0 gelebiliyor.
@@ -656,6 +664,32 @@ void invalidateProductCardSocialCaches(String productId) {
   _LikeCountCache.remove(productId);
   _RatingCache.remove(productId);
   _PhotoReviewCache.remove(productId);
+}
+
+/// [clearAllAppCachesOnLogout] — hesap değişiminde eski yorum/like sayıları kalmesin.
+void clearAllProductCardSocialCaches() {
+  _ReviewCountCache.clearAll();
+  _LikeCountCache.clearAll();
+  _RatingCache.clearAll();
+  _PhotoReviewCache.clearAll();
+}
+
+final List<void Function(String productId)> _productCardGridResyncHandlers = [];
+
+void registerProductCardGridResyncHandler(void Function(String productId) onProductId) {
+  _productCardGridResyncHandlers.add(onProductId);
+}
+
+void unregisterProductCardGridResyncHandler(void Function(String productId) onProductId) {
+  _productCardGridResyncHandlers.remove(onProductId);
+}
+
+/// Profil "My reviews" yorum silme gibi: ana sayfa/arama [ProductCard] anında sunucuyla hizalansın.
+void notifyProductCardGridResyncNeeded(String productId) {
+  if (productId.isEmpty) return;
+  for (final h in List<void Function(String)>.from(_productCardGridResyncHandlers)) {
+    h(productId);
+  }
 }
 
 /// Detay ekranından dönmeden hemen (sunucu refetch yok) grid sayılarını doldurur; flash yapmaz.

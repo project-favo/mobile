@@ -433,6 +433,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     FollowingIdSetCache.instance.addListener(_onFollowingChangedForFriendLikers);
     unawaited(_loadFriendLikers());
     unawaited(_warmSearchCatalogInBackground());
+    registerProductCardGridResyncHandler(_onProductCardGridResync);
     _searchController.addListener(() {
       _onSearchChanged(_searchController.text);
     });
@@ -462,6 +463,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   @override
   void dispose() {
     _rememberHomeViewState();
+    unregisterProductCardGridResyncHandler(_onProductCardGridResync);
     FollowingIdSetCache.instance.removeListener(_onFollowingChangedForFriendLikers);
     MessageUnreadService.instance.detach();
     if (_notificationSvcAttached) {
@@ -1926,6 +1928,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     if (si != -1) {
       _searchResults[si] = updated;
     }
+  }
+
+  void _onProductCardGridResync(String productId) {
+    unawaited(_refreshProductLikeStatus(productId));
   }
 
   /// Sistem geri / gesture ile null dönüşte: sunucu gerçeği (cache revalidate, flash yok).
