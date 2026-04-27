@@ -268,7 +268,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
         try {
           final idStr = e.key.toString();
           final pix = await _authService.fetchUserProfileImage(idStr);
-          if (pix != null && pix.isNotFound) {
+          if (pix != null && (pix.isNotFound || pix.isActiveUserNoPhoto)) {
             return null;
           }
           if (pix != null && pix.hasImage) {

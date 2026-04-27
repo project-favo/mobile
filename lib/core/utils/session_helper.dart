@@ -12,7 +12,6 @@ import 'review_report_storage.dart';
 import '../cache/app_session_cache.dart';
 import '../config/app_background_timers.dart';
 import 'app_logger.dart';
-import 'user_account_flags.dart';
 
 /// Session management helper
 /// Handles backend session establishment and token management
@@ -28,9 +27,9 @@ class SessionHelper {
   static const String _deactivatedNotice =
       'Your account has been deactivated by admin.\n\n'
       'For help, please contact: ctis411.09@gmail.com';
-  static const String _suspendedTitle = 'Account Suspended';
+  static const String _suspendedTitle = 'Account unavailable';
   static const String _suspendedNotice =
-      'Your account has been suspended.\n\n'
+      'This account is no longer available.\n\n'
       'For help, please contact: ctis411.09@gmail.com';
   Timer? _accountStatusTimer;
   bool _isHandlingDeactivatedState = false;
@@ -230,6 +229,7 @@ class SessionHelper {
   }
 
   bool _looksLikeSuspendedAccountFromDio(DioException e) {
+    if (looksLikeSuspendedBackendLoginResponse(e)) return true;
     final body = dioResponseDataAsSearchString(e.response?.data);
     if (looksLikeSuspendedAccountMessage(body)) return true;
     final code = e.response?.statusCode ?? 0;

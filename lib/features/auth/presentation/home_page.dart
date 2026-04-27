@@ -13,6 +13,7 @@ import '../../../core/widgets/main_bottom_nav_items.dart';
 import '../../../features/activity/presentation/activity_page.dart';
 import '../../../core/widgets/custom_refresh_indicator.dart';
 import '../../../core/widgets/skeleton_loader.dart';
+import '../../../core/widgets/product_request_notice.dart';
 import '../../../core/routes/custom_page_transitions.dart';
 import '../../../core/utils/in_flight_id_lock.dart';
 import '../../../core/cache/following_id_set_cache.dart';
@@ -138,8 +139,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   /// [ProductCard] key parçası — ürün detayından dönünce like sayısı tazelensin.
   final Map<String, int> _productCardResync = {};
   final InFlightIdLock _homeProductLikeLock = InFlightIdLock();
-  final Map<String, bool> _homeQueuedLikeToggleParity = {};
-  static const Duration _homeLikeOverrideTtl = Duration(seconds: 10);
+  /// Grid like ile çakışan [getProductById] / yenilemelerin eski [isLiked] ile üstüne yazmasını engeller.
+  final Map<String, int> _homeLikeMutationEpoch = {};
+  static const Duration _homeLikeOverrideTtl = Duration(minutes: 3);
   final Map<String, ({bool liked, DateTime at})> _homeLikeOverrides = {};
 
   // --- Banner collapse state ---
@@ -231,9 +233,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
     final pid = product.id;
     if (!_homeProductLikeLock.tryEnter(pid)) {
-      _homeQueuedLikeToggleParity[pid] = !(_homeQueuedLikeToggleParity[pid] ?? false);
       return;
     }
+    _homeLikeMutationEpoch[pid] = (_homeLikeMutationEpoch[pid] ?? 0) + 1;
     final beforeLike = _effectiveHomeLiked(product);
     final optimistic = !beforeLike;
     applyLocalLikeCountDeltaOnToggle(
@@ -282,11 +284,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       }
     } finally {
       _homeProductLikeLock.leave(pid);
-      final queued = _homeQueuedLikeToggleParity[pid] ?? false;
-      if (queued) {
-        _homeQueuedLikeToggleParity[pid] = false;
-        unawaited(_toggleHomeProductLike(product));
-      }
     }
   }
 
@@ -1439,6 +1436,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   style: AppTextStyles.bodySecondary,
                   textAlign: TextAlign.center,
                 ),
+                const ProductRequestNotice(),
               ],
             ),
           ),
@@ -2186,6 +2184,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   /// Sistem geri / gesture ile null dönüşte: sunucu gerçeği (cache revalidate, flash yok).
   Future<void> _refreshProductLikeStatus(String productId) async {
+    final epochAtStart = _homeLikeMutationEpoch[productId] ?? 0;
     try {
       final token = await _sessionHelper.getTokenAndSetHeader();
       if (token == null) return;
@@ -2205,6 +2204,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final rc = visible.length;
       final sumRating = visible.fold<int>(0, (sum, r) => sum + r.rating);
       final computedRating = rc > 0 ? (sumRating / rc) : 0.0;
+      if (!mounted) return;
+      if ((_homeLikeMutationEpoch[productId] ?? 0) != epochAtStart) {
+        return;
+      }
       setProductCardSocialCaches(
         productId,
         likeCount: likeCount,

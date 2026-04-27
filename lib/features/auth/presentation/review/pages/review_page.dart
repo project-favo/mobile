@@ -845,8 +845,10 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
   }
 
   Future<void> _afterReviewsRefreshed() async {
-    await _hydrateReviewRowLikeCounts();
+    // Kendi yorumu like overlay’i diskten hızlı gelir; tüm satırlar için like count
+    // GET’leri (yavaş) ondan sonra veya paralel — önce boost yoksa UI 1–2 sn gecikirdi.
     await _syncSelfLikeBoostFromPrefsAndServer();
+    unawaited(_hydrateReviewRowLikeCounts());
   }
 
   @override
@@ -874,6 +876,9 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       }
       ProductMemoryCache.instance.remember(_currentProduct);
       _hydrateReviewsFromCache();
+      if (_reviews.isNotEmpty) {
+        unawaited(_syncSelfLikeBoostFromPrefsAndServer());
+      }
       _loadReviews(background: _reviews.isNotEmpty);
       unawaited(_loadLikeCount());
       unawaited(_refreshProductData());
@@ -893,6 +898,9 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       }
       _isLoadingProduct = false;
       _hydrateReviewsFromCache();
+      if (_reviews.isNotEmpty) {
+        unawaited(_syncSelfLikeBoostFromPrefsAndServer());
+      }
       _loadReviews(background: _reviews.isNotEmpty);
       unawaited(_loadLikeCount());
       unawaited(_refreshProductData());
@@ -903,6 +911,9 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
     _currentProduct = _placeholderProduct(pid, widget.productName ?? '');
     _isLoadingProduct = true;
     _hydrateReviewsFromCache();
+    if (_reviews.isNotEmpty) {
+      unawaited(_syncSelfLikeBoostFromPrefsAndServer());
+    }
     _loadReviews(background: _reviews.isNotEmpty);
     _loadProductById();
     _startProductListingPoll();
@@ -1058,7 +1069,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       if (_reviewListDataChanged(_reviews, reviews) || avgChanged) {
         if (mounted) {
           setState(() {
-            _reviews = reviews;
+            _reviews = _mergeReviewsPreservingLikeInFlight(reviews);
             _currentProduct = _currentProduct.copyWith(averageRating: nextAvg);
             _cachedRatingCounts = null;
           });
@@ -1453,6 +1464,46 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
     } catch (_) {}
   }
 
+  /// Arka plan [_loadReviews] / poll, like isteği sürerken eski satırı geri yazmasın.
+  List<ReviewDto> _mergeReviewsPreservingLikeInFlight(List<ReviewDto> fetched) {
+    if (fetched.isEmpty) return fetched;
+    final prev = {for (final r in _reviews) r.id: r};
+    return [
+      for (final r in fetched)
+        if (_reviewListLikeLock.isHeld(r.id) && prev.containsKey(r.id))
+          prev[r.id]!
+        else
+          r,
+    ];
+  }
+
+  /// [getReviewById] bazen toggle’dan önceki [isLiked] ile döner; [toggleReviewLike] otoritedir.
+  ReviewDto _reviewRowWithToggleLikeReconciled(
+    ReviewDto fromServer,
+    bool toggleLiked,
+    ReviewDto optimisticRow,
+  ) {
+    if (fromServer.isLikedByCurrentUser == toggleLiked) return fromServer;
+    return ReviewDto(
+      id: fromServer.id,
+      title: fromServer.title,
+      description: fromServer.description,
+      isCollaborative: fromServer.isCollaborative,
+      rating: fromServer.rating,
+      createdAt: fromServer.createdAt,
+      productId: fromServer.productId,
+      productName: fromServer.productName,
+      ownerId: fromServer.ownerId,
+      ownerUserName: fromServer.ownerUserName,
+      ownerProfilePhotoUrl: fromServer.ownerProfilePhotoUrl,
+      mediaList: fromServer.mediaList,
+      likeCount: optimisticRow.likeCount,
+      isLikedByCurrentUser: toggleLiked,
+      isProductNotListed: fromServer.isProductNotListed,
+      isReviewInactive: fromServer.isReviewInactive,
+    );
+  }
+
   Future<void> _loadReviews({bool background = false}) async {
     var shouldFetchInBackground = background;
     if (!background) {
@@ -1492,7 +1543,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
             ReviewMemoryCache.instance.remember(_currentProduct.id, reviews);
           }
           setState(() {
-            _reviews = reviews;
+            _reviews = _mergeReviewsPreservingLikeInFlight(reviews);
             _currentProduct = _currentProduct.copyWith(
               averageRating: reviews.isEmpty ? 0.0 : _averageRatingFromReviews(reviews),
             );
@@ -1547,7 +1598,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       }
 
       setState(() {
-        _reviews = reviews;
+        _reviews = _mergeReviewsPreservingLikeInFlight(reviews);
         _currentProduct = _currentProduct.copyWith(
           averageRating: reviews.isEmpty ? 0.0 : _averageRatingFromReviews(reviews),
         );
@@ -2392,7 +2443,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                             context,
                             SlideRightRoute(
                               page: ReviewDetailPage(
-                                review: review,
+                                review: displayReview,
                                 product: _currentProduct,
                               ),
                             ),
@@ -2505,15 +2556,21 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                                 _currentUserId?.trim() ??
                                 CurrentUserCache.instance.userId?.trim() ??
                                 '';
+                            // Kendi yorumu: toggle true dönse bile GET/liste gecikmeli false verebilir;
+                            // boost’u true bırak; [_syncSelfLikeBoostFromPrefsAndServer] sunucu true olunca siler.
                             if (uid.isNotEmpty && _isMyReview(review)) {
                               await SelfReviewLikeLocalPrefs.instance.setBoost(
                                 uid,
                                 review.id,
-                                false,
+                                newLikeStatus,
                               );
                               if (mounted) {
                                 setState(() {
-                                  _selfLikeBoostByReviewId.remove(review.id);
+                                  if (newLikeStatus) {
+                                    _selfLikeBoostByReviewId[review.id] = true;
+                                  } else {
+                                    _selfLikeBoostByReviewId.remove(review.id);
+                                  }
                                 });
                               }
                             }
@@ -2546,10 +2603,50 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                                 }
                                 return;
                               }
-                              if (reviewIndex != -1) {
-                                setState(() {
-                                  _reviews[reviewIndex] = updatedReview;
-                                });
+                              if (mounted) {
+                                final ri =
+                                    _reviews.indexWhere((r) => r.id == review.id);
+                                if (ri != -1) {
+                                  final opt = _reviews[ri];
+                                  final merged =
+                                      _reviewRowWithToggleLikeReconciled(
+                                    updatedReview,
+                                    newLikeStatus,
+                                    opt,
+                                  );
+                                  setState(() {
+                                    final i2 = _reviews.indexWhere(
+                                      (r) => r.id == review.id,
+                                    );
+                                    if (i2 != -1) {
+                                      _reviews[i2] = merged;
+                                    }
+                                  });
+                                  if (_isUsingDefaultReviewQuery) {
+                                    ReviewMemoryCache.instance.remember(
+                                      _currentProduct.id,
+                                      _reviews,
+                                    );
+                                  }
+                                  final uidClear =
+                                      _currentUserId?.trim() ??
+                                      CurrentUserCache.instance.userId
+                                          ?.trim() ??
+                                      '';
+                                  if (uidClear.isNotEmpty &&
+                                      _isMyReview(review) &&
+                                      merged.isLikedByCurrentUser) {
+                                    await SelfReviewLikeLocalPrefs.instance
+                                        .setBoost(uidClear, review.id, false);
+                                    if (mounted) {
+                                      setState(() {
+                                        _selfLikeBoostByReviewId.remove(
+                                          review.id,
+                                        );
+                                      });
+                                    }
+                                  }
+                                }
                               }
                             } on ReviewNotAvailableException {
                               if (reviewIndex != -1 && mounted) {

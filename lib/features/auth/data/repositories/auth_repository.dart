@@ -17,19 +17,29 @@ class UserProfileImageFetch {
     this.memoryBytes,
     this.imageUrl,
     this.isNotFound = false,
+    this.isActiveUserNoPhoto = false,
   });
 
+  /// 404/410: kullanıcı yok veya deaktif.
   const UserProfileImageFetch.notFound() : this._(isNotFound: true);
+
+  /// 204: kullanıcı aktif ama profil fotoğrafı yok.
+  const UserProfileImageFetch.activeNoPhoto() : this._(isActiveUserNoPhoto: true);
 
   /// Ham görüntü baytları (image/* 200 cevabı).
   factory UserProfileImageFetch.fromBytes(Uint8List b) {
-    if (b.isEmpty) return const UserProfileImageFetch.notFound();
+    if (b.isEmpty) return const UserProfileImageFetch.activeNoPhoto();
     return UserProfileImageFetch._(memoryBytes: b);
   }
 
   final Uint8List? memoryBytes;
   final String? imageUrl;
+
+  /// true = kullanıcı yok veya deaktif (404/410).
   final bool isNotFound;
+
+  /// true = kullanıcı aktif ama fotoğraf yok (204).
+  final bool isActiveUserNoPhoto;
 
   bool get hasImage =>
       (memoryBytes != null && memoryBytes!.isNotEmpty) ||
@@ -377,6 +387,9 @@ class AuthRepository {
       final code = r.statusCode;
       if (code == 404 || code == 410) {
         return const UserProfileImageFetch.notFound();
+      }
+      if (code == 204) {
+        return const UserProfileImageFetch.activeNoPhoto();
       }
       if (code != 200) return null;
       final data = r.data;

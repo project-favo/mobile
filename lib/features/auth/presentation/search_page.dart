@@ -30,6 +30,7 @@ import '../data/services/auth_service.dart';
 import '../data/services/review_prefetch_service.dart';
 import '../widgets/product_card.dart';
 import '../../../core/widgets/skeleton_loader.dart';
+import '../../../core/widgets/product_request_notice.dart';
 import '../../../core/widgets/custom_snack_bar.dart';
 import '../../../core/widgets/profile_avatar.dart';
 import 'home_page.dart';
@@ -77,6 +78,8 @@ class _SearchPageState extends State<SearchPage> with RouteAware {
   Timer? _userSearchDebounce;
   String? _currentUserId;
   final Set<String> _productLikeInFlight = <String>{};
+  /// Like toggler iken tamamlanan ürün yenilemelerinin eski [isLiked]/sayacı geri yazmasını engeller.
+  final Map<String, int> _searchLikeMutationEpoch = <String, int>{};
   final Set<String> _socialCountsInFlight = <String>{};
 
   /// GET /api/reviews/top-reviewers — giriş yapmışken dolar
@@ -417,6 +420,7 @@ class _SearchPageState extends State<SearchPage> with RouteAware {
   }
 
   Future<void> _refreshProductAfterReview(String productId) async {
+    final epochAtStart = _searchLikeMutationEpoch[productId] ?? 0;
     try {
       final token = await _sessionHelper.getTokenAndSetHeader();
       if (token == null) return;
@@ -435,6 +439,10 @@ class _SearchPageState extends State<SearchPage> with RouteAware {
       final rc = visible.length;
       final sumRating = visible.fold<int>(0, (sum, r) => sum + r.rating);
       final computedRating = rc > 0 ? (sumRating / rc) : 0.0;
+      if (!mounted) return;
+      if ((_searchLikeMutationEpoch[productId] ?? 0) != epochAtStart) {
+        return;
+      }
       setProductCardSocialCaches(
         productId,
         likeCount: like,
@@ -538,6 +546,7 @@ class _SearchPageState extends State<SearchPage> with RouteAware {
     final id = product.id;
     if (_productLikeInFlight.contains(id)) return;
     _productLikeInFlight.add(id);
+    _searchLikeMutationEpoch[id] = (_searchLikeMutationEpoch[id] ?? 0) + 1;
     try {
       final currentIndex = _searchResults.indexWhere((p) => p.id == id);
       final current = currentIndex != -1 ? _searchResults[currentIndex] : product;
@@ -595,7 +604,6 @@ class _SearchPageState extends State<SearchPage> with RouteAware {
           );
         }
       }
-      unawaited(_refreshProductAfterReview(id));
     } finally {
       _productLikeInFlight.remove(id);
     }
@@ -871,11 +879,22 @@ class _SearchPageState extends State<SearchPage> with RouteAware {
     final hasProfiles = _profileSearchMatches.isNotEmpty;
     final hasProducts = _searchResults.isNotEmpty;
     if (!hasProfiles && !hasProducts) {
-      return const Center(
-        child: Text(
-          'No matching products or people',
-          style: AppTextStyles.bodySecondary,
-          textAlign: TextAlign.center,
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.xxLarge),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.search_off_rounded, size: 44, color: AppColors.border),
+              const SizedBox(height: 12),
+              const Text(
+                'No matching products or people',
+                style: AppTextStyles.bodySecondary,
+                textAlign: TextAlign.center,
+              ),
+              const ProductRequestNotice(paddingTop: AppSpacing.medium),
+            ],
+          ),
         ),
       );
     }
@@ -980,12 +999,22 @@ class _SearchPageState extends State<SearchPage> with RouteAware {
               : Center(
                   child: Padding(
                     padding: const EdgeInsets.all(AppSpacing.xLarge),
-                    child: Text(
-                      hasProfiles
-                          ? 'No products match this search'
-                          : 'No matching products or people',
-                      style: AppTextStyles.bodySecondary,
-                      textAlign: TextAlign.center,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          hasProfiles
+                              ? 'No products match this search'
+                              : 'No matching products or people',
+                          style: AppTextStyles.bodySecondary,
+                          textAlign: TextAlign.center,
+                        ),
+                        ProductRequestNotice(
+                          paddingTop: hasProfiles
+                              ? AppSpacing.medium
+                              : AppSpacing.small,
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -1393,10 +1422,24 @@ class _SearchPageState extends State<SearchPage> with RouteAware {
                                           ),
                                           Expanded(
                                             child: _searchResults.isEmpty
-                                                ? const Center(
-                                                    child: Text(
-                                                      'No products found in this category',
-                                                      style: AppTextStyles.bodySecondary,
+                                                ? Center(
+                                                    child: Padding(
+                                                      padding: const EdgeInsets.all(
+                                                        AppSpacing.large,
+                                                      ),
+                                                      child: Column(
+                                                        mainAxisSize: MainAxisSize.min,
+                                                        children: [
+                                                          const Text(
+                                                            'No products found in this category',
+                                                            style: AppTextStyles.bodySecondary,
+                                                            textAlign: TextAlign.center,
+                                                          ),
+                                                          const ProductRequestNotice(
+                                                            paddingTop: AppSpacing.medium,
+                                                          ),
+                                                        ],
+                                                      ),
                                                     ),
                                                   )
                                                 : GridView.builder(

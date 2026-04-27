@@ -8,10 +8,11 @@ import 'exceptions.dart';
 class ErrorHandler {
   /// Login: devre dışı / kapatılmış hesap ([LoginPage]).
   static const String deactivatedAccountLoginMessage =
-      'Account was suspended.';
+      'This account is no longer available.';
 
-  /// Login: askıya alınmış hesap ([LoginPage] — backend bazen 401 + session metni döner).
-  static const String suspendedAccountLoginMessage = 'Account was suspended.';
+  /// Login: askıya alınmış veya vitrin dışı hesap ([LoginPage]).
+  static const String suspendedAccountLoginMessage =
+      'This account is no longer available.';
   /// Backend 503 “mail gönderilemedi” JSON: [code], isteğe bağlı [smtpDetail].
   /// Tanınmazsa null (genel 503 metni kullanılır).
   static String? messageForMailDelivery503Body(dynamic errorData) {
@@ -290,6 +291,10 @@ class ErrorHandler {
         serverMessage?.toString(),
       );
       if (conflictMsg != null) return conflictMsg;
+
+      if (looksLikeSuspendedBackendLoginResponse(e)) {
+        return suspendedAccountLoginMessage;
+      }
 
       final fullText =
           ('${serverMessage ?? ''} ${dioResponseDataAsSearchString(errorData)}')

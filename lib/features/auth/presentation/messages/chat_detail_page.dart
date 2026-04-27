@@ -258,7 +258,7 @@ class _ChatDetailPageState extends State<ChatDetailPage>
       final pix = await _authService.fetchUserProfileImage(op.id.toString());
       if (!mounted) return;
       if (pix != null) {
-        if (pix.isNotFound) {
+        if (pix.isNotFound || pix.isActiveUserNoPhoto) {
           evictProfileImageBytesCacheForRaw(
             _resolvedOtherUrl ?? op.profilePhotoUrl,
           );

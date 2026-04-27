@@ -13,6 +13,8 @@ class InFlightIdLock {
   void leave(String id) {
     if (id.isNotEmpty) _ids.remove(id);
   }
+
+  bool isHeld(String id) => id.isNotEmpty && _ids.contains(id);
 }
 
 /// Tek bir işlem (ör. detaydaki product like) için global kilitle.
@@ -28,4 +30,6 @@ class InFlightFlag {
   void leave() {
     _busy = false;
   }
+
+  bool get isHeld => _busy;
 }
