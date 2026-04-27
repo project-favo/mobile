@@ -1372,18 +1372,177 @@ class _ProfilePageState extends State<ProfilePage>
     setState(() {});
   }
 
+  Widget _buildStatColumn({required String value, required String label}) {
+    return Column(
+      children: [
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            value,
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+            maxLines: 1,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+            color: AppColors.textSecondary,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatDivider() {
+    return Container(
+      width: 1,
+      height: 36,
+      color: AppColors.border.withValues(alpha: 0.5),
+    );
+  }
+
+  Widget _buildStatsCard() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 18),
+          child: Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => unawaited(
+                    _openFollowListAndRefresh(isFollowers: true),
+                  ),
+                  child: _buildStatColumn(
+                    value: _followerCount.toString(),
+                    label: 'Followers',
+                  ),
+                ),
+              ),
+              _buildStatDivider(),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => unawaited(
+                    _openFollowListAndRefresh(isFollowers: false),
+                  ),
+                  child: _buildStatColumn(
+                    value: _followingCount.toString(),
+                    label: 'Following',
+                  ),
+                ),
+              ),
+              _buildStatDivider(),
+              Expanded(
+                child: _buildStatColumn(
+                  value: _myReviewsServerTotal > 0
+                      ? _myReviewsServerTotal.toString()
+                      : _myReviewsVisibleInTab().length.toString(),
+                  label: 'Reviews',
+                ),
+              ),
+              _buildStatDivider(),
+              Expanded(
+                child: Tooltip(
+                  message: 'Average star rating of your reviews (out of 5).',
+                  child: _buildStatColumn(
+                    value: _myReviewsAverageLabel(),
+                    label: 'Avg ★',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  AppBar _buildModernAppBar({bool showSettings = false}) {
+    return AppBar(
+      backgroundColor: AppColors.primary,
+      elevation: 0,
+      automaticallyImplyLeading: false,
+      title: const Text(
+        'Profile',
+        style: TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+          color: Colors.white,
+        ),
+      ),
+      centerTitle: true,
+      actions: showSettings
+          ? [
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: IconButton(
+                  icon: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.2),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.settings_rounded,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                  ),
+                  onPressed: () async {
+                    final result = await Navigator.push<dynamic>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => SettingsPage(initialUser: _user),
+                      ),
+                    );
+                    if (!mounted) return;
+                    if (result is UserResponseDto) {
+                      setState(() {
+                        _user = result;
+                        _cachedProfilePhotoBytes =
+                            result.hasProfileAvatarVisual
+                            ? decodeProfilePhotoBytes(result.profilePhotoData)
+                            : null;
+                      });
+                      _rememberWarmProfile();
+                    } else if (result == true) {
+                      unawaited(_loadUserData(background: true));
+                    }
+                  },
+                ),
+              ),
+            ]
+          : [],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
       return Scaffold(
         backgroundColor: AppColors.background,
-        appBar: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          automaticallyImplyLeading: false,
-          title: const Text('Profile', style: AppTextStyles.HomeHeader),
-          centerTitle: true,
-        ),
+        appBar: _buildModernAppBar(),
         body: const _ProfilePageSkeleton(),
         bottomNavigationBar: _buildBottomNavigationBar(),
       );
@@ -1392,28 +1551,59 @@ class _ProfilePageState extends State<ProfilePage>
     if (_errorMessage != null || _user == null) {
       return Scaffold(
         backgroundColor: AppColors.background,
-        appBar: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          automaticallyImplyLeading: false,
-          title: const Text('Profile', style: AppTextStyles.HomeHeader),
-          centerTitle: true,
-        ),
+        appBar: _buildModernAppBar(),
         body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                _errorMessage ?? 'Failed to load user data',
-                style: AppTextStyles.body,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: AppSpacing.large),
-              ElevatedButton(
-                onPressed: _loadUserData,
-                child: const Text('Retry'),
-              ),
-            ],
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.xLarge),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: AppColors.error.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.error_outline_rounded,
+                    size: 32,
+                    color: AppColors.error,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xLarge),
+                Text(
+                  _errorMessage ?? 'Failed to load user data',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: AppColors.textSecondary,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: AppSpacing.xLarge),
+                ElevatedButton(
+                  onPressed: _loadUserData,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 32,
+                      vertical: 14,
+                    ),
+                  ),
+                  child: const Text(
+                    'Try again',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
         bottomNavigationBar: _buildBottomNavigationBar(),
@@ -1423,13 +1613,7 @@ class _ProfilePageState extends State<ProfilePage>
     if (_user != null && _user!.id.isEmpty) {
       return Scaffold(
         backgroundColor: AppColors.background,
-        appBar: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          automaticallyImplyLeading: false,
-          title: const Text('Profile', style: AppTextStyles.HomeHeader),
-          centerTitle: true,
-        ),
+        appBar: _buildModernAppBar(),
         body: SafeArea(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xLarge),
@@ -1514,198 +1698,249 @@ class _ProfilePageState extends State<ProfilePage>
       );
     }
 
+    final user = _user!;
+    final firstName = (user.name ?? '').trim();
+    final lastName = (user.surname ?? '').trim();
+    final fullName = [firstName, lastName]
+        .where((e) => e.isNotEmpty)
+        .join(' ')
+        .trim();
+    final handle = '@${user.userName.replaceAll(' ', '')}';
+
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        automaticallyImplyLeading: false,
-        title: const Text('Profile', style: AppTextStyles.HomeHeader),
-        centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings),
-            color: AppColors.primary,
-            onPressed: () async {
-              final result = await Navigator.push<dynamic>(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => SettingsPage(initialUser: _user),
-                ),
-              );
-              if (!mounted) return;
-              if (result is UserResponseDto) {
-                setState(() {
-                  _user = result;
-                  _cachedProfilePhotoBytes = result.hasProfileAvatarVisual
-                      ? decodeProfilePhotoBytes(result.profilePhotoData)
-                      : null;
-                });
-                _rememberWarmProfile();
-              } else if (result == true) {
-                unawaited(_loadUserData(background: true));
-              }
-            },
-          ),
-        ],
-      ),
       body: CustomRefreshIndicator(
         onRefresh: _onProfilePullToRefresh,
-        child: SingleChildScrollView(
+        child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
-          child: Column(
-            children: [
-            const SizedBox(height: AppSpacing.xxLarge),
-            ProfileAvatar(
-              radius: 50,
-              imageUrl: _user!.profileImageUrl,
-              memoryBytes: _cachedProfilePhotoBytes,
-              fallbackInitial: _user!.userName,
-            ),
-            const SizedBox(height: AppSpacing.large),
-            if (_user!.name != null || _user!.surname != null) ...[
-              Text(
-                '${_user!.name ?? ''} ${_user!.surname ?? ''}'.trim(),
-                style: AppTextStyles.titleMedium,
-              ),
-              const SizedBox(height: AppSpacing.small),
-              Text(
-                '@${_user!.userName.replaceAll(' ', '')}',
-                style: AppTextStyles.bodySmall.copyWith(
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ] else ...[
-              Text(
-                '@${_user!.userName.replaceAll(' ', '')}',
-                style: AppTextStyles.titleMedium,
-              ),
-            ],
-            const SizedBox(height: AppSpacing.xxLarge),
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.medium,
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => unawaited(
-                        _openFollowListAndRefresh(isFollowers: true),
-                      ),
-                      child: _StatItem(
-                        count: _followerCount,
-                        label: 'Followers',
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => unawaited(
-                        _openFollowListAndRefresh(isFollowers: false),
-                      ),
-                      child: _StatItem(
-                        count: _followingCount,
-                        label: 'Following',
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: _StatItem(
-                      count: _myReviewsServerTotal > 0
-                          ? _myReviewsServerTotal
-                          : _myReviewsVisibleInTab().length,
-                      label: 'Reviews',
-                    ),
-                  ),
-                  Expanded(
-                    child: Tooltip(
-                      message:
-                          'Average star rating of your reviews (out of 5).',
-                      child: _StatTextItem(
-                        value: _myReviewsAverageLabel(),
-                        label: 'Review avg',
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: AppSpacing.xxLarge),
-            Material(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(14),
-              clipBehavior: Clip.antiAlias,
-              child: TabBar(
-                controller: _tabController,
-                labelColor: AppColors.primary,
-                unselectedLabelColor: AppColors.textSecondary,
-                indicatorColor: AppColors.primary,
-                indicatorWeight: 2.5,
-                dividerColor: Colors.transparent,
-                labelStyle: const TextStyle(
+          slivers: [
+            SliverAppBar(
+              expandedHeight: 250,
+              pinned: true,
+              automaticallyImplyLeading: false,
+              backgroundColor: AppColors.primary,
+              title: const Text(
+                'Profile',
+                style: TextStyle(
+                  fontSize: 18,
                   fontWeight: FontWeight.w700,
-                  fontSize: 14,
+                  color: Colors.white,
                 ),
-                unselectedLabelStyle: const TextStyle(
-                  fontWeight: FontWeight.w500,
-                  fontSize: 14,
-                ),
-                tabs: const [Tab(text: 'My Reviews'), Tab(text: 'Wishlist')],
               ),
-            ),
-            const SizedBox(height: AppSpacing.large),
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.xLarge,
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Text(
-                    'Sort by date',
-                    style: AppTextStyles.bodySmall.copyWith(
-                      color: AppColors.textSecondary,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.2,
+              centerTitle: true,
+              actions: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: IconButton(
+                    icon: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.2),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.settings_rounded,
+                        color: Colors.white,
+                        size: 18,
+                      ),
                     ),
-                  ),
-                  const Spacer(),
-                  _SortDropdown(
-                    items: const ['Newest', 'Oldest'],
-                    value: _selectedDateSort,
-                    onChanged: (value) {
-                      if (value == null) return;
-                      setState(() {
-                        _selectedDateSort = value;
-                        _myReviewsCurrentPageIndex = 0;
-                        _myReviewsPageCache.clear();
-                      });
-                      if (_tabController.index == 0) {
-                        unawaited(
-                          _loadMyReviews(
-                            background: true,
-                            refreshProductState: true,
-                            targetPageIndex: 0,
-                          ),
-                        );
-                      } else {
-                        _sortWishlist();
+                    onPressed: () async {
+                      final result = await Navigator.push<dynamic>(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => SettingsPage(initialUser: _user),
+                        ),
+                      );
+                      if (!mounted) return;
+                      if (result is UserResponseDto) {
+                        setState(() {
+                          _user = result;
+                          _cachedProfilePhotoBytes =
+                              result.hasProfileAvatarVisual
+                              ? decodeProfilePhotoBytes(result.profilePhotoData)
+                              : null;
+                        });
+                        _rememberWarmProfile();
+                      } else if (result == true) {
+                        unawaited(_loadUserData(background: true));
                       }
                     },
                   ),
+                ),
+              ],
+              flexibleSpace: FlexibleSpaceBar(
+                background: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Container(
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            Color(0xFFB5003A),
+                            AppColors.primary,
+                            Color(0xFF6B001F),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Positioned.fill(
+                      child: CustomPaint(painter: _CirclePatternPainter()),
+                    ),
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ProfileAvatar(
+                            radius: 52,
+                            imageUrl: user.profileImageUrl,
+                            memoryBytes: _cachedProfilePhotoBytes,
+                            fallbackInitial: '',
+                          ),
+                          const SizedBox(height: 8),
+                          if (fullName.isNotEmpty) ...[
+                            Text(
+                              fullName,
+                              style: const TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                          ],
+                          Text(
+                            handle,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.white.withValues(alpha: 0.75),
+                              fontWeight: FontWeight.w400,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: AppSpacing.xLarge),
+
+                  _buildStatsCard(),
+
+                  const SizedBox(height: AppSpacing.xxLarge),
+
+                  // Tab bar
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.xLarge,
+                    ),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(14),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.05),
+                            blurRadius: 10,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: TabBar(
+                          controller: _tabController,
+                          labelColor: AppColors.primary,
+                          unselectedLabelColor: AppColors.textSecondary,
+                          indicatorColor: AppColors.primary,
+                          indicatorWeight: 2.5,
+                          dividerColor: Colors.transparent,
+                          labelStyle: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                          ),
+                          unselectedLabelStyle: const TextStyle(
+                            fontWeight: FontWeight.w500,
+                            fontSize: 14,
+                          ),
+                          tabs: const [
+                            Tab(text: 'My Reviews'),
+                            Tab(text: 'Wishlist'),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: AppSpacing.large),
+
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.xLarge,
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        const Text(
+                          'Sort by date',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: AppColors.textSecondary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const Spacer(),
+                        _SortDropdown(
+                          items: const ['Newest', 'Oldest'],
+                          value: _selectedDateSort,
+                          onChanged: (value) {
+                            if (value == null) return;
+                            setState(() {
+                              _selectedDateSort = value;
+                              _myReviewsCurrentPageIndex = 0;
+                              _myReviewsPageCache.clear();
+                            });
+                            if (_tabController.index == 0) {
+                              unawaited(
+                                _loadMyReviews(
+                                  background: true,
+                                  refreshProductState: true,
+                                  targetPageIndex: 0,
+                                ),
+                              );
+                            } else {
+                              _sortWishlist();
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: AppSpacing.xxLarge),
+
+                  if (_tabController.index == 0)
+                    _buildMyReviewsTab()
+                  else
+                    _buildWishlistTab(),
+
+                  const SizedBox(height: AppSpacing.xxLarge),
                 ],
               ),
             ),
-            const SizedBox(height: AppSpacing.xxLarge),
-            if (_tabController.index == 0)
-              _buildMyReviewsTab()
-            else
-              _buildWishlistTab(),
-            const SizedBox(height: AppSpacing.xxLarge),
           ],
-          ),
         ),
       ),
       bottomNavigationBar: _buildBottomNavigationBar(),
@@ -1814,59 +2049,6 @@ class _ProfilePageSkeleton extends StatelessWidget {
           width: 64,
           height: 12,
           borderRadius: BorderRadius.circular(4),
-        ),
-      ],
-    );
-  }
-}
-
-class _StatItem extends StatelessWidget {
-  final int count;
-  final String label;
-
-  const _StatItem({required this.count, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(
-          count.toString(),
-          style: AppTextStyles.heading3,
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: AppSpacing.small),
-        Text(
-          label,
-          style: AppTextStyles.bodySecondary,
-          textAlign: TextAlign.center,
-          maxLines: 2,
-        ),
-      ],
-    );
-  }
-}
-
-class _StatTextItem extends StatelessWidget {
-  final String value;
-  final String label;
-
-  const _StatTextItem({required this.value, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Text(value, style: AppTextStyles.heading3, maxLines: 1),
-        ),
-        const SizedBox(height: AppSpacing.small),
-        Text(
-          label,
-          style: AppTextStyles.bodySecondary,
-          textAlign: TextAlign.center,
-          maxLines: 2,
         ),
       ],
     );
@@ -2007,4 +2189,20 @@ class _WishlistRow extends StatelessWidget {
       ),
     );
   }
+}
+
+class _CirclePatternPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.06)
+      ..style = PaintingStyle.fill;
+
+    canvas.drawCircle(Offset(size.width * 0.85, size.height * 0.2), 70, paint);
+    canvas.drawCircle(Offset(size.width * 0.1, size.height * 0.75), 50, paint);
+    canvas.drawCircle(Offset(size.width * 0.5, size.height * 1.1), 65, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

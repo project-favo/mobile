@@ -278,7 +278,7 @@ final class RemoteNotificationUserListabilityCache {
         return true;
       }
       final imgOnly = await auth.fetchUserProfileImage(id.toString());
-      if (imgOnly != null && imgOnly.isNotFound) {
+      if (imgOnly != null && imgOnly.isNotFound && !imgOnly.isActiveUserNoPhoto) {
         _byUserId[id] = _CacheEntry(false, now.add(_ttlUnlisted));
         return false;
       }
