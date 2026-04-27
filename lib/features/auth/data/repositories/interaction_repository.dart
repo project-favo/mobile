@@ -390,7 +390,7 @@ class InteractionRepository {
       if (list.isEmpty) break;
       for (final u in list) {
         if (u.id > 0) {
-          out.add(u.id.toString());
+          out.add(u.id.toString().trim());
         }
       }
       if (list.length < pageSize) break;

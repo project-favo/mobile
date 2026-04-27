@@ -254,7 +254,47 @@ class FriendsFeedItemDto {
       'productId',
     ]);
 
-    final productIdV = nullableFirstNonEmpty(['productId']);
+    String? productIdFromNested(String nk) {
+      final nested = _asStringKeyedMap(json[nk]);
+      if (nested == null) return null;
+      final direct = _nullableFirstNonEmptyIn(nested, [
+        'productId',
+        'product_id',
+      ]);
+      if (direct != null) return direct;
+      final nestedId = _nullableFirstNonEmptyIn(nested, ['id']);
+      if (nestedId != null &&
+          (nk == 'product' ||
+              nk == 'targetProduct' ||
+              nk == 'item' ||
+              nk == 'event')) {
+        return nestedId;
+      }
+      final prod = _asStringKeyedMap(nested['product']);
+      if (prod != null) {
+        final fromProd = _nullableFirstNonEmptyIn(prod, [
+          'id',
+          'productId',
+          'product_id',
+        ]);
+        if (fromProd != null) return fromProd;
+      }
+      return null;
+    }
+
+    var productIdV = nullableFirstNonEmpty([
+      'productId',
+      'product_id',
+      'targetProductId',
+      'itemId',
+    ]);
+    productIdV ??= productIdFromNested('product');
+    productIdV ??= productIdFromNested('targetProduct');
+    productIdV ??= productIdFromNested('item');
+    // Yorum satırında kök productId boş; iç içe review/payload üzerinden ürün id.
+    for (final nk in ['review', 'payload', 'data', 'content', 'event']) {
+      productIdV ??= productIdFromNested(nk);
+    }
     final productNameV = nullableFirstNonEmpty(['productName']);
     final productImageV = nullableFirstNonEmpty(['productImageUrl', 'productImageURL']);
 

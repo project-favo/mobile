@@ -21,6 +21,7 @@ import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../../../../core/widgets/custom_snack_bar.dart';
 import '../../../../../core/cache/current_user_cache.dart';
 import '../../../../../core/cache/product_memory_cache.dart';
+import '../../../../../core/utils/load_profile_image_bytes.dart';
 import '../../../../../core/utils/resolve_media_url.dart';
 import '../../../../../core/routes/custom_page_transitions.dart';
 import '../../../../../routes/app_routes.dart';
@@ -102,10 +103,41 @@ class _UserProfilePageState extends State<UserProfilePage>
   String? _profileFullName;
   bool _profileAnonymous = false;
   bool _identityReady = false;
+  int _profileAvatarImageRevision = 0;
+
+  bool _avatarVisualDiffers(
+    String? urlA,
+    Uint8List? memA,
+    String? urlB,
+    Uint8List? memB,
+  ) {
+    if ((urlA ?? '').trim() != (urlB ?? '').trim()) return true;
+    final la = memA?.length ?? 0;
+    final lb = memB?.length ?? 0;
+    return la != lb;
+  }
+
+  void _invalidateProfileAvatarMemoryCacheIfNeeded({
+    String? nextUrl,
+    Uint8List? nextMem,
+  }) {
+    if (!_avatarVisualDiffers(
+      _avatarImageUrl,
+      _avatarMemoryBytes,
+      nextUrl,
+      nextMem,
+    )) {
+      return;
+    }
+    evictProfileImageBytesCacheForRaw(_avatarImageUrl);
+    evictProfileImageBytesCacheForRaw(nextUrl);
+    _profileAvatarImageRevision++;
+  }
 
   @override
   void initState() {
     super.initState();
+    evictProfileImageBytesCacheForRaw(widget.profileImageUrl);
     unawaited(ReviewReportStorage.hydrateForCurrentUser());
     unawaited(ProductReportStorage.hydrateForCurrentUser());
     _tabController = TabController(length: 1, vsync: this);
@@ -271,12 +303,20 @@ class _UserProfilePageState extends State<UserProfilePage>
     if (prefillImg != null && prefillImg.hasImage) {
       final px = prefillImg;
       if (px.memoryBytes != null) {
+        _invalidateProfileAvatarMemoryCacheIfNeeded(
+          nextUrl: null,
+          nextMem: px.memoryBytes,
+        );
         setState(() {
           _avatarMemoryBytes = px.memoryBytes;
           _avatarImageUrl = null;
           _avatarPhotoDataRaw = null;
         });
       } else if (px.imageUrl != null && px.imageUrl!.trim().isNotEmpty) {
+        _invalidateProfileAvatarMemoryCacheIfNeeded(
+          nextUrl: px.imageUrl,
+          nextMem: null,
+        );
         setState(() {
           _avatarImageUrl = px.imageUrl;
           _avatarMemoryBytes = null;
@@ -286,9 +326,13 @@ class _UserProfilePageState extends State<UserProfilePage>
     } else if (preloaded != null) {
       final p = preloaded;
       final bytes = decodeProfilePhotoBytes(p.profilePhotoData);
+      final nextUrl = p.profileImageUrl?.trim();
+      _invalidateProfileAvatarMemoryCacheIfNeeded(
+        nextUrl: (nextUrl != null && nextUrl.isNotEmpty) ? nextUrl : null,
+        nextMem: bytes,
+      );
       setState(() {
-        final url = p.profileImageUrl?.trim();
-        if (url != null && url.isNotEmpty) _avatarImageUrl = url;
+        if (nextUrl != null && nextUrl.isNotEmpty) _avatarImageUrl = nextUrl;
         if (bytes != null && bytes.isNotEmpty) _avatarMemoryBytes = bytes;
         if (p.profilePhotoData != null && p.profilePhotoData!.trim().isNotEmpty) {
           _avatarPhotoDataRaw = p.profilePhotoData;
@@ -435,6 +479,10 @@ class _UserProfilePageState extends State<UserProfilePage>
         for (final r in _reviews) {
           final photo = r.ownerProfilePhotoUrl?.trim();
           if (photo != null && photo.isNotEmpty) {
+            _invalidateProfileAvatarMemoryCacheIfNeeded(
+              nextUrl: photo,
+              nextMem: null,
+            );
             setState(() => _avatarImageUrl = photo);
             break;
           }
@@ -452,9 +500,14 @@ class _UserProfilePageState extends State<UserProfilePage>
       if (u != null && mounted) {
         final profile = u;
         final bytes = decodeProfilePhotoBytes(profile.profilePhotoData);
+        final url = profile.profileImageUrl?.trim();
+        final resolvedUrl = (url != null && url.isNotEmpty) ? url : null;
+        _invalidateProfileAvatarMemoryCacheIfNeeded(
+          nextUrl: resolvedUrl,
+          nextMem: bytes,
+        );
         setState(() {
-          final url = profile.profileImageUrl?.trim();
-          if (url != null && url.isNotEmpty) _avatarImageUrl = url;
+          if (resolvedUrl != null) _avatarImageUrl = resolvedUrl;
           if (bytes != null && bytes.isNotEmpty) _avatarMemoryBytes = bytes;
           if (profile.profilePhotoData != null &&
               profile.profilePhotoData!.trim().isNotEmpty) {
@@ -473,6 +526,10 @@ class _UserProfilePageState extends State<UserProfilePage>
     if (prefillImage != null) {
       if (prefillImage.isNotFound) {
         if (mounted) {
+          _invalidateProfileAvatarMemoryCacheIfNeeded(
+            nextUrl: null,
+            nextMem: null,
+          );
           setState(() {
             _avatarImageUrl = null;
             _avatarMemoryBytes = null;
@@ -484,6 +541,17 @@ class _UserProfilePageState extends State<UserProfilePage>
       if (prefillImage.hasImage) {
         hideReviewAvatarFallback = true;
         if (mounted) {
+          if (prefillImage.memoryBytes != null) {
+            _invalidateProfileAvatarMemoryCacheIfNeeded(
+              nextUrl: null,
+              nextMem: prefillImage.memoryBytes,
+            );
+          } else {
+            _invalidateProfileAvatarMemoryCacheIfNeeded(
+              nextUrl: prefillImage.imageUrl,
+              nextMem: null,
+            );
+          }
           setState(() {
             if (prefillImage.memoryBytes != null) {
               _avatarMemoryBytes = prefillImage.memoryBytes;
@@ -506,6 +574,10 @@ class _UserProfilePageState extends State<UserProfilePage>
       if (pix != null) {
         if (pix.isNotFound) {
           hideReviewAvatarFallback = true;
+          _invalidateProfileAvatarMemoryCacheIfNeeded(
+            nextUrl: null,
+            nextMem: null,
+          );
           setState(() {
             _avatarImageUrl = null;
             _avatarMemoryBytes = null;
@@ -513,6 +585,17 @@ class _UserProfilePageState extends State<UserProfilePage>
           });
         } else if (pix.hasImage) {
           hideReviewAvatarFallback = true;
+          if (pix.memoryBytes != null) {
+            _invalidateProfileAvatarMemoryCacheIfNeeded(
+              nextUrl: null,
+              nextMem: pix.memoryBytes,
+            );
+          } else {
+            _invalidateProfileAvatarMemoryCacheIfNeeded(
+              nextUrl: pix.imageUrl,
+              nextMem: null,
+            );
+          }
           setState(() {
             if (pix.memoryBytes != null) {
               _avatarMemoryBytes = pix.memoryBytes;
@@ -536,6 +619,10 @@ class _UserProfilePageState extends State<UserProfilePage>
       for (final r in _reviews) {
         final photo = r.ownerProfilePhotoUrl?.trim();
         if (photo != null && photo.isNotEmpty) {
+          _invalidateProfileAvatarMemoryCacheIfNeeded(
+            nextUrl: photo,
+            nextMem: null,
+          );
           setState(() => _avatarImageUrl = photo);
           break;
         }
@@ -595,6 +682,10 @@ class _UserProfilePageState extends State<UserProfilePage>
           }
         }
       }
+      _invalidateProfileAvatarMemoryCacheIfNeeded(
+        nextUrl: avatar,
+        nextMem: null,
+      );
       setState(() {
         final reviewProductIds = reviews
             .map((r) => r.productId.trim())
@@ -1021,6 +1112,7 @@ class _UserProfilePageState extends State<UserProfilePage>
                 imageUrl: _avatarImageUrl ?? widget.profileImageUrl,
                 memoryBytes: _avatarMemoryBytes,
                 fallbackInitial: _profileUsername,
+                imageRevision: _profileAvatarImageRevision,
               ),
               const SizedBox(height: AppSpacing.large),
               AnimatedSwitcher(

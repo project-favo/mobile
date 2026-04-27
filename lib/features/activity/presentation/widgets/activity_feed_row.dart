@@ -57,7 +57,9 @@ class ActivityFeedRow extends StatelessWidget {
                 onTap: onUserTap,
                 behavior: HitTestBehavior.opaque,
                 child: ProfileAvatar(
-                  key: ValueKey('avatar_${item.user.id}'),
+                  key: ValueKey(
+                    'avatar_${item.user.id}_${item.user.avatarUrl ?? ''}',
+                  ),
                   radius: 22,
                   imageUrl: item.user.avatarUrl,
                   fallbackInitial: item.user.username.isNotEmpty

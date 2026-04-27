@@ -8,6 +8,9 @@ class FollowingIdSetCache {
   static final FollowingIdSetCache instance = FollowingIdSetCache._();
 
   final Set<String> _ids = <String>{};
+  /// Takip API’si henüz yeni takipçiyi döndürmeden [ensureLoaded] tamamlanırsa
+  /// [applyToggle] ile eklenen id’ler silinmesin (ana sayfa baloncuk budaması).
+  final Set<String> _optimisticFollowIds = <String>{};
   final List<void Function()> _listeners = [];
   bool _loaded = false;
   Future<void>? _inflight;
@@ -33,20 +36,27 @@ class FollowingIdSetCache {
   bool contains(String id) => _ids.contains(id);
   Set<String> get snapshot => Set<String>.unmodifiable(_ids);
 
+  /// Sunucu takip listesi henüz güncellenmemişken [applyToggle] ile eklenen id’ler var mı.
+  bool get hasPendingOptimisticFollows => _optimisticFollowIds.isNotEmpty;
+
   void invalidate() {
     _inflight = null;
     _loaded = false;
     _ids.clear();
+    _optimisticFollowIds.clear();
     _lastUserId = null;
     _notifyListeners();
   }
 
   void applyToggle(String userId, bool nowFollowing) {
-    if (userId.isEmpty) return;
+    final id = userId.trim();
+    if (id.isEmpty) return;
     if (nowFollowing) {
-      _ids.add(userId);
+      _ids.add(id);
+      _optimisticFollowIds.add(id);
     } else {
-      _ids.remove(userId);
+      _ids.remove(id);
+      _optimisticFollowIds.remove(id);
     }
     _notifyListeners();
   }
@@ -54,7 +64,9 @@ class FollowingIdSetCache {
   void replaceFromSet(Set<String> set) {
     _ids
       ..clear()
-      ..addAll(set);
+      ..addAll(set)
+      ..addAll(_optimisticFollowIds);
+    _optimisticFollowIds.removeWhere(set.contains);
     _loaded = true;
     _notifyListeners();
   }
@@ -93,6 +105,7 @@ class FollowingIdSetCache {
       final me = await auth.getMe();
       if (me.id != _lastUserId) {
         _ids.clear();
+        _optimisticFollowIds.clear();
         _lastUserId = me.id;
       }
       if (me.id.isEmpty) {
@@ -103,6 +116,8 @@ class FollowingIdSetCache {
       _ids
         ..clear()
         ..addAll(s);
+      _ids.addAll(_optimisticFollowIds);
+      _optimisticFollowIds.removeWhere(s.contains);
     } catch (_) {
       // Ağ/401; boş set ile _loaded — ActivityController is-following yedeği
     } finally {

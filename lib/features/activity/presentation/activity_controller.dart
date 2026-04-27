@@ -143,9 +143,10 @@ class ActivityController extends ChangeNotifier {
         page.content,
         _auth,
       );
-      _items = _deduplicateItems(
-        visible.map(activityItemFromNotification).toList(),
-      );
+      final mapped = visible.map(activityItemFromNotification).toList();
+      final nextItems = _deduplicateItems(mapped);
+      clearProfileImageByteCache();
+      _items = nextItems;
       _page = page.number;
       _totalPages = page.totalPages;
       _totalElements = page.totalElements;
@@ -174,6 +175,22 @@ class ActivityController extends ChangeNotifier {
       );
       final appended =
           visible.map(activityItemFromNotification).toList();
+      final knownAvatarByUserId = <String, String?>{};
+      for (final i in _items) {
+        final id = i.user.id.trim();
+        if (id.isEmpty) continue;
+        knownAvatarByUserId[id] = i.user.avatarUrl;
+      }
+      for (final i in appended) {
+        final id = i.user.id.trim();
+        if (id.isEmpty) continue;
+        final before = knownAvatarByUserId[id];
+        final after = i.user.avatarUrl;
+        if (before != after) {
+          evictProfileImageBytesCacheForRaw(before);
+          evictProfileImageBytesCacheForRaw(after);
+        }
+      }
       _items = _deduplicateItems([..._items, ...appended]);
       _page = next.number;
       _totalPages = next.totalPages;

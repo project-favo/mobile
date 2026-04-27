@@ -16,6 +16,7 @@ import '../../../../../core/utils/content_availability_messages.dart';
 import '../../../../../core/utils/content_unavailable_dialog.dart';
 import '../../../../../core/utils/error_handler.dart';
 import '../../../../../core/utils/exceptions.dart';
+import '../../../../../core/utils/load_profile_image_bytes.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
@@ -241,6 +242,7 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
       }
       await _pumpFromServerForVisibleCount(kStandardListPageSize);
       if (!mounted) return;
+      clearProfileImageByteCache();
       setState(() => _loadingFirst = false);
       _scrollNotificationsToTop();
       _scheduleNotificationsPrefetchIfNeeded();
@@ -763,6 +765,9 @@ class _NotificationTile extends StatelessWidget {
             children: [
               if (n.actor != null) ...[
                 ProfileAvatar(
+                  key: ValueKey(
+                    'n_act_${n.actor!.id}_${n.actor!.profileImageUrl}',
+                  ),
                   radius: 20,
                   imageUrl: n.actor!.profileImageUrl.trim().isEmpty
                       ? null

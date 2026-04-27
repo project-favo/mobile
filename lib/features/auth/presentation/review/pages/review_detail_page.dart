@@ -20,6 +20,7 @@ import '../../../../../core/utils/app_datetime.dart';
 import '../../../../../core/utils/entity_active.dart';
 import '../../../../../core/utils/user_profile_navigation.dart';
 import '../../../../../core/utils/in_flight_id_lock.dart';
+import '../../../../../core/utils/load_profile_image_bytes.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/utils/review_report_storage.dart';
 import '../../../../../core/network/api_client.dart';
@@ -126,6 +127,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
     WidgetsBinding.instance.addObserver(this);
     _currentReview = widget.review;
     _currentProduct = widget.product;
+    evictProfileImageBytesCacheForRaw(widget.review.ownerProfilePhotoUrl);
     if (!isReviewEntityVisible(_currentReview) ||
         !isProductEntityActive(_currentProduct)) {
       _invalidInitialRoute = true;
@@ -626,6 +628,9 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
       } catch (_) {}
 
       final oldMediaSig = _mediaListSignature(_currentReview);
+      final oldOwnerPhoto = _currentReview.ownerProfilePhotoUrl;
+      evictProfileImageBytesCacheForRaw(oldOwnerPhoto);
+      evictProfileImageBytesCacheForRaw(updatedReview.ownerProfilePhotoUrl);
       setState(() {
         _currentReview = updatedReview;
         if (viewerId != null && viewerId.trim().isNotEmpty) {

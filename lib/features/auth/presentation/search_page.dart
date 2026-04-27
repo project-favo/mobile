@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../../../core/navigation/app_route_observer.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
@@ -9,6 +10,7 @@ import '../../../core/cache/current_user_cache.dart';
 import '../../../core/cache/following_id_set_cache.dart';
 import '../../../core/cache/search_warm_cache.dart';
 import '../../../core/utils/error_handler.dart';
+import '../../../core/utils/load_profile_image_bytes.dart';
 import '../../../core/utils/app_logger.dart';
 import '../../../core/utils/session_helper.dart';
 import '../../../core/utils/user_profile_navigation.dart';
@@ -43,7 +45,7 @@ class SearchPage extends StatefulWidget {
   State<SearchPage> createState() => _SearchPageState();
 }
 
-class _SearchPageState extends State<SearchPage> {
+class _SearchPageState extends State<SearchPage> with RouteAware {
   static const Duration _topReviewersRefreshInterval = Duration(seconds: 10);
   final ProductRepository _productRepository = ProductRepository();
   final TagRepository _tagRepository = TagRepository();
@@ -119,6 +121,10 @@ class _SearchPageState extends State<SearchPage> {
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_hookNotificationsIfSignedIn());
+      final route = ModalRoute.of(context);
+      if (route is PageRoute<dynamic>) {
+        appRouteObserver.subscribe(this, route);
+      }
     });
     _searchFocusNode.addListener(() {
       setState(() {});
@@ -161,6 +167,7 @@ class _SearchPageState extends State<SearchPage> {
       if (serverUsers.isEmpty) return;
       _serverUserResults = serverUsers;
       _serverUserResultsQuery = normalizedQuery;
+      clearProfileImageByteCache();
       setState(() {
         _profileSearchMatches = _mergeProfileMatches(normalizedQuery, serverUsers);
       });
@@ -307,6 +314,7 @@ class _SearchPageState extends State<SearchPage> {
     try {
       final users = await _authService.fetchUserDirectory(maxPages: 1, pageSize: 100);
       if (!mounted || users.isEmpty) return;
+      clearProfileImageByteCache();
       _preloadedUsers = users;
       _recomputeProfileMatchesIfNeeded();
     } catch (e, s) {
@@ -368,6 +376,7 @@ class _SearchPageState extends State<SearchPage> {
       }
       final list = await _reviewRepository.getTopReviewers(token, limit: 5);
       if (!mounted) return;
+      clearProfileImageByteCache();
       SearchWarmCache.instance.rememberTopReviewers(list);
       setState(() {
         _topReviewers = list;
@@ -601,7 +610,14 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   @override
+  void didPopNext() {
+    unawaited(_loadTopReviewers(force: true));
+    unawaited(_preloadUserDirectory());
+  }
+
+  @override
   void dispose() {
+    appRouteObserver.unsubscribe(this);
     unregisterProductCardGridResyncHandler(_onProductCardGridResync);
     if (_notificationSvcAttached) {
       NotificationRealtimeService.instance.detach();

@@ -47,7 +47,33 @@ import '../data/services/review_prefetch_service.dart';
 import '../data/models/tag_dto.dart';
 import '../data/models/product_dto.dart';
 import '../data/models/product_search_result_dto.dart';
+import '../data/models/review_dto.dart';
 import '../data/models/feed_sort_option.dart';
+
+/// Aynı [FriendsFeedItemDto.id] tekrarlandığında farklı yorumcuların satırını atmamak için.
+String _friendsFeedDtoDedupeKey(FriendsFeedItemDto e) {
+  final id = e.id.trim();
+  final aid = e.actorUserId.trim();
+  final pid = (e.productId ?? '').trim();
+  final rid = (e.reviewId ?? '').trim();
+  final t = e.type.trim();
+  if (id.isNotEmpty) {
+    return '$id|u:$aid|r:$rid|p:$pid';
+  }
+  return '$t|u:$aid|p:$pid|r:$rid|${e.createdAt?.millisecondsSinceEpoch ?? 0}';
+}
+
+/// [ActivityItem.id] çakışınca aynı üründe ikinci arkadaş baloncuğu kaybolmasın.
+String _friendLikerActivityMergeKey(ActivityItem item) {
+  final base = item.id.trim();
+  final uid = item.user.id.trim();
+  final rid = (item.targetContent?.reviewId ?? '').trim();
+  final pid = (item.targetContent?.productId ?? '').trim();
+  if (base.isNotEmpty) {
+    return '$base|u:$uid|r:$rid|p:$pid';
+  }
+  return '${item.type.name}|u:$uid|p:$pid|r:$rid|${item.timestamp.millisecondsSinceEpoch}';
+}
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -58,7 +84,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
   static const int _kMaxFriendReviewBubblesPerProduct = 5;
-  static const int _kMaxFriendLikerKeysPerProduct = 8;
+  static const int _kMaxFriendLikerKeysPerProduct = 5;
   static const double _kScrollToTopThreshold = 520;
 
   // BottomNavigationBar index mapping:
@@ -98,9 +124,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   late final ScrollController _scrollController;
   bool _notificationSvcAttached = false;
 
-  // --- Friend likers: API + [FriendFeedMemoryCache] + disk; pushReplacement sonrası da toparlanır.
+  // --- Friend likers: (1) arkadaş feed aktiviteleri (2) ana vitrindeki ürünlerin yorumlarında
+  // takip edilen yazarlar — feed sayfasına sığmayan yorumlar da baloncukta görünsün.
   List<ActivityItem> _friendFeedItemsForLikers = const [];
   Map<String, List<String>> _friendLikersMap = {};
+
+  static const int _kFriendReviewSupplementMaxProducts = 36;
+  static const int _kFriendReviewSupplementConcurrency = 5;
+  static const Duration _kFriendReviewSupplementMinGap = Duration(seconds: 50);
+  DateTime? _friendReviewSupplementCooldownUntil;
+  int _friendReviewSupplementRequestId = 0;
 
   /// [ProductCard] key parçası — ürün detayından dönünce like sayısı tazelensin.
   final Map<String, int> _productCardResync = {};
@@ -505,15 +538,55 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       unawaited(_persistFriendLikersMap());
     }
     unawaited(_loadFriendLikers());
+    // Yeni takip: takip listesi API’si veya arkadaş feed’i birkaç sn gecikebilir.
+    if (FollowingIdSetCache.instance.hasPendingOptimisticFollows) {
+      Future<void>.delayed(const Duration(seconds: 2), () {
+        if (!mounted) return;
+        unawaited(_loadFriendLikers());
+      });
+    }
   }
 
-  /// [fallback:…] anahtarından userId; url anahtarında takip bilgisi yok → budanmaz.
-  String? _userIdFromFriendAvatarBubbleKey(String key) {
-    if (!key.startsWith('fallback:')) return null;
-    final parts = key.split(':');
-    if (parts.length < 2) return null;
-    final id = parts[1].trim();
-    return id.isEmpty ? null : id;
+  /// Baloncuk anahtarından aktör kullanıcı id (takip budaması + dedupe); saf `url:…` için null.
+  String? _canonicalActorIdForBubbleKey(String key) {
+    if (key.startsWith('uid:')) {
+      final pipe = key.indexOf('|');
+      final slice = pipe == -1 ? key.substring(4) : key.substring(4, pipe);
+      final id = slice.trim();
+      return id.isEmpty ? null : id;
+    }
+    if (key.startsWith('fallback:')) {
+      final parts = key.split(':');
+      if (parts.length >= 2) {
+        final id = parts[1].trim();
+        if (id.isNotEmpty) return id;
+      }
+    }
+    return null;
+  }
+
+  String _bubbleDedupeSlot(String key) {
+    final aid = _canonicalActorIdForBubbleKey(key);
+    if (aid != null && aid.isNotEmpty) return 'a:$aid';
+    return 'x:$key';
+  }
+
+  /// Aynı kullanıcı için `uid:…|` biçimini eski `url:` / `fallback:` üzerine tercih et.
+  bool _bubbleKeyPreferNew(String incoming, String existing) {
+    final i = incoming.startsWith('uid:');
+    final e = existing.startsWith('uid:');
+    if (i && !e) return true;
+    if (!i && e) return false;
+    return false;
+  }
+
+  bool _followingSnapshotContains(Set<String> following, String uidRaw) {
+    final t = uidRaw.trim();
+    if (t.isEmpty) return false;
+    if (following.contains(t)) return true;
+    final n = int.tryParse(t);
+    if (n != null && following.contains(n.toString())) return true;
+    return false;
   }
 
   Map<String, List<String>> _pruneFriendLikersMapByFollowing(
@@ -524,9 +597,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final out = <String, List<String>>{};
     for (final e in input.entries) {
       final kept = e.value.where((bubbleKey) {
-        final uid = _userIdFromFriendAvatarBubbleKey(bubbleKey);
+        final uid = _canonicalActorIdForBubbleKey(bubbleKey);
         if (uid == null) return true;
-        return following.contains(uid);
+        return _followingSnapshotContains(following, uid);
       }).toList();
       if (kept.isNotEmpty) {
         out[e.key] = kept;
@@ -539,29 +612,30 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   /// immediately rebuilds [_friendLikersMap] so avatars show on first open.
   Future<void> _loadFriendLikers() async {
     try {
+      const friendFeedPageSize = 80;
       final page0 = await _friendsFeedRepository.getFriendsFeed(
         page: 0,
-        size: 50,
+        size: friendFeedPageSize,
       );
       if (!mounted) return;
 
-      // Aynı üründe birden çok yorumcu: tek sayfada 50 satır yetmeyebilir — ikinci sayfayı da al.
+      // Aynı üründe birden çok yorumcu + backend aynı [id]'yi farklı satırlarda tekrarlayabiliyor.
       final dtoById = <String, FriendsFeedItemDto>{};
-      for (final e in page0.content) {
-        final key = e.id.trim().isNotEmpty ? e.id.trim() : '${e.type}_${e.actorUserId}_${e.productId ?? ''}';
-        dtoById.putIfAbsent(key, () => e);
+      void ingestDtoPage(FriendsFeedPageDto p) {
+        for (final e in p.content) {
+          dtoById.putIfAbsent(_friendsFeedDtoDedupeKey(e), () => e);
+        }
       }
-      if (page0.totalPages > 1) {
+
+      ingestDtoPage(page0);
+      for (var p = 1; p < 5 && p < page0.totalPages; p++) {
         try {
-          final page1 = await _friendsFeedRepository.getFriendsFeed(
-            page: 1,
-            size: 50,
+          final pn = await _friendsFeedRepository.getFriendsFeed(
+            page: p,
+            size: friendFeedPageSize,
           );
           if (!mounted) return;
-          for (final e in page1.content) {
-            final key = e.id.trim().isNotEmpty ? e.id.trim() : '${e.type}_${e.actorUserId}_${e.productId ?? ''}';
-            dtoById.putIfAbsent(key, () => e);
-          }
+          ingestDtoPage(pn);
         } catch (_) {}
       }
 
@@ -571,10 +645,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final existing = FriendFeedMemoryCache.instance.peek();
       final mergedByActivityId = <String, ActivityItem>{};
       for (final item in items) {
-        mergedByActivityId.putIfAbsent(item.id, () => item);
+        mergedByActivityId.putIfAbsent(
+          _friendLikerActivityMergeKey(item),
+          () => item,
+        );
       }
       for (final item in existing?.items ?? const <ActivityItem>[]) {
-        mergedByActivityId.putIfAbsent(item.id, () => item);
+        mergedByActivityId.putIfAbsent(
+          _friendLikerActivityMergeKey(item),
+          () => item,
+        );
       }
       final mergedList = mergedByActivityId.values.toList()
         ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
@@ -595,6 +675,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _friendLikersMap = next;
       });
       unawaited(_persistFriendLikersMap());
+      unawaited(_supplementFriendLikersFromFollowedReviews());
     } catch (_) {
       // Friend likers are optional — silent fail.
       if (!mounted) return;
@@ -608,6 +689,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         });
         unawaited(_persistFriendLikersMap());
       }
+      unawaited(_supplementFriendLikersFromFollowedReviews());
     }
   }
 
@@ -655,21 +737,33 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     List<String>? primary,
     List<String>? fallback,
   ) {
-    final seen = <String>{};
-    final out = <String>[];
-    for (final k in [...?primary, ...?fallback]) {
-      if (seen.add(k)) {
-        out.add(k);
+    final slotOrder = <String>[];
+    final slotToKey = <String, String>{};
+
+    void consider(String k) {
+      final slot = _bubbleDedupeSlot(k);
+      if (slotToKey.containsKey(slot)) {
+        final cur = slotToKey[slot]!;
+        if (_bubbleKeyPreferNew(k, cur)) {
+          slotToKey[slot] = k;
+        }
+        return;
       }
-      if (out.length >= _kMaxFriendLikerKeysPerProduct) {
-        break;
+      if (slotOrder.length >= _kMaxFriendLikerKeysPerProduct) {
+        return;
       }
+      slotToKey[slot] = k;
+      slotOrder.add(slot);
     }
-    return out;
+
+    for (final k in [...?primary, ...?fallback]) {
+      consider(k);
+    }
+    return [for (final s in slotOrder) slotToKey[s]!];
   }
 
-  /// Ürün kartı arkadaş baloncuğu: sadece review bırakan takip edilen kullanıcılar.
-  /// Taze harita [_kMaxFriendReviewBubblesPerProduct] ile sınırlanır; birleşik sırada en fazla [_kMaxFriendLikerKeysPerProduct].
+  /// Arkadaş feed’indeki review aktiviteleri → ürün id → avatar anahtarları (tarih sırası).
+  /// Takip budaması ayrıca [_pruneFriendLikersMapByFollowing] ile uygulanır.
   Map<String, List<String>> _buildFriendLikersMapForItems(
     Iterable<ActivityItem> source,
   ) {
@@ -680,7 +774,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       if (item.type != ActivityType.review) {
         continue;
       }
-      final productId = item.targetContent?.productId;
+      final productId = item.targetContent?.productId?.trim();
       if (productId == null || productId.isEmpty) continue;
       final list = map.putIfAbsent(productId, () => <String>[]);
       if (list.length >= _kMaxFriendReviewBubblesPerProduct) continue;
@@ -693,20 +787,173 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       seen.add(dedupeKey);
       list.add(avatarKey);
     }
-    return map;
+    return map.map(
+      (k, v) => MapEntry(
+        k,
+        _mergeOrderedFriendAvatarKeys(v, null),
+      ),
+    );
   }
 
   /// ProductCard'e avatar verisini taşır:
-  /// - `url:<raw>`: normal profil resmi
-  /// - `fallback:<userId>:<initial>`: resim yoksa placeholder ikonu/harfi
+  /// - `uid:<id>|url:<raw>`: takip kümesiyle budama + dedupe için stabil kullanıcı.
+  /// - `uid:<id>|fallback:<initial>` / `fallback:<userId>:<initial>`: resim yok.
   String _friendAvatarKeyFor(ActivityUser user) {
+    final uid = user.id.trim();
+    final uidPrefix = uid.isNotEmpty ? 'uid:$uid|' : '';
     final raw = user.avatarUrl?.trim();
     if (raw != null && raw.isNotEmpty) {
-      return 'url:$raw';
+      return '${uidPrefix}url:$raw';
     }
     final trimmed = user.username.trim();
     final initial = trimmed.isEmpty ? '?' : trimmed[0].toUpperCase();
-    return 'fallback:${user.id}:$initial';
+    if (uid.isNotEmpty) {
+      return '${uidPrefix}fallback:$initial';
+    }
+    return 'fallback::$initial';
+  }
+
+  String _friendAvatarKeyFromReview(ReviewDto r) {
+    final uid = r.ownerId.trim();
+    final uidPrefix = uid.isNotEmpty ? 'uid:$uid|' : '';
+    final raw = r.ownerProfilePhotoUrl?.trim();
+    if (raw != null && raw.isNotEmpty) {
+      return '${uidPrefix}url:$raw';
+    }
+    final trimmed = r.ownerUserName.trim();
+    final initial = trimmed.isEmpty ? '?' : trimmed[0].toUpperCase();
+    if (uid.isNotEmpty) {
+      return '${uidPrefix}fallback:$initial';
+    }
+    return 'fallback::$initial';
+  }
+
+  /// GET /api/reviews/product/{id} — takip edilen yorum sahipleri (ürün başına en fazla 5).
+  Map<String, List<String>> _buildFriendLikersMapFromFollowedProductReviews(
+    Set<String> following,
+    Map<String, List<ReviewDto>> reviewsByProduct,
+  ) {
+    final me = CurrentUserCache.instance.userId?.trim() ?? '';
+    final map = <String, List<String>>{};
+    for (final e in reviewsByProduct.entries) {
+      final pid = e.key.trim();
+      if (pid.isEmpty) continue;
+      final rows = List<ReviewDto>.from(e.value)
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      final keys = <String>[];
+      final seenUid = <String>{};
+      for (final r in rows) {
+        if (!isReviewEntityVisible(r)) continue;
+        final oid = r.ownerId.trim();
+        if (oid.isEmpty || oid == me) continue;
+        if (!_followingSnapshotContains(following, oid)) continue;
+        if (seenUid.contains(oid)) continue;
+        seenUid.add(oid);
+        keys.add(_friendAvatarKeyFromReview(r));
+        if (keys.length >= _kMaxFriendReviewBubblesPerProduct) break;
+      }
+      if (keys.isNotEmpty) {
+        map[pid] = _mergeOrderedFriendAvatarKeys(keys, null);
+      }
+    }
+    return map;
+  }
+
+  List<String> _orderedProductIdsForFriendReviewSupplement() {
+    final out = <String>[];
+    final seen = <String>{};
+    void take(Iterable<ProductDto> products) {
+      for (final p in products) {
+        final id = p.id.trim();
+        if (id.isEmpty || seen.contains(id)) continue;
+        if (out.length >= _kFriendReviewSupplementMaxProducts) return;
+        seen.add(id);
+        out.add(id);
+      }
+    }
+
+    take(_filteredProducts);
+    for (final tab in HomeTopPicksTab.values) {
+      take(_topPicksByTab[tab]!);
+    }
+    return out;
+  }
+
+  /// Feed penceresine sığmayan takip edilen yorumcuları ürün yorum listesinden tamamla.
+  Future<void> _supplementFriendLikersFromFollowedReviews({bool force = false}) async {
+    if (!mounted) return;
+    final now = DateTime.now();
+    if (!force &&
+        _friendReviewSupplementCooldownUntil != null &&
+        now.isBefore(_friendReviewSupplementCooldownUntil!)) {
+      return;
+    }
+    final req = ++_friendReviewSupplementRequestId;
+    final token = await _sessionHelper.ensureSession();
+    if (token == null || !mounted || req != _friendReviewSupplementRequestId) return;
+
+    await FollowingIdSetCache.instance.ensureLoaded(
+      _interactionRepository,
+      _authService,
+      _sessionHelper,
+    );
+    if (!mounted || req != _friendReviewSupplementRequestId) return;
+    if (!FollowingIdSetCache.instance.isReady) return;
+    final following = FollowingIdSetCache.instance.snapshot;
+    if (following.isEmpty) return;
+
+    final orderedIds = _orderedProductIdsForFriendReviewSupplement();
+    if (orderedIds.isEmpty) return;
+
+    final reviewsByProduct = <String, List<ReviewDto>>{};
+    for (var i = 0; i < orderedIds.length; i += _kFriendReviewSupplementConcurrency) {
+      if (!mounted || req != _friendReviewSupplementRequestId) return;
+      final chunk = orderedIds.skip(i).take(_kFriendReviewSupplementConcurrency).toList();
+      final batch = await Future.wait(
+        chunk.map((pid) async {
+          try {
+            final list = await _reviewRepository
+                .getReviewsByProductIdForFriendCardOverlay(
+              pid,
+              firebaseIdToken: token,
+            );
+            return MapEntry(pid, list);
+          } catch (_) {
+            return MapEntry(pid, <ReviewDto>[]);
+          }
+        }),
+      );
+      for (final e in batch) {
+        reviewsByProduct[e.key] = e.value;
+      }
+    }
+
+    if (!mounted || req != _friendReviewSupplementRequestId) return;
+    final supplement = _buildFriendLikersMapFromFollowedProductReviews(
+      following,
+      reviewsByProduct,
+    );
+    if (supplement.isEmpty) return;
+
+    if (!force) {
+      _friendReviewSupplementCooldownUntil =
+          DateTime.now().add(_kFriendReviewSupplementMinGap);
+    }
+
+    setState(() {
+      final next = <String, List<String>>{};
+      final keys = {..._friendLikersMap.keys, ...supplement.keys};
+      for (final pid in keys) {
+        final merged = _mergeOrderedFriendAvatarKeys(
+          _friendLikersMap[pid],
+          supplement[pid],
+        );
+        if (merged.isEmpty) continue;
+        next[pid] = merged;
+      }
+      _friendLikersMap = _pruneFriendLikersMapByFollowing(next);
+    });
+    unawaited(_persistFriendLikersMap());
   }
 
   /// Search sayfasıyla aynı: GET /api/products tüm ürün listesi (önbellek + arka planda ısıtma).
@@ -1028,6 +1275,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         append && page > 0 ? result.content : _filteredProducts,
         maxCount: append ? 5 : 8,
       );
+      if (mounted) {
+        unawaited(_supplementFriendLikersFromFollowedReviews(force: append));
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -1982,6 +2232,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             ? _tags[_selectedCategoryIndex].categoryPath
             : null;
     if (!background) {
+      _friendReviewSupplementCooldownUntil = null;
       setState(() {
         _isLoading = true;
         _errorMessage = null;
@@ -2063,6 +2314,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           _friendLikersMap = next;
         });
         unawaited(_persistFriendLikersMap());
+        unawaited(_supplementFriendLikersFromFollowedReviews(force: !background));
       }
     } catch (e) {
       if (mounted) {
@@ -2080,6 +2332,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             _friendLikersMap = next;
           });
           unawaited(_persistFriendLikersMap());
+          unawaited(_supplementFriendLikersFromFollowedReviews(force: false));
           return;
         }
         setState(() {

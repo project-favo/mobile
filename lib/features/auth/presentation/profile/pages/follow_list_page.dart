@@ -6,6 +6,7 @@ import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/widgets/skeleton_loader.dart';
 import '../../../../../core/config/app_background_timers.dart';
+import '../../../../../core/utils/load_profile_image_bytes.dart';
 import '../../../../../core/widgets/profile_avatar.dart';
 import '../../../../../core/utils/user_profile_navigation.dart';
 import '../../../data/models/conversation_dto.dart';
@@ -55,8 +56,17 @@ class _FollowListPageState extends State<FollowListPage> {
   Future<void> _resyncListSilently() async {
     if (!mounted) return;
     if (_isLoading) return;
+    final prevUrls = <int, String?>{for (final u in _users) u.id: u.profilePhotoUrl};
     final result = await _fetch(0);
     if (!mounted) return;
+    for (final u in result) {
+      final before = prevUrls[u.id];
+      final after = u.profilePhotoUrl;
+      if (before != after) {
+        evictProfileImageBytesCacheForRaw(before);
+        evictProfileImageBytesCacheForRaw(after);
+      }
+    }
     setState(() {
       _users = result;
       if (result.length < 20) {
@@ -98,6 +108,7 @@ class _FollowListPageState extends State<FollowListPage> {
     });
     final result = await _fetch(0);
     if (!mounted) return;
+    clearProfileImageByteCache();
     setState(() {
       _users = result;
       _isLoading = false;
@@ -225,6 +236,7 @@ class _UserListTile extends StatelessWidget {
         vertical: AppSpacing.small,
       ),
       leading: ProfileAvatar(
+        key: ValueKey('follow_${user.id}_${url ?? ''}'),
         radius: 22,
         imageUrl: url,
         fallbackInitial: user.username,

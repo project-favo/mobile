@@ -115,14 +115,35 @@ class ReviewRepository {
     }
   }
 
+  List<ReviewDto> _parseProductReviewsPayload(dynamic data) {
+    if (data is List) {
+      return (data)
+          .map((json) => ReviewDto.fromJson(json as Map<String, dynamic>))
+          .toList();
+    }
+    if (data is Map) {
+      final m = Map<String, dynamic>.from(data);
+      final c = m['content'];
+      if (c is List) {
+        return c
+            .map((json) => ReviewDto.fromJson(json as Map<String, dynamic>))
+            .toList();
+      }
+    }
+    return [];
+  }
+
   /// Product'a göre review'ları getirir
   /// GET /api/reviews/product/{productId}
+  /// [page]/[size] Spring sayfalaması; gövde [List] veya [Page] (`content`) olabilir.
   Future<List<ReviewDto>> getReviewsByProductId(
     String productId, {
     String? firebaseIdToken,
     bool? hasMedia,
     bool? isCollaborative,
     String sort = reviewSortNewest,
+    int? page,
+    int? size,
   }) async {
     try {
       if (firebaseIdToken != null) {
@@ -134,17 +155,13 @@ class ReviewRepository {
           if (hasMedia != null) 'hasMedia': hasMedia,
           if (isCollaborative != null) 'isCollaborative': isCollaborative,
           'sort': sort,
+          if (page != null) 'page': page,
+          if (size != null) 'size': size,
         },
       );
-      
-      if (response.data is List) {
-        final list = (response.data as List)
-            .map((json) => ReviewDto.fromJson(json as Map<String, dynamic>))
-            .toList();
-        return filterVisibleReviews(list);
-      }
-      
-      return [];
+
+      final raw = _parseProductReviewsPayload(response.data);
+      return filterVisibleReviews(raw);
     } on DioException catch (e) {
       if (e.response != null) {
         final errorData = e.response?.data;
@@ -155,6 +172,59 @@ class ReviewRepository {
       }
       throw Exception('Network error: ${e.message}');
     }
+  }
+
+  /// Ana sayfa arkadaş baloncuğu: takip edilen farklı yazarları bulmak için yeni + takipçi sıralı
+  /// sayfaları birleştirir (tek sıralamada kaçan yazarlar için).
+  Future<List<ReviewDto>> getReviewsByProductIdForFriendCardOverlay(
+    String productId, {
+    required String firebaseIdToken,
+    int pageSize = 45,
+    int maxPages = 4,
+  }) async {
+    final byKey = <String, ReviewDto>{};
+    void absorb(Iterable<ReviewDto> list) {
+      for (final r in list) {
+        final id = r.id.trim();
+        final k = id.isNotEmpty ? id : '${r.ownerId.trim()}|${r.createdAt.trim()}';
+        byKey[k] = r;
+      }
+    }
+
+    String? firstRowKeyPage0;
+    for (var p = 0; p < maxPages; p++) {
+      final list = await getReviewsByProductId(
+        productId,
+        firebaseIdToken: firebaseIdToken,
+        sort: reviewSortNewest,
+        page: p,
+        size: pageSize,
+      );
+      if (list.isEmpty) break;
+      final rowKey = list.first.id.trim().isNotEmpty
+          ? list.first.id.trim()
+          : '${list.first.ownerId.trim()}|${list.first.createdAt.trim()}';
+      if (p == 0) {
+        firstRowKeyPage0 = rowKey;
+      } else if (rowKey == firstRowKeyPage0) {
+        break;
+      }
+      absorb(list);
+      if (list.length < pageSize) break;
+    }
+
+    final topSorted = await getReviewsByProductId(
+      productId,
+      firebaseIdToken: firebaseIdToken,
+      sort: reviewSortTopFollowerAuthor,
+      page: 0,
+      size: pageSize,
+    );
+    absorb(topSorted);
+
+    final out = byKey.values.toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return filterVisibleReviews(out);
   }
 
   /// Kullanıcıya göre review'ları getirir

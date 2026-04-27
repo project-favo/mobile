@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
@@ -240,6 +241,9 @@ class _ProductCardState extends State<ProductCard> {
         }
       }
     }
+    if (!listEquals(oldWidget.friendAvatarUrls, widget.friendAvatarUrls)) {
+      needBuild = true;
+    }
     if (needBuild && mounted) setState(() {});
   }
 
@@ -323,6 +327,7 @@ class _ProductCardState extends State<ProductCard> {
               child: AspectRatio(
                 aspectRatio: 1,
                 child: Stack(
+                  clipBehavior: Clip.none,
                   children: [
                     Positioned.fill(
                       child: Container(
@@ -563,9 +568,11 @@ class _FriendAvatarStack extends StatelessWidget {
         height: size,
         width: stackWidth,
         child: Stack(
+          clipBehavior: Clip.none,
           children: [
             ...List.generate(shown.length, (i) {
-              final parsed = _AvatarPayload.parse(shown[i]);
+              final bubbleKey = shown[i];
+              final parsed = _AvatarPayload.parse(bubbleKey);
               return Positioned(
                 left: i * step,
                 child: Container(
@@ -576,8 +583,9 @@ class _FriendAvatarStack extends StatelessWidget {
                     border: Border.all(color: Colors.white, width: border),
                   ),
                   child: ClipOval(
+                    clipBehavior: Clip.hardEdge,
                     child: ProfileAvatar(
-                      key: ValueKey('friend_avatar_$i/${parsed.key}'),
+                      key: ValueKey('friend_avatar_$bubbleKey'),
                       radius: (size - border * 2) / 2,
                       imageUrl: parsed.imageUrl,
                       fallbackInitial: parsed.fallbackInitial,
@@ -628,19 +636,29 @@ class _AvatarPayload {
   });
 
   static _AvatarPayload parse(String raw) {
-    if (raw.startsWith('url:')) {
-      final url = raw.substring(4).trim();
+    var rest = raw;
+    if (rest.startsWith('uid:')) {
+      final pipe = rest.indexOf('|');
+      if (pipe != -1) {
+        rest = rest.substring(pipe + 1);
+      }
+    }
+    if (rest.startsWith('url:')) {
+      final url = rest.substring(4).trim();
       return _AvatarPayload(
         key: raw,
         imageUrl: url.isEmpty ? null : url,
         fallbackInitial: '?',
       );
     }
-    if (raw.startsWith('fallback:')) {
-      final parts = raw.split(':');
-      final initial = parts.length >= 3 && parts[2].trim().isNotEmpty
-          ? parts[2].trim()[0].toUpperCase()
-          : '?';
+    if (rest.startsWith('fallback:')) {
+      final parts = rest.split(':');
+      var initial = '?';
+      if (parts.length >= 3 && parts[2].trim().isNotEmpty) {
+        initial = parts[2].trim()[0].toUpperCase();
+      } else if (parts.length >= 2 && parts[1].trim().isNotEmpty) {
+        initial = parts[1].trim()[0].toUpperCase();
+      }
       return _AvatarPayload(
         key: raw,
         imageUrl: null,

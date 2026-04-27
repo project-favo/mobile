@@ -39,10 +39,21 @@ void evictProfileImageBytesCacheForRaw(String? raw) {
   if (k != null) _profileImageByteCache.remove(k);
 }
 
+/// Liste yenileme / profil açılışı gibi durumlarda tüm profil piksel önbelleğini boşaltır.
+void clearProfileImageByteCache() {
+  _profileImageByteCache.clear();
+}
+
 /// Profil / avatar görselleri için ham byte yükler.
 /// Önce [ApiClient] (Authorization Bearer) ile dener; korumalı dosya uçları için gerekli.
 /// Gerekirse yetkisiz [Dio] ile tekrar dener (herkese açık CDN vb.).
-Future<Uint8List?> loadProfileImageBytesFromRaw(String? raw) async {
+///
+/// [bypassMemoryCache]: true ise bellek önbelleği okunmaz/yazılmadan önce silinir; aynı URL’de
+/// sunucuda güncellenmiş görsel için zorunlu tazeleme.
+Future<Uint8List?> loadProfileImageBytesFromRaw(
+  String? raw, {
+  bool bypassMemoryCache = false,
+}) async {
   final resolved = resolveMediaUrl(raw);
   if (resolved == null || resolved.isEmpty) return null;
   if (resolved.startsWith('data:')) {
@@ -51,8 +62,12 @@ Future<Uint8List?> loadProfileImageBytesFromRaw(String? raw) async {
 
   final k = _profileImageCacheKey(raw);
   if (k != null) {
-    final hit = _profileImageByteCache[k];
-    if (hit != null && hit.isNotEmpty) return hit;
+    if (bypassMemoryCache) {
+      _profileImageByteCache.remove(k);
+    } else {
+      final hit = _profileImageByteCache[k];
+      if (hit != null && hit.isNotEmpty) return hit;
+    }
   }
 
   Future<Uint8List?> fetchWith(Dio dio) async {
@@ -62,6 +77,10 @@ Future<Uint8List?> loadProfileImageBytesFromRaw(String? raw) async {
         options: Options(
           responseType: ResponseType.bytes,
           validateStatus: (c) => c != null && c > 0 && c < 600,
+          headers: const <String, dynamic>{
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+          },
         ),
       );
       final body = r.data;
@@ -91,6 +110,10 @@ Future<Uint8List?> loadProfileImageBytesFromRaw(String? raw) async {
       connectTimeout: const Duration(seconds: 20),
       receiveTimeout: const Duration(seconds: 20),
       validateStatus: (c) => c != null && c > 0 && c < 600,
+      headers: const <String, dynamic>{
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
     ),
   );
   final out = await fetchWith(plain);

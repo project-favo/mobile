@@ -41,6 +41,7 @@ import '../../../../../core/widgets/custom_snack_bar.dart';
 import '../../../../../core/widgets/app_button.dart';
 import '../../../../../core/utils/in_flight_id_lock.dart';
 import '../../../../../core/utils/product_report_storage.dart';
+import '../../../../../core/utils/load_profile_image_bytes.dart';
 import '../../../../../core/utils/resolve_media_url.dart';
 import '../../../../../core/utils/review_report_storage.dart';
 import '../../../../../routes/app_routes.dart';
@@ -103,6 +104,7 @@ class _ProfilePageState extends State<ProfilePage>
   bool _profileRefreshInFlight = false;
   final InFlightIdLock _wishlistProductLikeLock = InFlightIdLock();
   final InFlightIdLock _myReviewDeleteLock = InFlightIdLock();
+  int _profileAvatarImageRevision = 0;
 
   void _rememberWarmProfile() {
     if (_user == null) return;
@@ -995,7 +997,19 @@ class _ProfilePageState extends State<ProfilePage>
         user = user.withFilledAvatarFrom(extra);
       }
       if (!mounted) return;
+      final prevUser = _user;
       setState(() {
+        if (prevUser != null) {
+          final urlChanged = (prevUser.profileImageUrl ?? '') !=
+              (user.profileImageUrl ?? '');
+          final dataChanged = (prevUser.profilePhotoData ?? '') !=
+              (user.profilePhotoData ?? '');
+          if (urlChanged || dataChanged) {
+            evictProfileImageBytesCacheForRaw(prevUser.profileImageUrl);
+            evictProfileImageBytesCacheForRaw(user.profileImageUrl);
+            _profileAvatarImageRevision++;
+          }
+        }
         _user = user;
         _cachedProfilePhotoBytes = decodeProfilePhotoBytes(user.profilePhotoData);
         _isLoading = false;
@@ -1535,7 +1549,19 @@ class _ProfilePageState extends State<ProfilePage>
               );
               if (!mounted) return;
               if (result is UserResponseDto) {
+                final prevUser = _user;
                 setState(() {
+                  if (prevUser != null) {
+                    final urlChanged = (prevUser.profileImageUrl ?? '') !=
+                        (result.profileImageUrl ?? '');
+                    final dataChanged = (prevUser.profilePhotoData ?? '') !=
+                        (result.profilePhotoData ?? '');
+                    if (urlChanged || dataChanged) {
+                      evictProfileImageBytesCacheForRaw(prevUser.profileImageUrl);
+                      evictProfileImageBytesCacheForRaw(result.profileImageUrl);
+                      _profileAvatarImageRevision++;
+                    }
+                  }
                   _user = result;
                   _cachedProfilePhotoBytes = result.hasProfileAvatarVisual
                       ? decodeProfilePhotoBytes(result.profilePhotoData)
@@ -1561,6 +1587,7 @@ class _ProfilePageState extends State<ProfilePage>
               imageUrl: _user!.profileImageUrl,
               memoryBytes: _cachedProfilePhotoBytes,
               fallbackInitial: _user!.userName,
+              imageRevision: _profileAvatarImageRevision,
             ),
             const SizedBox(height: AppSpacing.large),
             if (_user!.name != null || _user!.surname != null) ...[

@@ -236,6 +236,8 @@ class _FriendFeedPageState extends State<FriendFeedPage>
       final res = await _repository.getFriendsFeed(page: 0, size: pageSize);
       final mapped = activityItemsFromFriendsFeedDtos(res.content);
       if (!mounted) return;
+      // Sunucu aynı URL ile yeni piksel döndürebilir; tüm profil byte önbelleğini boşalt.
+      clearProfileImageByteCache();
       setState(() {
         _items
           ..clear()
@@ -273,8 +275,24 @@ class _FriendFeedPageState extends State<FriendFeedPage>
         size: kStandardListPageSize,
       );
       if (!mounted) return;
+      final mapped = activityItemsFromFriendsFeedDtos(res.content);
+      final knownAvatarByUserId = <String, String?>{};
+      for (final i in _items) {
+        final id = i.user.id.trim();
+        if (id.isEmpty) continue;
+        knownAvatarByUserId[id] = i.user.avatarUrl;
+      }
+      for (final i in mapped) {
+        final id = i.user.id.trim();
+        if (id.isEmpty) continue;
+        final before = knownAvatarByUserId[id];
+        final after = i.user.avatarUrl;
+        if (before != after) {
+          evictProfileImageBytesCacheForRaw(before);
+          evictProfileImageBytesCacheForRaw(after);
+        }
+      }
       setState(() {
-        final mapped = activityItemsFromFriendsFeedDtos(res.content);
         _items.addAll(mapped);
         _page = res.number;
         _totalPages = res.totalPages;

@@ -35,6 +35,7 @@ ActivityItem activityItemFromFriendsFeed(FriendsFeedItemDto e) {
   final targetTitle = productTitle.isNotEmpty
       ? productTitle
       : (reviewTitle.isNotEmpty ? reviewTitle : 'Product');
+  final trimmedProductId = (e.productId ?? '').trim();
 
   final lineText = type == ActivityType.like
       ? '$actorName liked this product'
@@ -46,14 +47,14 @@ ActivityItem activityItemFromFriendsFeed(FriendsFeedItemDto e) {
         : '${e.type}_${e.actorUserId}_${e.productId ?? ''}_${e.createdAt?.millisecondsSinceEpoch ?? 0}',
     type: type,
     user: ActivityUser(
-      id: e.actorUserId,
+      id: e.actorUserId.trim(),
       username: username,
-      avatarUrl: e.actorProfilePhotoUrl,
+      avatarUrl: e.actorProfilePhotoUrl?.trim(),
     ),
     targetContent: ActivityTargetContent(
       title: targetTitle,
       thumbnailUrl: e.productImageUrl,
-      productId: (e.productId ?? '').trim().isEmpty ? null : e.productId,
+      productId: trimmedProductId.isEmpty ? null : trimmedProductId,
       reviewId: (e.reviewId ?? '').trim().isEmpty ? null : e.reviewId,
     ),
     timestamp: e.createdAt ?? DateTime.now(),

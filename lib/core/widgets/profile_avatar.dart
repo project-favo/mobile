@@ -11,12 +11,16 @@ class ProfileAvatar extends StatefulWidget {
   final Uint8List? memoryBytes;
   final String fallbackInitial;
 
+  /// Aynı [imageUrl] altında sunucu görseli değiştiğinde üst widget artırır; önbellek atlanır.
+  final int imageRevision;
+
   const ProfileAvatar({
     super.key,
     required this.radius,
     this.imageUrl,
     this.memoryBytes,
     this.fallbackInitial = '?',
+    this.imageRevision = 0,
   });
 
   @override
@@ -25,48 +29,74 @@ class ProfileAvatar extends StatefulWidget {
 
 class _ProfileAvatarState extends State<ProfileAvatar> {
   Uint8List? _networkBytes;
-  bool _loading = false;
 
   @override
   void initState() {
     super.initState();
+    if (widget.imageRevision != 0) {
+      evictProfileImageBytesCacheForRaw(widget.imageUrl);
+    }
     _networkBytes = peekProfileImageBytes(widget.imageUrl);
-    _kickLoad();
+    _kickLoad(bypassMemoryCache: widget.imageRevision != 0);
   }
 
   @override
   void didUpdateWidget(ProfileAvatar oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.imageUrl != widget.imageUrl ||
-        oldWidget.memoryBytes != widget.memoryBytes) {
-      // setState ile hemen yeniden çiz — yoksa eski avatar bir frame kalır
-      setState(() {
-        _networkBytes = peekProfileImageBytes(widget.imageUrl);
-      });
-      _kickLoad();
+    final revisionChanged = oldWidget.imageRevision != widget.imageRevision;
+    final urlChanged = oldWidget.imageUrl != widget.imageUrl;
+    final memChanged = oldWidget.memoryBytes != widget.memoryBytes;
+    if (!revisionChanged && !urlChanged && !memChanged) return;
+
+    if (revisionChanged) {
+      evictProfileImageBytesCacheForRaw(widget.imageUrl);
     }
-  }
+    if (urlChanged) {
+      evictProfileImageBytesCacheForRaw(oldWidget.imageUrl);
+    }
 
-  void _kickLoad() {
-    if (widget.memoryBytes != null && widget.memoryBytes!.isNotEmpty) return;
-    if (_networkBytes != null && _networkBytes!.isNotEmpty) return;
-    final raw = widget.imageUrl;
-    if (raw == null || raw.trim().isEmpty) return;
-    _loadBytes();
-  }
-
-  Future<void> _loadBytes() async {
-    if (widget.memoryBytes != null && widget.memoryBytes!.isNotEmpty) return;
-    final raw = widget.imageUrl;
-    if (raw == null || raw.trim().isEmpty) return;
-
-    setState(() => _loading = true);
-    final bytes = await loadProfileImageBytesFromRaw(raw);
-    if (!mounted) return;
     setState(() {
-      _networkBytes = bytes;
-      _loading = false;
+      if (widget.imageUrl == null || widget.imageUrl!.trim().isEmpty) {
+        _networkBytes = null;
+      } else {
+        _networkBytes = revisionChanged
+            ? null
+            : peekProfileImageBytes(widget.imageUrl);
+      }
     });
+    _kickLoad(bypassMemoryCache: revisionChanged);
+  }
+
+  void _kickLoad({bool bypassMemoryCache = false}) {
+    if (widget.memoryBytes != null && widget.memoryBytes!.isNotEmpty) return;
+    final raw = widget.imageUrl;
+    if (raw == null || raw.trim().isEmpty) return;
+    if (!bypassMemoryCache &&
+        _networkBytes != null &&
+        _networkBytes!.isNotEmpty) {
+      return;
+    }
+    _loadBytes(bypassMemoryCache: bypassMemoryCache);
+  }
+
+  Future<void> _loadBytes({bool bypassMemoryCache = false}) async {
+    if (widget.memoryBytes != null && widget.memoryBytes!.isNotEmpty) return;
+    final raw = widget.imageUrl;
+    if (raw == null || raw.trim().isEmpty) return;
+
+    final trimmedUrl = raw.trim();
+    final revisionAtStart = widget.imageRevision;
+
+    final bytes = await loadProfileImageBytesFromRaw(
+      raw,
+      bypassMemoryCache: bypassMemoryCache,
+    );
+    if (!mounted) return;
+    if (widget.imageUrl?.trim() != trimmedUrl) return;
+    if (widget.imageRevision != revisionAtStart) return;
+    if (widget.memoryBytes != null && widget.memoryBytes!.isNotEmpty) return;
+
+    setState(() => _networkBytes = bytes);
   }
 
   @override
@@ -87,12 +117,7 @@ class _ProfileAvatarState extends State<ProfileAvatar> {
       );
     }
 
-    // Show placeholder immediately while network bytes load,
-    // instead of shimmer delay that feels like UI lag.
-    return Opacity(
-      opacity: _loading ? 0.72 : 1.0,
-      child: _placeholderCircle(widget.radius, widget.fallbackInitial),
-    );
+    return _placeholderCircle(widget.radius, widget.fallbackInitial);
   }
 
   Widget _placeholderCircle(double radius, String fallbackInitial) {
@@ -130,6 +155,7 @@ class ProfileAvatarImage extends StatefulWidget {
   final String? imageUrl;
   final Uint8List? memoryBytes;
   final String fallbackInitial;
+  final int imageRevision;
 
   const ProfileAvatarImage({
     super.key,
@@ -137,6 +163,7 @@ class ProfileAvatarImage extends StatefulWidget {
     this.imageUrl,
     this.memoryBytes,
     this.fallbackInitial = '?',
+    this.imageRevision = 0,
   });
 
   @override
@@ -145,49 +172,76 @@ class ProfileAvatarImage extends StatefulWidget {
 
 class _ProfileAvatarImageState extends State<ProfileAvatarImage> {
   Uint8List? _networkBytes;
-  bool _loading = false;
 
   @override
   void initState() {
     super.initState();
+    if (widget.imageRevision != 0) {
+      evictProfileImageBytesCacheForRaw(widget.imageUrl);
+    }
     _networkBytes = peekProfileImageBytes(widget.imageUrl);
-    _kickLoad();
+    _kickLoad(bypassMemoryCache: widget.imageRevision != 0);
   }
 
   @override
   void didUpdateWidget(ProfileAvatarImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.imageUrl != widget.imageUrl ||
-        oldWidget.memoryBytes != widget.memoryBytes) {
-      setState(() {
-        _networkBytes = peekProfileImageBytes(widget.imageUrl);
-      });
-      _kickLoad();
+    final revisionChanged = oldWidget.imageRevision != widget.imageRevision;
+    final urlChanged = oldWidget.imageUrl != widget.imageUrl;
+    final memChanged = oldWidget.memoryBytes != widget.memoryBytes;
+    if (!revisionChanged && !urlChanged && !memChanged) return;
+
+    if (revisionChanged) {
+      evictProfileImageBytesCacheForRaw(widget.imageUrl);
     }
+    if (urlChanged) {
+      evictProfileImageBytesCacheForRaw(oldWidget.imageUrl);
+    }
+
+    setState(() {
+      if (widget.imageUrl == null || widget.imageUrl!.trim().isEmpty) {
+        _networkBytes = null;
+      } else {
+        _networkBytes = revisionChanged
+            ? null
+            : peekProfileImageBytes(widget.imageUrl);
+      }
+    });
+    _kickLoad(bypassMemoryCache: revisionChanged);
   }
 
-  void _kickLoad() {
+  void _kickLoad({bool bypassMemoryCache = false}) {
     if (widget.memoryBytes != null && widget.memoryBytes!.isNotEmpty) {
       return;
     }
-    if (_networkBytes != null && _networkBytes!.isNotEmpty) return;
     final raw = widget.imageUrl;
     if (raw == null || raw.trim().isEmpty) return;
-    _loadBytes();
+    if (!bypassMemoryCache &&
+        _networkBytes != null &&
+        _networkBytes!.isNotEmpty) {
+      return;
+    }
+    _loadBytes(bypassMemoryCache: bypassMemoryCache);
   }
 
-  Future<void> _loadBytes() async {
+  Future<void> _loadBytes({bool bypassMemoryCache = false}) async {
     if (widget.memoryBytes != null && widget.memoryBytes!.isNotEmpty) return;
     final raw = widget.imageUrl;
     if (raw == null || raw.trim().isEmpty) return;
 
-    setState(() => _loading = true);
-    final bytes = await loadProfileImageBytesFromRaw(raw);
+    final trimmedUrl = raw.trim();
+    final revisionAtStart = widget.imageRevision;
+
+    final bytes = await loadProfileImageBytesFromRaw(
+      raw,
+      bypassMemoryCache: bypassMemoryCache,
+    );
     if (!mounted) return;
-    setState(() {
-      _networkBytes = bytes;
-      _loading = false;
-    });
+    if (widget.imageUrl?.trim() != trimmedUrl) return;
+    if (widget.imageRevision != revisionAtStart) return;
+    if (widget.memoryBytes != null && widget.memoryBytes!.isNotEmpty) return;
+
+    setState(() => _networkBytes = bytes);
   }
 
   @override
@@ -216,10 +270,7 @@ class _ProfileAvatarImageState extends State<ProfileAvatarImage> {
       );
     }
 
-    return Opacity(
-      opacity: _loading ? 0.72 : 1.0,
-      child: _initials(widget.size, radius),
-    );
+    return _initials(widget.size, radius);
   }
 
   Widget _initials(double size, double radius) {
