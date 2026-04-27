@@ -1830,7 +1830,7 @@ class _ProfilePageState extends State<ProfilePage>
                             radius: 52,
                             imageUrl: user.profileImageUrl,
                             memoryBytes: _cachedProfilePhotoBytes,
-                            fallbackInitial: user.userName,
+                            fallbackInitial: '',
                             imageRevision: _profileAvatarImageRevision,
                           ),
                           const SizedBox(height: 8),

@@ -311,128 +311,233 @@ class _ConversationListPageState extends State<ConversationListPage> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: AppColors.primary,
         elevation: 0,
-        iconTheme: const IconThemeData(color: AppColors.primary),
-        title: Text(
-          'Messages',
-          style: AppTextStyles.heading3.copyWith(
-            color: AppColors.textPrimary,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppColors.primary),
+          icon: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.2),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.arrow_back_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
+          ),
           onPressed: () => Navigator.of(context).pop(true),
         ),
-      ),
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: Image.asset('assets/images/background.png', fit: BoxFit.cover),
+        title: const Text(
+          'Messages',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
           ),
-          RefreshIndicator(
+        ),
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFFB5003A),
+                AppColors.primary,
+                Color(0xFF6B001F),
+              ],
+            ),
+          ),
+        ),
+      ),
+      body: RefreshIndicator(
+        color: AppColors.primary,
         onRefresh: _loadConversations,
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.xLarge),
-          child: _isLoading
-              ? ListView.separated(
-                  physics: const AlwaysScrollableScrollPhysics(
-                    parent: ClampingScrollPhysics(),
-                  ),
-                  itemCount: 6,
-                  separatorBuilder: (_, __) => const SizedBox(height: 6),
-                  itemBuilder: (context, index) => _ConversationRowSkeleton(),
-                )
-              : _errorMessage != null
-                  ? Center(
-                      child: Text(
-                        _errorMessage!,
-                        style: AppTextStyles.bodySecondary.copyWith(
-                          color: AppColors.textSecondary,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    )
-                  : _conversations.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.chat_bubble_outline,
-                                size: 48,
-                                color: AppColors.textSecondary.withValues(alpha: 0.7),
+        child: _isLoading
+            ? ListView.separated(
+                padding: const EdgeInsets.all(AppSpacing.xLarge),
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: ClampingScrollPhysics(),
+                ),
+                itemCount: 6,
+                separatorBuilder: (_, __) => const SizedBox(height: 6),
+                itemBuilder: (_, __) => const _ConversationRowSkeleton(),
+              )
+            : _errorMessage != null
+                ? ListView(
+                    physics: const AlwaysScrollableScrollPhysics(
+                      parent: ClampingScrollPhysics(),
+                    ),
+                    children: [
+                      SizedBox(
+                        height: MediaQuery.of(context).size.height * 0.4,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Container(
+                              width: 64,
+                              height: 64,
+                              decoration: BoxDecoration(
+                                color: AppColors.error.withValues(alpha: 0.1),
+                                shape: BoxShape.circle,
                               ),
-                              const SizedBox(height: AppSpacing.large),
-                              Text(
-                                'No conversations yet',
-                                style: AppTextStyles.bodyMedium.copyWith(
+                              child: const Icon(
+                                Icons.error_outline_rounded,
+                                size: 32,
+                                color: AppColors.error,
+                              ),
+                            ),
+                            const SizedBox(height: AppSpacing.large),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.xLarge,
+                              ),
+                              child: Text(
+                                _errorMessage!,
+                                style: const TextStyle(
+                                  fontSize: 14,
                                   color: AppColors.textSecondary,
                                 ),
+                                textAlign: TextAlign.center,
                               ),
-                            ],
-                          ),
-                        )
-                      : ListView.separated(
-                          physics: const AlwaysScrollableScrollPhysics(
-                            parent: ClampingScrollPhysics(),
-                          ),
-                          itemCount: _conversations.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 6),
-                          itemBuilder: (context, index) {
-                            final c = _conversations[index];
-                            final av = _effectiveAvatarFor(c.otherParticipant);
-                            final hasUnread = c.unreadCount > 0;
-                            final timeParts =
-                                conversationPreviewTimePartsFromBackend(
-                              c.lastMessageAt,
-                              fallback: '—',
-                            );
-                            return _ConversationListTile(
-                              username: c.otherParticipant.username,
-                              preview: c.lastMessage,
-                              timeParts: timeParts,
-                              hasUnread: hasUnread,
-                              unreadCount: c.unreadCount,
-                              avatar: ProfileAvatar(
-                                radius: 20,
-                                imageUrl: av.url,
-                                memoryBytes: av.bytes,
-                                fallbackInitial: c.otherParticipant.username,
+                            ),
+                            const SizedBox(height: AppSpacing.xLarge),
+                            ElevatedButton(
+                              onPressed: _loadConversations,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.primary,
+                                elevation: 0,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 28,
+                                  vertical: 12,
+                                ),
                               ),
-                              onTap: () async {
-                                if (!isConversationDtoVisible(c)) {
-                                  unawaited(_loadConversations());
-                                  return;
-                                }
-                                if (_openingConversationIds.contains(c.id)) {
-                                  return;
-                                }
-                                _openingConversationIds.add(c.id);
-                                if (!mounted) return;
-                                try {
-                                  final result = await Navigator.push(
-                                    context,
-                                    SlideRightRoute(
-                                      page: ChatDetailPage(conversation: c),
-                                    ),
-                                  );
-                                  if (result == true && mounted) {
-                                    await _loadConversations();
-                                  }
-                                } finally {
-                                  _openingConversationIds.remove(c.id);
-                                }
-                              },
-                            );
-                          },
+                              child: const Text(
+                                'Try again',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-          ),
-          ),
-        ],
+                      ),
+                    ],
+                  )
+                : _conversations.isEmpty
+                    ? ListView(
+                        physics: const AlwaysScrollableScrollPhysics(
+                          parent: ClampingScrollPhysics(),
+                        ),
+                        children: [
+                          SizedBox(
+                            height: MediaQuery.of(context).size.height * 0.42,
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Container(
+                                  width: 72,
+                                  height: 72,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primary.withValues(
+                                      alpha: 0.08,
+                                    ),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    Icons.chat_bubble_outline_rounded,
+                                    size: 34,
+                                    color: AppColors.primary.withValues(
+                                      alpha: 0.6,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: AppSpacing.large),
+                                const Text(
+                                  'No conversations yet',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.textPrimary,
+                                  ),
+                                ),
+                                const SizedBox(height: AppSpacing.small),
+                                const Text(
+                                  'Start a conversation by visiting\nsomeone\'s profile.',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: AppColors.textSecondary,
+                                    height: 1.4,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      )
+                    : ListView.separated(
+                        padding: const EdgeInsets.all(AppSpacing.xLarge),
+                        physics: const AlwaysScrollableScrollPhysics(
+                          parent: ClampingScrollPhysics(),
+                        ),
+                        itemCount: _conversations.length,
+                        separatorBuilder: (_, __) =>
+                            const SizedBox(height: 6),
+                        itemBuilder: (context, index) {
+                          final c = _conversations[index];
+                          final av = _effectiveAvatarFor(c.otherParticipant);
+                          final hasUnread = c.unreadCount > 0;
+                          final timeParts =
+                              conversationPreviewTimePartsFromBackend(
+                            c.lastMessageAt,
+                            fallback: '—',
+                          );
+                          return _ConversationListTile(
+                            username: c.otherParticipant.username,
+                            preview: c.lastMessage,
+                            timeParts: timeParts,
+                            hasUnread: hasUnread,
+                            unreadCount: c.unreadCount,
+                            avatar: ProfileAvatar(
+                              radius: 22,
+                              imageUrl: av.url,
+                              memoryBytes: av.bytes,
+                              fallbackInitial: c.otherParticipant.username,
+                            ),
+                            onTap: () async {
+                              if (!isConversationDtoVisible(c)) {
+                                unawaited(_loadConversations());
+                                return;
+                              }
+                              if (_openingConversationIds.contains(c.id)) {
+                                return;
+                              }
+                              _openingConversationIds.add(c.id);
+                              if (!mounted) return;
+                              try {
+                                final result = await Navigator.push(
+                                  context,
+                                  SlideRightRoute(
+                                    page: ChatDetailPage(conversation: c),
+                                  ),
+                                );
+                                if (result == true && mounted) {
+                                  await _loadConversations();
+                                }
+                              } finally {
+                                _openingConversationIds.remove(c.id);
+                              }
+                            },
+                          );
+                        },
+                      ),
       ),
     );
   }
@@ -462,34 +567,34 @@ class _ConversationListTile extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         onTap: () => unawaited(onTap()),
         child: Ink(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(16),
             color: AppColors.surface,
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.06),
+                color: Colors.black.withValues(alpha: 0.05),
                 blurRadius: 10,
-                offset: const Offset(0, 3),
+                offset: const Offset(0, 2),
               ),
               if (hasUnread)
                 BoxShadow(
-                  color: AppColors.primary.withValues(alpha: 0.1),
+                  color: AppColors.primary.withValues(alpha: 0.08),
                   blurRadius: 14,
                   offset: const Offset(0, 2),
                 ),
             ],
             border: Border.all(
               color: hasUnread
-                  ? AppColors.primary.withValues(alpha: 0.2)
-                  : AppColors.border.withValues(alpha: 0.45),
+                  ? AppColors.primary.withValues(alpha: 0.25)
+                  : AppColors.border.withValues(alpha: 0.35),
               width: 1,
             ),
           ),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -612,37 +717,37 @@ class _ConversationRowSkeleton extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         color: AppColors.surface,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
-            offset: const Offset(0, 3),
+            offset: const Offset(0, 2),
           ),
         ],
         border: Border.all(
-          color: AppColors.border.withValues(alpha: 0.45),
+          color: AppColors.border.withValues(alpha: 0.35),
           width: 1,
         ),
       ),
       child: const Padding(
-        padding: EdgeInsets.fromLTRB(12, 10, 12, 10),
+        padding: EdgeInsets.fromLTRB(12, 9, 12, 9),
         child: Row(
           children: [
             SkeletonLoader(
-              width: 40,
-              height: 40,
-              borderRadius: BorderRadius.all(Radius.circular(20)),
+              width: 44,
+              height: 44,
+              borderRadius: BorderRadius.all(Radius.circular(22)),
             ),
             SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SkeletonLoader(width: 110, height: 14),
-                  SizedBox(height: 5),
-                  SkeletonLoader(width: 160, height: 12),
+                  SkeletonLoader(width: 120, height: 14),
+                  SizedBox(height: 6),
+                  SkeletonLoader(width: 180, height: 12),
                 ],
               ),
             ),
@@ -650,9 +755,9 @@ class _ConversationRowSkeleton extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                SkeletonLoader(width: 40, height: 10),
-                SizedBox(height: 3),
-                SkeletonLoader(width: 34, height: 12),
+                SkeletonLoader(width: 38, height: 10),
+                SizedBox(height: 4),
+                SkeletonLoader(width: 32, height: 12),
               ],
             ),
           ],

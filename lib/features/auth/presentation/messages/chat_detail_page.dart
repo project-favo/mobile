@@ -578,13 +578,38 @@ class _ChatDetailPageState extends State<ChatDetailPage>
       resizeToAvoidBottomInset: true,
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: AppColors.primary,
         elevation: 0,
+        centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppColors.primary),
+          icon: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.2),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.arrow_back_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
+          ),
           onPressed: () => Navigator.of(context).pop(true),
         ),
-        iconTheme: const IconThemeData(color: AppColors.primary),
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFFB5003A),
+                AppColors.primary,
+                Color(0xFF6B001F),
+              ],
+            ),
+          ),
+        ),
         title: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () {
@@ -600,19 +625,30 @@ class _ChatDetailPageState extends State<ChatDetailPage>
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              ProfileAvatarImage(
-                size: 32,
-                imageUrl: _effectiveOtherUrl,
-                memoryBytes: _effectiveOtherBytes,
-                fallbackInitial: widget.conversation.otherParticipant.username,
+              Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.4),
+                    width: 1.5,
+                  ),
+                ),
+                child: ProfileAvatarImage(
+                  size: 34,
+                  imageUrl: _effectiveOtherUrl,
+                  memoryBytes: _effectiveOtherBytes,
+                  fallbackInitial:
+                      widget.conversation.otherParticipant.username,
+                ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 10),
               Flexible(
                 child: Text(
                   widget.conversation.otherParticipant.username,
-                  style: AppTextStyles.heading3.copyWith(
-                    color: AppColors.textPrimary,
+                  style: const TextStyle(
+                    fontSize: 16,
                     fontWeight: FontWeight.w700,
+                    color: Colors.white,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -620,14 +656,8 @@ class _ChatDetailPageState extends State<ChatDetailPage>
             ],
           ),
         ),
-        centerTitle: true,
       ),
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: Image.asset('assets/images/background.png', fit: BoxFit.cover),
-          ),
-          GestureDetector(
+      body: GestureDetector(
         behavior: HitTestBehavior.translucent,
         onTap: () => FocusScope.of(context).unfocus(),
         child: Column(
@@ -816,8 +846,6 @@ class _ChatDetailPageState extends State<ChatDetailPage>
             ),
           ],
         ),
-      ),
-        ],
       ),
     );
   }

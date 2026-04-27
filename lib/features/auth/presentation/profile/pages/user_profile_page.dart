@@ -1405,7 +1405,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
                             radius: 52,
                             imageUrl: _avatarImageUrl ?? widget.profileImageUrl,
                             memoryBytes: _avatarMemoryBytes,
-                            fallbackInitial: _profileUsername,
+                            fallbackInitial: '',
                             imageRevision: _profileAvatarImageRevision,
                           ),
                           const SizedBox(height: 8),
