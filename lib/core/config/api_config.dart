@@ -18,6 +18,8 @@ class ApiConfig {
   static const String forgotPasswordPath = '/api/auth/forgot-password';
   static const String checkUsernamePath = '/api/auth/check-username';
   static const String mePath = '/api/auth/me';
+  static const String preRegisterSendCodePath = '/api/auth/pre-register/send-code';
+  static const String preRegisterVerifyCodePath = '/api/auth/pre-register/verify-code';
 
   /// Native STOMP endpoint (bildirimler: `/user/queue/notifications`). Mesajlar `/ws` kullanır.
   static const String wsNativePath = '/ws-native';

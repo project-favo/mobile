@@ -143,6 +143,9 @@ class _BackendEmailVerificationPageState
     });
   }
 
+  /// Yeni kayıt akışında geri/iptal tuşuna basınca çağrılır.
+  /// Onay alındıktan sonra yarım kalan Firebase + backend kaydını silerek kayıt ekranına döner.
+
   Future<void> _resend() async {
     if (_resendBusy || _cooldownNotifier.value > 0) return;
     setState(() {
@@ -566,6 +569,6 @@ class _BackendEmailVerificationPageState
           },
         ),
       ),
-    );
+    ); // Scaffold
   }
 }

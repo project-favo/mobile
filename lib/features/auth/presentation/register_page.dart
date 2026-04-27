@@ -12,7 +12,7 @@ import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/username_input_rules.dart';
 import '../data/services/auth_service.dart';
 import '../data/models/register_request_dto.dart';
-import 'register_firebase_verify_gate_page.dart';
+import 'pre_register_verify_page.dart';
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
@@ -337,18 +337,17 @@ class _RegisterPageState extends State<RegisterPage> {
       );
       AuthService.saveRegisterFormDraft(registerRequest);
 
-      await _authService.createFirebaseUserForRegistration(
-        email: _email.text.trim(),
-        password: _password.text,
-      );
+      // Firebase veya DB'ye kayıt yok — sadece kodu e-postaya gönder.
+      await _authService.sendPreRegistrationCode(_email.text.trim());
 
       if (!mounted) return;
       setState(() => _isLoading = false);
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => RegisterFirebaseVerifyGatePage(
+          builder: (_) => PreRegisterVerifyPage(
             email: _email.text.trim(),
+            password: _password.text,
             pendingRegistration: registerRequest,
           ),
         ),

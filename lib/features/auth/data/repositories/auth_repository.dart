@@ -558,6 +558,37 @@ class AuthRepository {
     );
   }
 
+  /// Kayıt öncesi e-posta doğrulama kodu gönderir (public — Firebase gerekmez).
+  Future<void> sendPreRegistrationCode(String email) async {
+    try {
+      await _apiClient.dio.post(
+        ApiConfig.preRegisterSendCodePath,
+        data: {'email': email.trim()},
+      );
+    } on DioException catch (e) {
+      final msg = backendResponsePrimaryErrorText(e.response?.data) ??
+          e.message ??
+          'Failed to send code';
+      throw Exception(msg);
+    }
+  }
+
+  /// Kayıt öncesi e-posta doğrulama kodunu doğrular.
+  /// Yanlış kod / süresi dolmuş → Exception fırlatır.
+  Future<void> verifyPreRegistrationCode(String email, String code) async {
+    try {
+      await _apiClient.dio.post(
+        ApiConfig.preRegisterVerifyCodePath,
+        data: {'email': email.trim(), 'code': code.trim()},
+      );
+    } on DioException catch (e) {
+      final msg = backendResponsePrimaryErrorText(e.response?.data) ??
+          e.message ??
+          'Code verification failed';
+      throw Exception(msg);
+    }
+  }
+
   /// Hesabı siler (backend'de /api/auth/me DELETE)
   Future<void> deleteMe(String firebaseIdToken) async {
     try {

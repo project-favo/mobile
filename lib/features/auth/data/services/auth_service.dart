@@ -195,8 +195,21 @@ class AuthService {
     return _authRepository.checkUsernameAvailable(userName);
   }
 
+  /// Kayıt öncesi: e-postaya 5 haneli doğrulama kodu gönderir (Firebase oluşturulmaz).
+  Future<void> sendPreRegistrationCode(String email) async {
+    return _authRepository.sendPreRegistrationCode(email);
+  }
+
+  /// Kayıt öncesi kodu doğrular. Başarılı olursa Firebase + backend kaydı yapılabilir.
+  Future<void> verifyPreRegistrationCode(String email, String code) async {
+    return _authRepository.verifyPreRegistrationCode(email, code);
+  }
+
   /// Kayıt adımı 1: Firebase hesabı oluşturur; **e-posta göndermez** (Firebase link maili yok).
   /// E-postadaki 5 haneli kod yalnızca backend (`register` / `resend-verification`) üzerinden gelir.
+  ///
+  /// `email-already-in-use` hatası gelirse önce doğrulama tamamlanmadan yarım kalan (zombie)
+  /// bir Firebase hesabı olup olmadığını kontrol eder; öyleyse siler ve yeniden oluşturur.
   Future<void> createFirebaseUserForRegistration({
     required String email,
     required String password,
@@ -207,13 +220,75 @@ class AuthService {
         password: password,
       );
       final u = userCredential.user;
-      if (u == null) {
-        throw Exception('Failed to create account');
-      }
+      if (u == null) throw Exception('Failed to create account');
     } on FirebaseAuthException catch (e) {
+      if (e.code == 'email-already-in-use') {
+        final recovered = await _recoverZombieFirebaseUser(
+          email: email.trim(),
+          password: password,
+        );
+        if (recovered) return;
+      }
       throw _handleFirebaseError(e);
     }
   }
+
+  /// Yarım kalan kayıt akışından kalan Firebase hesabını temizler.
+  /// Doğrulama tamamlanmadan bırakılan hesap varsa ve backend'de tam kayıt yoksa siler.
+  /// Temizlik başarılıysa `true` döner; gerçek çakışmada `false` veya hata fırlatır.
+  Future<bool> _recoverZombieFirebaseUser({
+    required String email,
+    required String password,
+  }) async {
+    UserCredential cred;
+    try {
+      cred = await _firebaseAuth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+    } on FirebaseAuthException {
+      return false; // farklı şifre → gerçek çakışma
+    }
+
+    final existingUser = cred.user;
+    if (existingUser == null) return false;
+
+    bool isZombie = false;
+    try {
+      final idToken = await _getFreshIdToken(existingUser);
+      await _authRepository.login(idToken);
+      // Backend login başarılı → gerçek kayıtlı hesap; sign out + gerçek hata
+    } on DioException catch (de) {
+      final body = dioResponseDataAsSearchString(de.response?.data).toUpperCase();
+      if (_dioLooksLikeNoBackendUser(de) || body.contains('EMAIL_NOT_VERIFIED')) {
+        isZombie = true;
+        if (body.contains('EMAIL_NOT_VERIFIED')) {
+          // Backend'de yarım kalan kayıt var → silmeyi dene (best-effort)
+          try {
+            final idToken = await _getFreshIdToken(existingUser);
+            await _authRepository.deleteMe(idToken);
+          } catch (_) {}
+        }
+      }
+    } catch (_) {
+      // Beklenmedik hata → gerçek çakışma sayılır
+    }
+
+    if (!isZombie) {
+      await _firebaseAuth.signOut();
+      return false;
+    }
+
+    // Zombie hesap → Firebase kullanıcısını sil ve yeniden oluştur
+    await existingUser.delete();
+    final newCred = await _firebaseAuth.createUserWithEmailAndPassword(
+      email: email,
+      password: password,
+    );
+    if (newCred.user == null) throw Exception('Failed to create account');
+    return true;
+  }
+
 
   /// Kayıt adımı 2: `POST /api/auth/register`. Backend e-posta kodu için [requireFirebaseEmailVerified] false olmalı.
   Future<void> registerOnBackend(
