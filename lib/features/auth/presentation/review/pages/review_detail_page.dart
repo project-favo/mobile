@@ -76,6 +76,8 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
   final Map<String, Future<Uint8List?>> _mediaFutures = {};
   final InFlightFlag _reviewDetailLikeLock = InFlightFlag();
   final InFlightFlag _reviewDeleteLock = InFlightFlag();
+  /// Poll GET’i like toggle’dan önce başladıysa dönen eski satırı uygulama (ana sayfa like epoch ile aynı fikir).
+  int _reviewDetailPollBarrierEpoch = 0;
 
   /// Ürün askı / vitrin dışı; [canPop] yokken tam ekran yedek.
   bool _productListingBlocked = false;
@@ -270,6 +272,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
   /// Token yok: yine de [bypassCache] GET ürün (cache’de kalmış “aktif” [ProductDto] dönmesin).
   Future<void> _pollProductAndReviewStillPresent() async {
     if (!mounted || _poppedForListingGone) return;
+    final reviewPollBarrierAtStart = _reviewDetailPollBarrierEpoch;
     final token = await _sessionHelper.getTokenAndSetHeader();
     if (token != null) {
       ReviewDto? r;
@@ -304,11 +307,15 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
           return;
         }
         if (_reviewSnapshotChanged(freshReview, _currentReview)) {
-          if (mounted) {
+          final allowApplyReview =
+              mounted &&
+              !_reviewDetailLikeLock.isHeld &&
+              _reviewDetailPollBarrierEpoch == reviewPollBarrierAtStart;
+          if (allowApplyReview) {
             setState(() => _currentReview = freshReview);
             _initMediaFutures();
           }
-          if (isReviewEntityVisible(freshReview)) {
+          if (allowApplyReview && isReviewEntityVisible(freshReview)) {
             _applyMergedReviewToMemoryCache(freshReview);
           }
         }
@@ -653,6 +660,10 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
         _mediaFutures.clear();
       }
       _initMediaFutures();
+      if (CurrentUserCache.instance.isMyReview(_currentReview) &&
+          !_currentReview.isLikedByCurrentUser) {
+        unawaited(_hydrateSelfLikeLocalBoostFromPrefs());
+      }
     } on ReviewNotAvailableException {
       if (mounted) {
         await _navigateBackWithNotice(
@@ -1050,6 +1061,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
     if (!_reviewDetailLikeLock.tryEnter()) return;
 
     final serverSnap = _currentReview;
+    ReviewDto? nonOwnLikeOptimisticRow;
     final boostBeforeTap = _selfLikeLocalBoost;
     final displayLikedBeforeTap =
         serverSnap.isLikedByCurrentUser || boostBeforeTap;
@@ -1097,6 +1109,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
           isReviewInactive: _currentReview.isReviewInactive,
         );
       });
+      nonOwnLikeOptimisticRow = _currentReview;
     }
 
     final previousLikeStatus = serverSnap.isLikedByCurrentUser;
@@ -1119,36 +1132,68 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
           (_viewerUserId ?? CurrentUserCache.instance.userId)?.trim() ?? '';
       if (uid.isNotEmpty && _isOwnReview) {
         unawaited(
-          SelfReviewLikeLocalPrefs.instance.setBoost(uid, serverSnap.id, false),
+          SelfReviewLikeLocalPrefs.instance.setBoost(
+            uid,
+            serverSnap.id,
+            newLikeStatus,
+          ),
         );
       }
 
       setState(() {
         if (_isOwnReview) {
           _selfLikeLocalBoost = false;
+          final base = serverSnap;
+          _currentReview = ReviewDto(
+            id: base.id,
+            title: base.title,
+            description: base.description,
+            isCollaborative: base.isCollaborative,
+            rating: base.rating,
+            createdAt: base.createdAt,
+            productId: base.productId,
+            productName: base.productName,
+            ownerId: base.ownerId,
+            ownerUserName: base.ownerUserName,
+            ownerProfilePhotoUrl: base.ownerProfilePhotoUrl,
+            mediaList: base.mediaList,
+            likeCount:
+                newLikeStatus
+                    ? (previousLikeCount + 1)
+                    : (previousLikeCount > 0 ? previousLikeCount - 1 : 0),
+            isLikedByCurrentUser: newLikeStatus,
+            isProductNotListed: base.isProductNotListed,
+            isReviewInactive: base.isReviewInactive,
+          );
+        } else {
+          final opt = nonOwnLikeOptimisticRow ?? _currentReview;
+          final nextCount =
+              newLikeStatus == opt.isLikedByCurrentUser
+                  ? opt.likeCount
+                  : (newLikeStatus
+                      ? (serverSnap.likeCount + 1)
+                      : (serverSnap.likeCount > 0
+                          ? serverSnap.likeCount - 1
+                          : 0));
+          _currentReview = ReviewDto(
+            id: opt.id,
+            title: opt.title,
+            description: opt.description,
+            isCollaborative: opt.isCollaborative,
+            rating: opt.rating,
+            createdAt: opt.createdAt,
+            productId: opt.productId,
+            productName: opt.productName,
+            ownerId: opt.ownerId,
+            ownerUserName: opt.ownerUserName,
+            ownerProfilePhotoUrl: opt.ownerProfilePhotoUrl,
+            mediaList: opt.mediaList,
+            likeCount: nextCount,
+            isLikedByCurrentUser: newLikeStatus,
+            isProductNotListed: opt.isProductNotListed,
+            isReviewInactive: opt.isReviewInactive,
+          );
         }
-        final base = _isOwnReview ? serverSnap : _currentReview;
-        _currentReview = ReviewDto(
-          id: base.id,
-          title: base.title,
-          description: base.description,
-          isCollaborative: base.isCollaborative,
-          rating: base.rating,
-          createdAt: base.createdAt,
-          productId: base.productId,
-          productName: base.productName,
-          ownerId: base.ownerId,
-          ownerUserName: base.ownerUserName,
-          ownerProfilePhotoUrl: base.ownerProfilePhotoUrl,
-          mediaList: base.mediaList,
-          likeCount:
-              newLikeStatus
-                  ? (previousLikeCount + 1)
-                  : (previousLikeCount > 0 ? previousLikeCount - 1 : 0),
-          isLikedByCurrentUser: newLikeStatus,
-          isProductNotListed: base.isProductNotListed,
-          isReviewInactive: base.isReviewInactive,
-        );
       });
     } catch (e) {
       if (_isOwnReview &&
@@ -1215,6 +1260,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
         }
       }
     } finally {
+      _reviewDetailPollBarrierEpoch++;
       _reviewDetailLikeLock.leave();
     }
   }

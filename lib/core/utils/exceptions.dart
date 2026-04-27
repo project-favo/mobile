@@ -71,6 +71,30 @@ bool dioExceptionBodyContains(DioException e, String needle) {
   return dioResponseDataAsSearchString(e.response?.data).contains(needle);
 }
 
+/// [POST /api/auth/login] sonrası backend bazen açık "suspend" metni vermez (403/5xx).
+/// Firebase girişi başarılı olduğu için burada genelde hesap durumu / politika reddi vardır.
+bool looksLikeSuspendedBackendLoginResponse(DioException e) {
+  if (e.requestOptions.method.toUpperCase() != 'POST') return false;
+  final path = e.requestOptions.path.toLowerCase();
+  if (!(path.contains('auth/login') || path.endsWith('/login'))) return false;
+  final code = e.response?.statusCode ?? 0;
+  final flat = dioResponseDataAsSearchString(e.response?.data);
+  final sl = flat.toLowerCase();
+  if (sl.contains('no_such_account') || sl.contains('no such account')) {
+    return false;
+  }
+  if (flat.contains('EMAIL_NOT_VERIFIED')) return false;
+  if (sl.contains('wrong') && sl.contains('password')) return false;
+  if (sl.contains('invalid') && sl.contains('credential')) return false;
+  if (code == 403 || code == 423) return true;
+  if (code == 500 || code == 502) {
+    if (looksLikeSuspendedAccountMessage(sl)) return true;
+    if (looksLikeDeactivatedAccountMessage(sl)) return true;
+    return true;
+  }
+  return false;
+}
+
 /// Login sırasında backend EMAIL_NOT_VERIFIED döndürdüğünde fırlatılır.
 class EmailNotVerifiedException implements Exception {
   final String email;
@@ -157,8 +181,14 @@ bool looksLikeSuspendedAccountMessage(String value) {
   if (s.contains('suspend')) return true;
   if (s.contains('account_suspended') || s.contains('user_suspended')) return true;
   if (s.contains('account suspended') || s.contains('user suspended')) return true;
+  if (s.contains('status:suspended') || s.contains('accountstatus:suspended')) {
+    return true;
+  }
   if (s.contains('banned') || s.contains('blocked')) return true;
   if (s.contains('restriction') && s.contains('account')) return true;
+  if (s.contains('not eligible') || s.contains('ineligible')) return true;
+  if (s.contains('no longer') && s.contains('available')) return true;
+  if (s.contains('access denied') && s.contains('account')) return true;
   return false;
 }
 

@@ -88,6 +88,23 @@ int reconcileLikeCountWithWishlist({
   return serverCount;
 }
 
+/// [getProductLikeCount] yanıtı optimistic toggle’dan sonra gelebilir; tek adımlık gecikmeyi düzelt.
+int mergeLikeCountWithRecentCache({
+  required bool isWishlisted,
+  required int serverCount,
+  int? cachedLikeNow,
+}) {
+  final v = reconcileLikeCountWithWishlist(
+    isWishlisted: isWishlisted,
+    serverCount: serverCount,
+  );
+  final prev = cachedLikeNow;
+  if (prev == null) return v;
+  if (isWishlisted && v + 1 == prev) return prev;
+  if (!isWishlisted && v == prev + 1) return prev;
+  return v;
+}
+
 /// Görünür yorumlarda en az bir foto / ek medya var mı (ProductCard grid).
 bool _visibleReviewsIncludePhoto(ReviewDto r) {
   if (r.mediaList.isEmpty) return false;
@@ -259,9 +276,10 @@ class _ProductCardState extends State<ProductCard> {
       final reviews = filterVisibleReviews(
         futures[0] as List<ReviewDto>,
       );
-      final likeCount = reconcileLikeCountWithWishlist(
+      final likeCount = mergeLikeCountWithRecentCache(
         isWishlisted: widget.isFavorite,
         serverCount: futures[1] as int,
+        cachedLikeNow: _LikeCountCache.get(widget.productId),
       );
       final count = reviews.length;
       final sumRating = reviews.fold<int>(0, (sum, r) => sum + r.rating);

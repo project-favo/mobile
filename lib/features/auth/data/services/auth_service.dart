@@ -155,6 +155,11 @@ class AuthService {
           _sessionHelper.clearSession();
           throw const SuspendedAccountException();
         }
+        if (looksLikeSuspendedBackendLoginResponse(e)) {
+          await _firebaseAuth.signOut();
+          _sessionHelper.clearSession();
+          throw const SuspendedAccountException();
+        }
         if (looksLikeDeactivatedAccountMessage(combined)) {
           await _firebaseAuth.signOut();
           _sessionHelper.clearSession();
