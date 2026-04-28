@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -39,6 +40,8 @@ import '../../../data/services/auth_service.dart';
 import '../widgets/report_review_sheet.dart';
 import '../widgets/review_delete_flow.dart';
 import 'add_review_page.dart';
+import '../../../../../core/notifications/notification_realtime_service.dart';
+import '../../../data/models/notification_dto.dart';
 
 class ReviewDetailPage extends StatefulWidget {
   final ReviewDto review;
@@ -87,6 +90,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
       AppBackgroundTimers.standardListPoll;
   Timer? _listingPollTimer;
   bool _poppedForListingGone = false;
+  StreamSubscription<NotificationPushEvent>? _reviewDeactivatedSub;
   /// Son bildiğimiz home ilk sayfa (50) içindeyiz bilgisi — true→false askı/çıkarma ile uyumlu.
   bool? _lastProductOnHomeFirstPage;
   /// In [initState], inactive review/product: show [showContentUnavailableDialog] before the first frame.
@@ -127,6 +131,9 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    NotificationRealtimeService.instance.attach();
+    _reviewDeactivatedSub = NotificationRealtimeService.instance.pushStream
+        .listen(_onReviewDeactivatedPush);
     _currentReview = widget.review;
     _currentProduct = widget.product;
     evictProfileImageBytesCacheForRaw(widget.review.ownerProfilePhotoUrl);
@@ -172,6 +179,8 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _listingPollTimer?.cancel();
+    _reviewDeactivatedSub?.cancel();
+    NotificationRealtimeService.instance.detach();
     super.dispose();
   }
 
@@ -284,20 +293,12 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
           firebaseIdToken: token,
         );
       } on ReviewNotAvailableException {
-        if (mounted) {
-          await _navigateBackWithNotice(
-            detail: kMessageGenericContentNoLongerAvailable,
-          );
-        }
+        if (mounted) _popBackForReviewRemoved();
         return;
       } on DioException catch (e) {
         final c = e.response?.statusCode;
         if (c == 404 || c == 401) {
-          if (mounted) {
-            await _navigateBackWithNotice(
-              detail: kMessageGenericContentNoLongerAvailable,
-            );
-          }
+          if (mounted) _popBackForReviewRemoved();
           return;
         }
       } catch (_) {}
@@ -305,7 +306,7 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
         final freshReview = r;
         if (!mounted) return;
         if (!isReviewEntityVisible(freshReview)) {
-          await _navigateBackWithNotice(detail: kMessageReviewNoLongerAvailable);
+          _popBackForReviewRemoved();
           return;
         }
         if (_reviewSnapshotChanged(freshReview, _currentReview)) {
@@ -354,6 +355,47 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
   }
 
   /// [detail] defaults to the product copy. Always returns to [HomePage] (not the previous page).
+  /// Yorum silindi/pasife alındı: ReviewPage'e pop yap (HomePage'e gitme).
+  void _popBackForReviewRemoved() {
+    if (_poppedForListingGone || !mounted) return;
+    _poppedForListingGone = true;
+    _listingPollTimer?.cancel();
+    ReviewMemoryCache.instance.removeReviewFromProduct(
+      _currentProduct.id,
+      _currentReview.id,
+    );
+    Navigator.of(context).pop(ReviewDeleteFlow.popResultDeleted);
+  }
+
+  void _onReviewDeactivatedPush(NotificationPushEvent event) {
+    final n = event.notification;
+    if (n == null || n.type != 'REVIEW_DEACTIVATED') return;
+    if (_poppedForListingGone || !mounted) return;
+    String? eventReviewId;
+    String? eventProductId;
+    final raw = n.payloadJson;
+    if (raw != null && raw.trim().isNotEmpty) {
+      try {
+        final d = jsonDecode(raw);
+        if (d is Map<String, dynamic>) {
+          eventReviewId = d['reviewId']?.toString();
+          eventProductId = d['productId']?.toString();
+        }
+      } catch (_) {}
+    }
+    final rid = _currentReview.id.trim();
+    // Direkt eşleşme: bu yorumun ID'si → anında geri dön.
+    if (rid.isNotEmpty && eventReviewId != null && eventReviewId == rid) {
+      _popBackForReviewRemoved();
+      return;
+    }
+    // Ürün eşleşmesi: aynı üründeki bir yorum pasife alındı → hemen poll yap.
+    final pid = _currentProduct.id.trim();
+    if (pid.isNotEmpty && eventProductId != null && eventProductId == pid) {
+      unawaited(_pollProductAndReviewStillPresent());
+    }
+  }
+
   Future<void> _navigateBackWithNotice({String? detail}) async {
     if (!mounted || _poppedForListingGone) return;
     _poppedForListingGone = true;

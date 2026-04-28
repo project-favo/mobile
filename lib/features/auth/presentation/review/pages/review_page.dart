@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -28,6 +29,7 @@ import '../../../../../core/config/app_background_timers.dart';
 import '../../../../../core/utils/app_logger.dart';
 import '../../../../../core/utils/entity_active.dart';
 import '../../../../../core/utils/user_profile_navigation.dart';
+import '../../../data/models/notification_dto.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/models/review_dto.dart';
 import '../../../data/models/tag_dto.dart';
@@ -43,6 +45,7 @@ import '../../messages/product_ai_chat_page.dart';
 import '../review_page_pop_result.dart';
 import '../widgets/review_delete_flow.dart';
 import '../../home_page.dart';
+import '../../../../../core/notifications/notification_realtime_service.dart';
 
 class ReviewPage extends StatefulWidget {
   /// Tam product verilirse doğrudan kullanılır.
@@ -89,6 +92,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
   bool _poppedBecauseProductUnlisted = false;
   /// [_syncProductPageInBackground] tekil çalışsın; üst üste API çağrısı olmasın.
   bool _pageBackgroundSyncInFlight = false;
+  StreamSubscription<NotificationPushEvent>? _reviewDeactivatedSub;
   final Map<String, List<ReviewDto>> _reviewQueryCache = {};
   final Map<String, DateTime> _reviewQueryCacheTimes = {};
   static const Duration _reviewQueryCacheTtl = Duration(seconds: 25);
@@ -867,6 +871,9 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       _currentUsername = cu.userName;
     }
     unawaited(_loadCurrentUserEarly());
+    NotificationRealtimeService.instance.attach();
+    _reviewDeactivatedSub = NotificationRealtimeService.instance.pushStream
+        .listen(_onReviewDeactivatedPush);
     if (widget.product != null) {
       _currentProduct = widget.product!;
       if (!isProductEntityActive(_currentProduct)) {
@@ -924,6 +931,8 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _productListingPollTimer?.cancel();
+    _reviewDeactivatedSub?.cancel();
+    NotificationRealtimeService.instance.detach();
     super.dispose();
   }
 
@@ -1009,6 +1018,25 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
   }
 
   /// 5 sn: [getProductById] + yorum listesi; değişmediyse [setState] yok. Askı/404’te geri dön.
+  void _onReviewDeactivatedPush(NotificationPushEvent event) {
+    final n = event.notification;
+    if (n == null || n.type != 'REVIEW_DEACTIVATED') return;
+    String? eventProductId;
+    final raw = n.payloadJson;
+    if (raw != null && raw.trim().isNotEmpty) {
+      try {
+        final d = jsonDecode(raw);
+        if (d is Map<String, dynamic>) {
+          eventProductId = d['productId']?.toString();
+        }
+      } catch (_) {}
+    }
+    if (eventProductId == null) return;
+    if (eventProductId != _currentProduct.id) return;
+    _clearLocalReviewQueryCacheForCurrentProduct();
+    unawaited(_syncProductPageInBackground());
+  }
+
   Future<void> _syncProductPageInBackground() async {
     if (!mounted || _poppedBecauseProductUnlisted) return;
     // Placeholder olsa da [productId] varken taze GET ile askı tespit edilebilsin.
@@ -1053,7 +1081,8 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       String? reviewsToken;
       if (FirebaseAuth.instance.currentUser != null) {
         reviewsToken = await _sessionHelper.ensureSession();
-        if (reviewsToken == null || !mounted) return;
+        if (!mounted) return;
+        // Token null olsa bile review listesi güncellenmeli; erken çıkma.
       }
       final reviews = await _fetchReviewsWithCurrentFilters(
         firebaseIdToken: reviewsToken,
@@ -1670,6 +1699,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
         reviewId: review.id,
       );
       if (!mounted || !ok) return;
+      _clearLocalReviewQueryCacheForCurrentProduct();
       setState(() {
         _reviews.removeWhere((r) => r.id == review.id);
         _currentProduct = _currentProduct.copyWith(
@@ -2547,6 +2577,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                           );
                           if (result == true ||
                               result == ReviewDeleteFlow.popResultDeleted) {
+                            _clearLocalReviewQueryCacheForCurrentProduct();
                             await _loadReviews();
                           }
                         },
