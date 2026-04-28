@@ -1160,17 +1160,31 @@ class _SearchPageState extends State<SearchPage> with RouteAware {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: AppColors.primary,
         elevation: 0,
         automaticallyImplyLeading: false,
-        title: Text(
-          'Search',
-          style: AppTextStyles.heading2.copyWith(
-            color: AppColors.primary,
-            fontWeight: FontWeight.w700,
+        centerTitle: true,
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFFB5003A),
+                AppColors.primary,
+                Color(0xFF6B001F),
+              ],
+            ),
           ),
         ),
-        centerTitle: true,
+        title: const Text(
+          'Search',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
+          ),
+        ),
       ),
       body: _isLoading
           ? const SearchPageBodySkeleton()
@@ -1261,17 +1275,32 @@ class _SearchPageState extends State<SearchPage> with RouteAware {
                             decoration: _premiumSurface(radius: 18),
                             child: Column(
                               children: [
-                                const Padding(
-                                  padding: EdgeInsets.only(bottom: 10),
-                                  child: Text(
-                                    'Top 5 Reviewers',
-                                    style: TextStyle(
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.w800,
-                                      color: AppColors.textPrimary,
-                                      letterSpacing: 0.2,
-                                    ),
-                                    textAlign: TextAlign.center,
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Container(
+                                        width: 4,
+                                        height: 20,
+                                        decoration: BoxDecoration(
+                                          color: AppColors.primary,
+                                          borderRadius: BorderRadius.circular(2),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      const Text(
+                                        'Top 5 Reviewers',
+                                        style: TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.w800,
+                                          color: AppColors.textPrimary,
+                                          letterSpacing: 0.2,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                      const SizedBox(width: 12),
+                                    ],
                                   ),
                                 ),
                                 SizedBox(
@@ -1306,17 +1335,32 @@ class _SearchPageState extends State<SearchPage> with RouteAware {
                             decoration: _premiumSurface(radius: 18),
                             child: Column(
                               children: [
-                                const Padding(
-                                  padding: EdgeInsets.only(bottom: 10),
-                                  child: Text(
-                                    'Top 5 Reviewers',
-                                    style: TextStyle(
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.w800,
-                                      color: AppColors.textPrimary,
-                                      letterSpacing: 0.2,
-                                    ),
-                                    textAlign: TextAlign.center,
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Container(
+                                        width: 4,
+                                        height: 20,
+                                        decoration: BoxDecoration(
+                                          color: AppColors.primary,
+                                          borderRadius: BorderRadius.circular(2),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      const Text(
+                                        'Top 5 Reviewers',
+                                        style: TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.w800,
+                                          color: AppColors.textPrimary,
+                                          letterSpacing: 0.2,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                      const SizedBox(width: 12),
+                                    ],
                                   ),
                                 ),
                                 // Alt rozetlere alan açmak için ekstra boşluk
@@ -1510,21 +1554,36 @@ class _SearchPageState extends State<SearchPage> with RouteAware {
                                               child: Column(
                                                 crossAxisAlignment: CrossAxisAlignment.start,
                                                 children: [
-                                                  if (_categoryPath.isEmpty)
-                                                    const Padding(
-                                                      padding: EdgeInsets.only(bottom: 10),
-                                                      child: Center(
-                                                        child: Text(
-                                                          'Categories',
-                                                          style: TextStyle(
-                                                            fontSize: 22,
-                                                            fontWeight: FontWeight.w800,
-                                                            color: AppColors.textPrimary,
-                                                            letterSpacing: 0.2,
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    )
+                                  if (_categoryPath.isEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 10),
+                                      child: Center(
+                                        child: Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Container(
+                                              width: 4,
+                                              height: 20,
+                                              decoration: BoxDecoration(
+                                                color: AppColors.primary,
+                                                borderRadius: BorderRadius.circular(2),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            const Text(
+                                              'Categories',
+                                              style: TextStyle(
+                                                fontSize: 20,
+                                                fontWeight: FontWeight.w800,
+                                                color: AppColors.textPrimary,
+                                                letterSpacing: 0.2,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 12),
+                                          ],
+                                        ),
+                                      ),
+                                    )
                                                   else ...[
                                                     Row(
                                                       children: [

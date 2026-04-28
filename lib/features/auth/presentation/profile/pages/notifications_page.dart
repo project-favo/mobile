@@ -463,27 +463,49 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
     return Scaffold(
       backgroundColor: AppColors.background.withValues(alpha: 0.96),
       appBar: AppBar(
-        backgroundColor: AppColors.surface,
+        backgroundColor: AppColors.primary,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         shadowColor: Colors.transparent,
         toolbarHeight: AppSpacing.toolbarHeight,
-        title: Text(
+        centerTitle: true,
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFFB5003A),
+                AppColors.primary,
+                Color(0xFF6B001F),
+              ],
+            ),
+          ),
+        ),
+        title: const Text(
           'Notifications',
-          style: AppTextStyles.heading2.copyWith(
-            color: AppColors.textPrimary,
-            fontWeight: FontWeight.w600,
+          style: TextStyle(
             fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
             letterSpacing: -0.2,
           ),
         ),
-        centerTitle: true,
-        leading: Padding(
-          padding: const EdgeInsets.symmetric(vertical: AppSpacing.small),
-          child: BackButton(
-            color: AppColors.primary,
-            onPressed: () => Navigator.pop(context, true),
+        leading: IconButton(
+          icon: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.18),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.arrow_back_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
           ),
+          onPressed: () => Navigator.pop(context, true),
         ),
         actions: [
           if (!_loadingFirst && _allVisible.isNotEmpty)
@@ -492,18 +514,18 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
               child: Text(
                 'Read all',
                 style: AppTextStyles.bodyMedium.copyWith(
-                  color: AppColors.primary,
+                  color: Colors.white.withValues(alpha: _markingAll ? 0.5 : 1.0),
                   fontWeight: FontWeight.w600,
+                  fontSize: 14,
                 ),
               ),
             ),
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Divider(
+          child: Container(
             height: 1,
-            thickness: 1,
-            color: AppColors.textSecondary.withValues(alpha: 0.12),
+            color: Colors.white.withValues(alpha: 0.15),
           ),
         ),
       ),

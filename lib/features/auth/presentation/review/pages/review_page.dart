@@ -1823,15 +1823,40 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       child: Scaffold(
         backgroundColor: AppColors.background,
         appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: AppColors.primary,
         elevation: 0,
         automaticallyImplyLeading: false,
-        iconTheme: const IconThemeData(color: AppColors.primary),
+        iconTheme: const IconThemeData(color: Colors.white),
         centerTitle: false,
         toolbarHeight: 62,
         titleSpacing: 4,
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFFB5003A),
+                AppColors.primary,
+                Color(0xFF6B001F),
+              ],
+            ),
+          ),
+        ),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppColors.primary),
+          icon: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.18),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.arrow_back_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
+          ),
           onPressed: () {
             Navigator.of(context).pop(
               ReviewPagePopResult(
@@ -1846,37 +1871,52 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
           _currentProduct.name,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: AppTextStyles.bodyBold.copyWith(
+          style: const TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 17,
             height: 1.1,
+            color: Colors.white,
           ),
         ),
         actions: [
-          IconButton(
-            onPressed: !isProductEntityActive(_currentProduct) || _isLoadingProduct
-                ? null
-                : () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ProductAiChatPage(
-                          productId: _currentProduct.id,
-                          productName: _currentProduct.name,
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: IconButton(
+              onPressed: !isProductEntityActive(_currentProduct) || _isLoadingProduct
+                  ? null
+                  : () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ProductAiChatPage(
+                            productId: _currentProduct.id,
+                            productName: _currentProduct.name,
+                          ),
                         ),
-                      ),
-                    );
-                  },
-            icon: Image.asset(
-              'assets/images/Chatbot.png',
-              width: 26,
-              height: 26,
-              fit: BoxFit.contain,
-              color: (!isProductEntityActive(_currentProduct) || _isLoadingProduct)
-                  ? AppColors.textSecondary.withValues(alpha: 0.45)
-                  : null,
+                      );
+                    },
+              icon: Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.18),
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Image.asset(
+                      'assets/images/Chatbot.png',
+                      fit: BoxFit.contain,
+                      color: (!isProductEntityActive(_currentProduct) || _isLoadingProduct)
+                          ? Colors.white.withValues(alpha: 0.38)
+                          : Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+              tooltip: 'Product AI Chat',
             ),
-            tooltip: 'Product AI Chat',
           ),
         ],
       ),
@@ -1924,28 +1964,36 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                             child: Hero(
                               tag:
                                   'product_image_${_currentProduct.id}_${_currentProduct.imageURL}',
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(14),
-                                child: Image.network(
-                                  _currentProduct.imageURL,
-                                  height: 210,
-                                  width: 210,
-                                  fit: BoxFit.contain,
-                                  alignment: Alignment.center,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return Container(
-                                      height: 210,
-                                      width: 210,
-                                      color: AppColors.textSecondary.withValues(
-                                        alpha: 0.1,
-                                      ),
-                                      child: const Icon(
-                                        Icons.image_not_supported,
-                                        color: AppColors.textSecondary,
-                                        size: 44,
-                                      ),
-                                    );
-                                  },
+                              child: Container(
+                                width: 220,
+                                height: 220,
+                                decoration: BoxDecoration(
+                                  color: AppColors.background,
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(16),
+                                  child: Image.network(
+                                    _currentProduct.imageURL,
+                                    height: 220,
+                                    width: 220,
+                                    fit: BoxFit.contain,
+                                    alignment: Alignment.center,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return Container(
+                                        height: 220,
+                                        width: 220,
+                                        color: AppColors.textSecondary.withValues(
+                                          alpha: 0.1,
+                                        ),
+                                        child: const Icon(
+                                          Icons.image_not_supported,
+                                          color: AppColors.textSecondary,
+                                          size: 44,
+                                        ),
+                                      );
+                                    },
+                                  ),
                                 ),
                               ),
                             ),
@@ -2088,21 +2136,31 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                               flex: 1,
                               child: SizedBox(
                                 height: 48,
-                                child: Align(
-                                  alignment: Alignment.center,
-                                  child: IconButton(
-                                    onPressed: _toggleLike,
-                                    splashRadius: 20,
-                                    icon: Icon(
-                                      _effectiveProductLiked()
-                                          ? Icons.favorite
-                                          : Icons.favorite_border,
-                                      size: 22,
-                                      color:
-                                          _effectiveProductLiked()
-                                              ? AppColors.primary
-                                              : AppColors.textSecondary,
+                                child: OutlinedButton(
+                                  onPressed: _toggleLike,
+                                  style: OutlinedButton.styleFrom(
+                                    side: BorderSide(
+                                      color: _effectiveProductLiked()
+                                          ? AppColors.primary
+                                          : AppColors.border,
+                                      width: 1.5,
                                     ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    backgroundColor: _effectiveProductLiked()
+                                        ? AppColors.primary.withValues(alpha: 0.07)
+                                        : Colors.transparent,
+                                    padding: EdgeInsets.zero,
+                                  ),
+                                  child: Icon(
+                                    _effectiveProductLiked()
+                                        ? Icons.favorite_rounded
+                                        : Icons.favorite_border_rounded,
+                                    size: 22,
+                                    color: _effectiveProductLiked()
+                                        ? AppColors.primary
+                                        : AppColors.textSecondary,
                                   ),
                                 ),
                               ),
@@ -2299,6 +2357,15 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                   padding: _contentHorizontalPadding,
                   child: Row(
                     children: [
+                      Container(
+                        width: 4,
+                        height: 24,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
                       Text("Reviews", style: AppTextStyles.heading2),
                       const Spacer(),
                       _buildControlIconButton(

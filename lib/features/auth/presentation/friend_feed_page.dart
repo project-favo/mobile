@@ -436,36 +436,52 @@ class _FriendFeedPageState extends State<FriendFeedPage>
     return Scaffold(
         backgroundColor: AppColors.background.withValues(alpha: 0.96),
         appBar: AppBar(
-          backgroundColor: AppColors.surface,
+          backgroundColor: AppColors.primary,
           surfaceTintColor: Colors.transparent,
           elevation: 0,
           shadowColor: Colors.transparent,
           toolbarHeight: AppSpacing.toolbarHeight,
           centerTitle: true,
-          title: Text(
+          flexibleSpace: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFFB5003A),
+                  AppColors.primary,
+                  Color(0xFF6B001F),
+                ],
+              ),
+            ),
+          ),
+          title: const Text(
             'Friends Feed',
-            style: AppTextStyles.heading2.copyWith(
-              color: AppColors.textPrimary,
-              fontWeight: FontWeight.w600,
+            style: TextStyle(
               fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
               letterSpacing: -0.2,
             ),
           ),
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(50),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                FeedScreenTabBar(
-                  controller: _tabController,
-                  tabLabels: const ['All', 'Reviews', 'Likes'],
-                ),
-                Divider(
-                  height: 1,
-                  thickness: 1,
-                  color: AppColors.textSecondary.withValues(alpha: 0.12),
-                ),
-              ],
+            child: Container(
+              color: AppColors.surface,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  FeedScreenTabBar(
+                    controller: _tabController,
+                    tabLabels: const ['All', 'Reviews', 'Likes'],
+                  ),
+                  Divider(
+                    height: 1,
+                    thickness: 1,
+                    color: AppColors.textSecondary.withValues(alpha: 0.12),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
