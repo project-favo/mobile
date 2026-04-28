@@ -412,7 +412,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final warmTags = SearchWarmCache.instance.peekRootTags();
     if (viewSnap != null) {
       _tags = warmTags;
-      _filteredProducts = List<ProductDto>.from(viewSnap.products);
+      _filteredProducts = _onlyListedProducts(viewSnap.products);
       _currentPage = viewSnap.currentPage;
       _totalPages = viewSnap.totalPages;
       _totalElements = viewSnap.totalElements;
@@ -430,7 +430,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       unawaited(_loadData(background: true, preserveLoadedProducts: true));
     } else if (homeSnap != null && homeSnap.content.isNotEmpty) {
       _tags = warmTags;
-      _filteredProducts = List<ProductDto>.from(homeSnap.content);
+      _filteredProducts = _onlyListedProducts(homeSnap.content);
       _currentPage = homeSnap.number;
       _totalPages = homeSnap.totalPages;
       _totalElements = homeSnap.totalElements;
@@ -442,7 +442,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final warmProducts = SearchWarmCache.instance.peekSeedProducts();
       if (warmTags.isNotEmpty || warmProducts.isNotEmpty) {
         _tags = warmTags;
-        _filteredProducts = warmProducts;
+        _filteredProducts = _onlyListedProducts(warmProducts);
         _isLoading = false;
         _isFiltering = false;
         _errorMessage = null;
@@ -966,8 +966,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _fullSearchCatalogFuture = _productRepository.getAllProductsRaw();
       final products = await _fullSearchCatalogFuture!;
       if (products.isNotEmpty) {
-        _fullSearchCatalog = products;
-        SearchWarmCache.instance.rememberSeedProducts(products);
+        final listed = _onlyListedProducts(products);
+        _fullSearchCatalog = listed;
+        SearchWarmCache.instance.rememberSeedProducts(listed);
       }
     } catch (_) {}
     finally {
@@ -979,21 +980,27 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     if (_fullSearchCatalog.isNotEmpty) return _fullSearchCatalog;
     if (_fullSearchCatalogFuture != null) {
       final inFlight = await _fullSearchCatalogFuture!;
-      if (inFlight.isNotEmpty) _fullSearchCatalog = inFlight;
+      if (inFlight.isNotEmpty) {
+        final listed = _onlyListedProducts(inFlight);
+        _fullSearchCatalog = listed;
+        return listed;
+      }
       return inFlight;
     }
     _fullSearchCatalogFuture = _productRepository.getAllProductsRaw();
     try {
       final products = await _fullSearchCatalogFuture!;
       if (products.isNotEmpty) {
-        _fullSearchCatalog = products;
-        SearchWarmCache.instance.rememberSeedProducts(products);
+        final listed = _onlyListedProducts(products);
+        _fullSearchCatalog = listed;
+        SearchWarmCache.instance.rememberSeedProducts(listed);
+        return listed;
       }
       return products;
     } catch (_) {
       // Ağ hatasında warm cache fallback (varsa yine arama çalışsın).
       final warm = SearchWarmCache.instance.peekSeedProducts();
-      return warm;
+      return _onlyListedProducts(warm);
     } finally {
       _fullSearchCatalogFuture = null;
     }
@@ -1047,9 +1054,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             );
         return nameMatch || ownTagMatch;
       }).toList();
+      final visibleResults = _onlyListedProducts(results);
       if (!mounted || req != _searchReqSeq) return;
       setState(() {
-        _searchResults = results;
+        _searchResults = visibleResults;
         _isSearchLoading = false;
       });
     } catch (_) {
@@ -1241,8 +1249,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       );
       if (!mounted) return;
 
+      // İlk sayfa ID’leri aynı görünse bile kullanıcı sonsuz kaydırmada yüklemişse,
+      // tail’daki suspend senaryosu için birleştirmeyi yine çalıştır.
       if (_activeSortOption == FeedSortOption.newest &&
-          _homeFeedFirstPageUnchanged(result)) {
+          _homeFeedFirstPageUnchanged(result) &&
+          _filteredProducts.length <= result.content.length) {
         return;
       }
 
@@ -1273,6 +1284,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         });
       }
       HomeFeedCache.instance.setFromResult(result);
+      _invalidateInlineSearchCatalog();
       ReviewPrefetchService.instance.prefetchForProducts(
         _filteredProducts,
         maxCount: 8,
@@ -1323,10 +1335,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         );
       }
 
-      final nextProducts =
+      final rawNext =
           (append && page > 0)
               ? [..._filteredProducts, ...result.content]
               : result.content;
+      final nextProducts = _onlyListedProducts(rawNext);
       final nextWithOverrides = _applyHomeLikeOverrides(nextProducts);
 
       if (!mounted) return;
@@ -1343,6 +1356,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       if (!append &&
           _activeCategoryPathPrefix == null) {
         HomeFeedCache.instance.setFromResult(result);
+      }
+      if (!append && page == 0) {
+        _invalidateInlineSearchCatalog();
       }
 
       // Ana sayfa feed'ini [SearchWarmCache] üzerine yazma — inline arama tüm katalogu kullansın.
@@ -1371,15 +1387,27 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
   }
 
+  /// GET /api/products tam liste önbelleği; feed güncellenince inline arama eski suspend’leri göstermesin.
+  void _invalidateInlineSearchCatalog() {
+    _fullSearchCatalog = [];
+    _fullSearchCatalogFuture = null;
+  }
+
+  List<ProductDto> _onlyListedProducts(Iterable<ProductDto> items) =>
+      items.where(isProductEntityActive).toList();
+
   List<ProductDto> _mergePolledFirstPageKeepLoadedItems(List<ProductDto> firstPage) {
     // Polling should refresh top rows but never throw away already loaded pages.
     if (_filteredProducts.isEmpty || _filteredProducts.length <= firstPage.length) {
-      return firstPage;
+      return _onlyListedProducts(firstPage);
     }
 
     final firstIds = firstPage.map((p) => p.id).toSet();
-    final tail = _filteredProducts.where((p) => !firstIds.contains(p.id)).toList();
-    return [...firstPage, ...tail];
+    // Önceki hata: tüm eski grid taranıyordu — ilk sayfadan çıkan suspend ürünü
+    // firstIds’te olmadığı için tail’e eklenip listede kalıyordu.
+    final previousTail = _filteredProducts.sublist(firstPage.length);
+    final tail = previousTail.where((p) => !firstIds.contains(p.id)).toList();
+    return _onlyListedProducts([...firstPage, ...tail]);
   }
 
 
