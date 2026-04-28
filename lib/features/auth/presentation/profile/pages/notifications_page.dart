@@ -506,6 +506,9 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
     return Scaffold(
       backgroundColor: AppColors.background.withValues(alpha: 0.96),
       appBar: AppBar(
+        automaticallyImplyLeading: false,
+        leading: const SizedBox.shrink(),
+        leadingWidth: 0,
         backgroundColor: AppColors.primary,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
@@ -533,22 +536,6 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
             color: Colors.white,
             letterSpacing: -0.2,
           ),
-        ),
-        leading: IconButton(
-          icon: Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.18),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.arrow_back_rounded,
-              color: Colors.white,
-              size: 20,
-            ),
-          ),
-          onPressed: () => Navigator.pop(context, true),
         ),
         actions: [
           if (!_loadingFirst && _allVisible.isNotEmpty)

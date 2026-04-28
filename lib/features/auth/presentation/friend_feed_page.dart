@@ -436,6 +436,7 @@ class _FriendFeedPageState extends State<FriendFeedPage>
     return Scaffold(
         backgroundColor: AppColors.background.withValues(alpha: 0.96),
         appBar: AppBar(
+          automaticallyImplyLeading: false,
           backgroundColor: AppColors.primary,
           surfaceTintColor: Colors.transparent,
           elevation: 0,
