@@ -61,8 +61,8 @@ Map<NotificationSection, List<NotificationDto>> groupNotifications(
   }
   for (final list in map.values) {
     list.sort((a, b) {
-      final da = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-      final db = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final da = a.effectiveAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final db = b.effectiveAt ?? DateTime.fromMillisecondsSinceEpoch(0);
       return db.compareTo(da);
     });
   }

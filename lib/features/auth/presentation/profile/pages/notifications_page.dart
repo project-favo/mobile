@@ -85,6 +85,12 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
   String? _errorMessage;
   bool _markingAll = false;
   final ScrollController _listScrollController = ScrollController();
+  // Relike senaryosu: aynı notification id yeniden görünürse (unlike ile kaybolup relike ile geri)
+  // istemci tarafında "yeniden aktive oldu" kabul edip zamanı güncelleriz.
+  final Set<String> _knownNotificationIds = <String>{};
+  Set<String> _lastActiveNotificationIds = <String>{};
+  final Map<String, DateTime> _reactivatedAtById = <String, DateTime>{};
+  bool _notificationBaselineReady = false;
 
   void _scrollNotificationsToTop() {
     if (!mounted) return;
@@ -183,11 +189,45 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
     }
     final visible = await filterNotificationsHidingUnlistedUsers([n], _auth);
     if (visible.isEmpty || !mounted) return;
-    final n2 = visible.first;
+    var n2 = visible.first;
+    final now = DateTime.now();
+    if (_knownNotificationIds.contains(n2.id) &&
+        !_lastActiveNotificationIds.contains(n2.id)) {
+      _reactivatedAtById[n2.id] = now;
+    }
+    _knownNotificationIds.add(n2.id);
+    final revivedAt = _reactivatedAtById[n2.id];
+    if (revivedAt != null &&
+        (n2.updatedAt == null || revivedAt.isAfter(n2.updatedAt!))) {
+      n2 = n2.copyWith(updatedAt: revivedAt);
+    }
     if (_allVisible.any((x) => x.id == n2.id)) return;
     setState(() {
       _allVisible.insert(0, n2);
+      _lastActiveNotificationIds = _allVisible.map((e) => e.id).toSet();
     });
+  }
+
+  List<NotificationDto> _applyReactivationRecency(List<NotificationDto> list) {
+    if (list.isEmpty) return list;
+    final now = DateTime.now();
+    final out = <NotificationDto>[];
+    for (var n in list) {
+      final id = n.id;
+      if (_notificationBaselineReady &&
+          _knownNotificationIds.contains(id) &&
+          !_lastActiveNotificationIds.contains(id)) {
+        _reactivatedAtById[id] = now;
+      }
+      _knownNotificationIds.add(id);
+      final revivedAt = _reactivatedAtById[id];
+      if (revivedAt != null &&
+          (n.updatedAt == null || revivedAt.isAfter(n.updatedAt!))) {
+        n = n.copyWith(updatedAt: revivedAt);
+      }
+      out.add(n);
+    }
+    return out;
   }
 
   void _mergeFilteredIntoBuffer(
@@ -220,9 +260,10 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
         _auth,
       );
       if (!mounted) return;
+      final adjusted = _applyReactivationRecency(list);
       _serverTotalPages = page.totalPages;
       _nextServerPage = page.number + 1;
-      _mergeFilteredIntoBuffer(list, prependNewest: false);
+      _mergeFilteredIntoBuffer(adjusted, prependNewest: false);
     }
   }
 
@@ -242,6 +283,8 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
       }
       await _pumpFromServerForVisibleCount(kStandardListPageSize);
       if (!mounted) return;
+      _lastActiveNotificationIds = _allVisible.map((e) => e.id).toSet();
+      _notificationBaselineReady = true;
       clearProfileImageByteCache();
       setState(() => _loadingFirst = false);
       _scrollNotificationsToTop();
@@ -688,7 +731,7 @@ class _NotificationsPageState extends State<NotificationsPage> with RouteAware {
                         onDismissed: (_) => _onDismissed(n),
                         child: _NotificationTile(
                           notification: n,
-                          timestamp: _formatTimestamp(n.createdAt),
+                          timestamp: _formatTimestamp(n.effectiveAt),
                           onTap: () => _onTapItem(n),
                           onDelete: () async {
                             if (await _deleteNotification(n) && mounted) {

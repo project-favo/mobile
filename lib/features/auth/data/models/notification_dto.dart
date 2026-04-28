@@ -121,6 +121,7 @@ class NotificationDto {
   final String? body;
   final String? payloadJson;
   final DateTime? createdAt;
+  final DateTime? updatedAt;
   final DateTime? readAt;
 
   NotificationDto({
@@ -133,10 +134,18 @@ class NotificationDto {
     this.body,
     this.payloadJson,
     this.createdAt,
+    this.updatedAt,
     this.readAt,
   });
 
   bool get isUnread => readAt == null;
+  DateTime? get effectiveAt {
+    final u = updatedAt;
+    final c = createdAt;
+    if (u == null) return c;
+    if (c == null) return u;
+    return u.isAfter(c) ? u : c;
+  }
 
   /// [getUserById] ile “profilde açılamıyor” kontrolü; [actor] yoksa [payloadJson]’dan id okur.
   int? get resolvedUserIdForVisibilityCheck {
@@ -180,6 +189,7 @@ class NotificationDto {
     String? body,
     String? payloadJson,
     DateTime? createdAt,
+    DateTime? updatedAt,
     DateTime? readAt,
   }) {
     return NotificationDto(
@@ -192,6 +202,7 @@ class NotificationDto {
       body: body ?? this.body,
       payloadJson: payloadJson ?? this.payloadJson,
       createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
       readAt: readAt ?? this.readAt,
     );
   }
@@ -264,6 +275,13 @@ class NotificationDto {
       body: json['body']?.toString(),
       payloadJson: mergedPayloadJson,
       createdAt: parseFlexibleDateTime(json['createdAt']),
+      updatedAt: parseFlexibleDateTime(
+        json['updatedAt'] ??
+            json['lastModifiedAt'] ??
+            json['modifiedAt'] ??
+            json['eventAt'] ??
+            json['occurredAt'],
+      ),
       readAt: parseFlexibleDateTime(json['readAt']),
     );
   }

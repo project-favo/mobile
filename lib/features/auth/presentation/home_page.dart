@@ -153,6 +153,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   String _searchQuery = '';
   List<ProductDto> _searchResults = [];
   Timer? _searchDebounce;
+  // Home araması her zaman tam katalogda çalışsın (SearchPage ile aynı davranış).
+  List<ProductDto> _fullSearchCatalog = [];
+  Future<List<ProductDto>>? _fullSearchCatalogFuture;
   /// Tüm kategori ana sayfasında: yeni ürünler için arka planda periyodik kontrol.
   Timer? _homeFeedPollTimer;
   bool _homeFeedPollInFlight = false;
@@ -955,23 +958,42 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   /// Search sayfasıyla aynı: GET /api/products tüm ürün listesi (önbellek + arka planda ısıtma).
   Future<void> _warmSearchCatalogInBackground() async {
-    if (SearchWarmCache.instance.peekSeedProducts().isNotEmpty) return;
+    if (_fullSearchCatalog.isNotEmpty || _fullSearchCatalogFuture != null) return;
     try {
-      final products = await _productRepository.getAllProductsRaw();
+      _fullSearchCatalogFuture = _productRepository.getAllProductsRaw();
+      final products = await _fullSearchCatalogFuture!;
       if (products.isNotEmpty) {
+        _fullSearchCatalog = products;
         SearchWarmCache.instance.rememberSeedProducts(products);
       }
     } catch (_) {}
+    finally {
+      _fullSearchCatalogFuture = null;
+    }
   }
 
   Future<List<ProductDto>> _ensureSearchCatalog() async {
-    var pool = SearchWarmCache.instance.peekSeedProducts();
-    if (pool.isNotEmpty) return pool;
-    final products = await _productRepository.getAllProductsRaw();
-    if (products.isNotEmpty) {
-      SearchWarmCache.instance.rememberSeedProducts(products);
+    if (_fullSearchCatalog.isNotEmpty) return _fullSearchCatalog;
+    if (_fullSearchCatalogFuture != null) {
+      final inFlight = await _fullSearchCatalogFuture!;
+      if (inFlight.isNotEmpty) _fullSearchCatalog = inFlight;
+      return inFlight;
     }
-    return products;
+    _fullSearchCatalogFuture = _productRepository.getAllProductsRaw();
+    try {
+      final products = await _fullSearchCatalogFuture!;
+      if (products.isNotEmpty) {
+        _fullSearchCatalog = products;
+        SearchWarmCache.instance.rememberSeedProducts(products);
+      }
+      return products;
+    } catch (_) {
+      // Ağ hatasında warm cache fallback (varsa yine arama çalışsın).
+      final warm = SearchWarmCache.instance.peekSeedProducts();
+      return warm;
+    } finally {
+      _fullSearchCatalogFuture = null;
+    }
   }
 
   void _onSearchChanged(String query) {
@@ -985,6 +1007,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       });
       return;
     }
+    // Yazmaya başlar başlamaz banner/active-header kaybolsun.
+    setState(() {
+      _searchQuery = q;
+      _isSearchLoading = true;
+      _activeBannerTab = null;
+    });
     final req = ++_searchReqSeq;
     _searchDebounce = Timer(const Duration(milliseconds: 280), () {
       unawaited(_runHomeSearch(q, req));
@@ -1089,6 +1117,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       }
       if (!mounted || _topPicksLatestRequestByTab[tab] != requestId) return;
       final products = result.content.take(10).toList();
+      // Kartlar render olmadan sosyal sayaclari cache'e yaz: 0 -> gercek deger flash olmasin.
+      await _warmProductCardSocialCaches(
+        products,
+        firebaseIdToken,
+        triggerResync: false,
+      );
+      if (!mounted || _topPicksLatestRequestByTab[tab] != requestId) return;
       HomeTopPicksCache.remember(tab, products);
       setState(() => _topPicksByTab[tab] = products);
     } catch (_) {
@@ -1097,6 +1132,48 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _topPicksLoadingTabs.remove(tab);
       if (mounted) setState(() {});
     }
+  }
+
+  Future<void> _warmProductCardSocialCaches(
+    List<ProductDto> products,
+    String? firebaseIdToken,
+    {bool triggerResync = true}
+  ) async {
+    if (products.isEmpty) return;
+    final visible = products.take(10).toList();
+    for (final p in visible) {
+      try {
+        final futures = await Future.wait([
+          _interactionRepository.getProductLikeCount(p.id),
+          _reviewRepository.getReviewsByProductId(
+            p.id,
+            firebaseIdToken: firebaseIdToken,
+          ),
+        ]);
+        final likeCount = futures[0] as int;
+        final reviews = filterVisibleReviews(futures[1] as List<ReviewDto>);
+        final reviewCount = reviews.length;
+        final sum = reviews.fold<int>(0, (acc, r) => acc + r.rating);
+        final rating = reviewCount > 0 ? (sum / reviewCount) : 0.0;
+        setProductCardSocialCaches(
+          p.id,
+          likeCount: likeCount,
+          reviewCount: reviewCount,
+          rating: rating,
+          hasPhotoReview: anyVisibleReviewHasPhoto(reviews),
+        );
+      } catch (_) {
+        // Sessiz: kart kendi akışında tekrar dener.
+      }
+    }
+    if (!mounted || !triggerResync) return;
+    setState(() {
+      for (final p in visible) {
+        final id = p.id.trim();
+        if (id.isEmpty) continue;
+        _productCardResync[id] = (_productCardResync[id] ?? 0) + 1;
+      }
+    });
   }
 
   /// Infinite scroll: listenere yaklaşınca sonraki sayfayı yükle
@@ -1344,78 +1421,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   Widget _buildProductGrid() {
-    // ── Banner tab products — full grid below the header ───────────────────
-    if (_activeBannerTab != null) {
-      final tab = _activeBannerTab!;
-      final products = _topPicksByTab[tab] ?? [];
-      final isLoading = _topPicksLoadingTabs.contains(tab);
-      if (isLoading && products.isEmpty) {
-        return GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            crossAxisSpacing: AppSpacing.xLarge,
-            mainAxisSpacing: AppSpacing.xLarge,
-            childAspectRatio: 0.57,
-          ),
-          itemCount: 4,
-          itemBuilder: (_, __) => const ProductCardSkeleton(),
-        );
-      }
-      if (products.isEmpty) {
-        return Center(
-          child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.xxLarge),
-            child: Text('No products found', style: AppTextStyles.bodySecondary),
-          ),
-        );
-      }
-      return GridView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          crossAxisSpacing: AppSpacing.xLarge,
-          mainAxisSpacing: AppSpacing.xLarge,
-          childAspectRatio: 0.57,
-        ),
-        itemCount: products.length,
-        itemBuilder: (context, index) {
-          final product = products[index];
-          return ProductCard(
-            key: ValueKey('banner_${product.id}_${_productCardResync[product.id] ?? 0}'),
-            productId: product.id,
-            imageUrl: product.imageURL,
-            title: product.name,
-            category: product.tag.name,
-            categoryPath: product.tag.categoryPath,
-            rating: product.averageRating ?? 0.0,
-            desc: product.description ?? '',
-            isFavorite: _effectiveHomeLiked(product),
-            loadReviewCount: true,
-            friendAvatarUrls: _friendLikersMap[product.id] ?? const [],
-            onTap: () async {
-              final r = await Navigator.push<ReviewPagePopResult?>(
-                context,
-                SlideRightRoute(page: ReviewPage(product: product)),
-              );
-              if (!mounted) return;
-              if (r != null) {
-                _applyProductFromReviewExit(r);
-              } else {
-                unawaited(_refreshProductLikeStatus(product.id));
-              }
-            },
-            onFavoriteTap: () async {
-              await _toggleHomeProductLike(product);
-            },
-          );
-        },
-      );
-    }
-
-    // ── Inline search results (Search ekranıyla aynı katalog + yüklenme) ──
+    // Öncelik her zaman arama sonucu: banner tab açık olsa bile arama kazanır.
     if (_searchQuery.isNotEmpty) {
       if (_isSearchLoading) {
         return const Center(
@@ -1478,7 +1484,86 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 unawaited(_refreshProductLikeStatus(product.id));
               }
             },
-            onFavoriteTap: () {},
+            onFavoriteTap: () async {
+              await _toggleHomeProductLike(product);
+            },
+          );
+        },
+      );
+    }
+
+    // ── Banner tab products — full grid below the header ───────────────────
+    if (_activeBannerTab != null) {
+      final tab = _activeBannerTab!;
+      final products = _topPicksByTab[tab] ?? [];
+      final isLoading = _topPicksLoadingTabs.contains(tab);
+      if (isLoading && products.isEmpty) {
+        return GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            crossAxisSpacing: AppSpacing.xLarge,
+            mainAxisSpacing: AppSpacing.xLarge,
+            childAspectRatio: 0.57,
+          ),
+          itemCount: 4,
+          itemBuilder: (_, __) => const ProductCardSkeleton(),
+        );
+      }
+      if (products.isEmpty) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.xxLarge),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('No products found', style: AppTextStyles.bodySecondary),
+                const ProductRequestNotice(),
+              ],
+            ),
+          ),
+        );
+      }
+      return GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          crossAxisSpacing: AppSpacing.xLarge,
+          mainAxisSpacing: AppSpacing.xLarge,
+          childAspectRatio: 0.57,
+        ),
+        itemCount: products.length,
+        itemBuilder: (context, index) {
+          final product = products[index];
+          return ProductCard(
+            key: ValueKey('banner_${product.id}_${_productCardResync[product.id] ?? 0}'),
+            productId: product.id,
+            imageUrl: product.imageURL,
+            title: product.name,
+            category: product.tag.name,
+            categoryPath: product.tag.categoryPath,
+            rating: product.averageRating ?? 0.0,
+            desc: product.description ?? '',
+            isFavorite: _effectiveHomeLiked(product),
+            loadReviewCount: true,
+            friendAvatarUrls: _friendLikersMap[product.id] ?? const [],
+            onTap: () async {
+              final r = await Navigator.push<ReviewPagePopResult?>(
+                context,
+                SlideRightRoute(page: ReviewPage(product: product)),
+              );
+              if (!mounted) return;
+              if (r != null) {
+                _applyProductFromReviewExit(r);
+              } else {
+                unawaited(_refreshProductLikeStatus(product.id));
+              }
+            },
+            onFavoriteTap: () async {
+              await _toggleHomeProductLike(product);
+            },
           );
         },
       );
@@ -1799,6 +1884,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             child: TextField(
               controller: _searchController,
               focusNode: _searchFocusNode,
+              onChanged: _onSearchChanged,
+              onSubmitted: _onSearchChanged,
               style: const TextStyle(
                 fontSize: 14,
                 color: AppColors.textPrimary,
@@ -1826,6 +1913,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             GestureDetector(
               onTap: () {
                 _searchController.clear();
+                _onSearchChanged('');
                 _searchFocusNode.unfocus();
               },
               child: const Padding(

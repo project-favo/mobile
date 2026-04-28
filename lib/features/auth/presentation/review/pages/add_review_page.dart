@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -362,6 +363,28 @@ class _AddReviewPageState extends State<AddReviewPage> {
 
       return true;
     } catch (e) {
+      if (kDebugMode) {
+        debugPrint('AddReview submit error: $e');
+      }
+      if (e is DioException) {
+        final code = e.response?.statusCode;
+        String? backendMsg;
+        final data = e.response?.data;
+        if (data is Map) {
+          backendMsg =
+              data['message']?.toString() ??
+              data['error']?.toString() ??
+              data['detail']?.toString();
+        } else if (data is String && data.trim().isNotEmpty) {
+          backendMsg = data;
+        }
+        final friendly = ErrorHandler.getUserFriendlyMessage(e);
+        final msg = backendMsg != null && backendMsg.trim().isNotEmpty
+            ? (code != null ? '[$code] $backendMsg' : backendMsg)
+            : friendly;
+        _showErrorSnackBar(msg);
+        return false;
+      }
       final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
       _showErrorSnackBar(errorMessage);
       return false;

@@ -80,6 +80,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
   bool _queuedProductLikeToggleParity = false;
   bool? _productLikeUiOverride;
   int _likeCountFetchSeq = 0;
+  int _productLikeStatusFetchSeq = 0;
   final InFlightIdLock _reviewListLikeLock = InFlightIdLock();
   final InFlightIdLock _reviewDeleteLock = InFlightIdLock();
   static const Duration _productListingPollInterval =
@@ -1038,9 +1039,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       if (_productPageDataChanged(p, _currentProduct)) {
         if (mounted) {
           setState(() {
-            final likedForUi = _isProductLikeMutationInFlight
-                ? _effectiveProductLiked()
-                : (p.isLiked ?? false);
+            final likedForUi = _effectiveProductLiked();
             _currentProduct = p.copyWith(isLiked: likedForUi);
             _cachedRatingCounts = null;
             if (!_isProductLikeMutationInFlight) {
@@ -1078,6 +1077,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       }
       if (mounted && FirebaseAuth.instance.currentUser != null) {
         unawaited(_loadLikeCount());
+        unawaited(_refreshProductLikeStatus());
       }
     } on ProductNotAvailableException {
       if (!mounted) return;
@@ -1180,6 +1180,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       }
       unawaited(_seedLastHomeProductSnapshot(product, token));
       await _loadLikeCount();
+      unawaited(_refreshProductLikeStatus());
     } on ProductNotAvailableException {
       if (!mounted) return;
       setState(() {
@@ -1214,6 +1215,31 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
 
   bool _effectiveProductLiked() =>
       _productLikeUiOverride ?? (_currentProduct.isLiked ?? false);
+
+  Future<void> _refreshProductLikeStatus({
+    bool skipDuringLikeMutation = true,
+  }) async {
+    if (skipDuringLikeMutation && _isProductLikeMutationInFlight) return;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final token = await _sessionHelper.getTokenAndSetHeader();
+    if (token == null || !mounted) return;
+    final seq = ++_productLikeStatusFetchSeq;
+    try {
+      final liked = await _interactionRepository.isProductLiked(
+        token,
+        _currentProduct.id,
+      );
+      if (!mounted || seq != _productLikeStatusFetchSeq) return;
+      if (_isProductLikeMutationInFlight) return;
+      setState(() {
+        _currentProduct = _currentProduct.copyWith(isLiked: liked);
+        _productLikeUiOverride = null;
+      });
+    } catch (e, st) {
+      AppLogger.warnSilencedError('_refreshProductLikeStatus', e, st);
+    }
+  }
 
   bool _isUnauthorizedError(Object error) {
     if (error is DioException) {
@@ -1439,9 +1465,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       }
       _lastProductOnHomeFirstPage = onHome;
       setState(() {
-        final likedForUi = _isProductLikeMutationInFlight
-            ? _effectiveProductLiked()
-            : (updatedProduct.isLiked ?? false);
+        final likedForUi = _effectiveProductLiked();
         if (!_isLoadingReviews) {
           final nextAvg = _reviews.isEmpty
               ? 0.0
@@ -1458,6 +1482,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
         }
       });
       ProductMemoryCache.instance.remember(_currentProduct);
+      unawaited(_refreshProductLikeStatus());
     } on ProductNotAvailableException {
       if (!mounted) return;
       _exitProductPageBecauseUnavailable();
@@ -1714,6 +1739,7 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
         _likeCount = (previousLikeCount + delta).clamp(0, 999999);
       });
       unawaited(_loadLikeCount(skipDuringLikeMutation: false));
+      unawaited(_refreshProductLikeStatus(skipDuringLikeMutation: false));
     } catch (e) {
       // Hata durumunda optimistic update'i geri al
       setState(() {
