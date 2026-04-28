@@ -74,26 +74,35 @@ class ReviewCard extends StatelessWidget {
                 Expanded(
                   child: Row(
                     children: [
-                      GestureDetector(
-                        onTap: onUsernameTap,
-                        child: Text(
-                          username,
-                          style: AppTextStyles.body.copyWith(
-                            color:
-                                isCurrentUser
-                                    ? AppColors.error
-                                    : AppColors.textPrimary,
-                            fontWeight: FontWeight.w600,
-                            decoration: TextDecoration.none,
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: onUsernameTap,
+                          child: Text(
+                            username,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppTextStyles.body.copyWith(
+                              color:
+                                  isCurrentUser
+                                      ? AppColors.error
+                                      : AppColors.textPrimary,
+                              fontWeight: FontWeight.w600,
+                              decoration: TextDecoration.none,
+                            ),
                           ),
                         ),
                       ),
                       if (isSponsored)
-                        Text(
-                          "  Sponsored",
-                          style: AppTextStyles.chip.copyWith(
-                            color: AppColors.primary,
-                            decoration: TextDecoration.none,
+                        Padding(
+                          padding: const EdgeInsets.only(left: 6),
+                          child: Text(
+                            'Sponsored',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppTextStyles.chip.copyWith(
+                              color: AppColors.primary,
+                              decoration: TextDecoration.none,
+                            ),
                           ),
                         ),
                     ],
