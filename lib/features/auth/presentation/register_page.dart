@@ -9,6 +9,7 @@ import '../../../core/widgets/custom_snack_bar.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/error_handler.dart';
+import '../../../core/utils/image_picker_errors.dart';
 import '../../../core/utils/username_input_rules.dart';
 import '../data/services/auth_service.dart';
 import '../data/models/register_request_dto.dart';
@@ -179,7 +180,7 @@ class _RegisterPageState extends State<RegisterPage> {
       if (mounted) {
         CustomSnackBar.show(
           context,
-          message: 'Failed to pick image: ${e.toString()}',
+          message: messageForImagePickerError(e, source),
           variant: CustomSnackBarVariant.error,
         );
       }

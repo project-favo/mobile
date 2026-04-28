@@ -10,6 +10,7 @@ import '../../../../../core/config/api_config.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_text_styles.dart';
 import '../../../../../core/utils/error_handler.dart';
+import '../../../../../core/utils/image_picker_errors.dart';
 import '../../../../../core/utils/session_helper.dart';
 import '../../../../../core/widgets/custom_snack_bar.dart';
 import '../../../data/models/product_dto.dart';
@@ -174,7 +175,7 @@ class _AddReviewPageState extends State<AddReviewPage> {
         });
       }
     } catch (e) {
-      _showErrorSnackBar('Failed to pick image: ${e.toString()}');
+      _showErrorSnackBar(messageForImagePickerError(e, source));
     }
   }
 
