@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../routes/app_routes.dart';
 import '../../../core/widgets/app_input.dart';
@@ -11,6 +12,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/error_handler.dart';
 import '../../../core/utils/image_picker_errors.dart';
 import '../../../core/utils/username_input_rules.dart';
+import '../../../core/utils/profile_field_limits.dart';
 import '../data/services/auth_service.dart';
 import '../data/models/register_request_dto.dart';
 import 'pre_register_verify_page.dart';
@@ -148,12 +150,18 @@ class _RegisterPageState extends State<RegisterPage> {
   String? _nameValidator(String? v) {
     final value = (v ?? '').trim();
     if (value.isEmpty) return "Name is required";
+    if (value.length > ProfileFieldLimits.maxFirstNameLength) {
+      return 'First name must be at most ${ProfileFieldLimits.maxFirstNameLength} characters';
+    }
     return null;
   }
 
   String? _surnameValidator(String? v) {
     final value = (v ?? '').trim();
     if (value.isEmpty) return "Surname is required";
+    if (value.length > ProfileFieldLimits.maxLastNameLength) {
+      return 'Last name must be at most ${ProfileFieldLimits.maxLastNameLength} characters';
+    }
     return null;
   }
 
@@ -505,6 +513,11 @@ class _RegisterPageState extends State<RegisterPage> {
                         _scrollFieldIntoView(_nameFieldKey);
                       },
                       validator: _userNameValidator,
+                      inputFormatters: [
+                        LengthLimitingTextInputFormatter(
+                          ProfileFieldLimits.maxUserNameLength,
+                        ),
+                      ],
                       onChanged: () {
                         if (_registerError != null) {
                           setState(() => _registerError = null);
@@ -526,6 +539,11 @@ class _RegisterPageState extends State<RegisterPage> {
                         _scrollFieldIntoView(_surnameFieldKey);
                       },
                       validator: _nameValidator,
+                      inputFormatters: [
+                        LengthLimitingTextInputFormatter(
+                          ProfileFieldLimits.maxFirstNameLength,
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 14),
@@ -542,6 +560,11 @@ class _RegisterPageState extends State<RegisterPage> {
                         _scrollFieldIntoView(_birthdateFieldKey);
                       },
                       validator: _surnameValidator,
+                      inputFormatters: [
+                        LengthLimitingTextInputFormatter(
+                          ProfileFieldLimits.maxLastNameLength,
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 14),

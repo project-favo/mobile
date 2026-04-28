@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 
 /// Spring / özel API: uygulama kodu veya kullanıcıya gösterilecek birincil metin.
-/// Öncelik `code` / `errorCode` (ör. WRONG_CODE, EMAIL_NOT_VERIFIED), sonra RFC 7807 `detail`, `message`.
+/// Öncelik kullanıcı mesajı (`message`, `detail`), sonra makine kodu (`errorCode`).
 /// `error` alanı yalnızca jenerik HTTP sebebi değilse kullanılır (örn. "Bad Request" atlanır).
 String? backendResponsePrimaryErrorText(dynamic data) {
   if (data == null) return null;
@@ -19,11 +19,12 @@ String? backendResponsePrimaryErrorText(dynamic data) {
     return t.isEmpty ? null : t;
   }
 
-  for (final key in ['code', 'errorCode']) {
+  // Sunucunun İngilizce kullanıcı mesajı (message) makine kodundan (errorCode) önce gelmeli.
+  for (final key in ['message', 'detail', 'title']) {
     final v = pick(key);
     if (v != null) return v;
   }
-  for (final key in ['message', 'detail', 'title']) {
+  for (final key in ['code', 'errorCode']) {
     final v = pick(key);
     if (v != null) return v;
   }

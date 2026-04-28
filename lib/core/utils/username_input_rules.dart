@@ -1,3 +1,5 @@
+import 'profile_field_limits.dart';
+
 /// Kullanıcı adı: harf (Türkçe `İ/ğ/ü` vb. Unicode dahil), rakam, alt çizgi.
 /// Sunucu `[a-zA-Z0-9_]` ile sınırlı olsa dahi, istemci en azından aynı kuralla doğrulamalı.
 class UsernameInputRules {
@@ -21,6 +23,9 @@ class UsernameInputRules {
     final t = value.trim();
     if (t.length < 3) {
       return 'Username must be at least 3 characters';
+    }
+    if (t.length > ProfileFieldLimits.maxUserNameLength) {
+      return 'Username must be at most ${ProfileFieldLimits.maxUserNameLength} characters';
     }
     if (!isValidFormat(t)) {
       return 'Username can only contain letters, numbers and underscore';

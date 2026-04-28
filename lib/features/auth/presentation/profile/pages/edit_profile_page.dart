@@ -4,6 +4,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../core/theme/app_spacing.dart';
@@ -14,6 +15,7 @@ import '../../../../../core/utils/image_picker_errors.dart';
 import '../../../../../core/utils/app_datetime.dart';
 import '../../../../../core/utils/user_display_name_prefs.dart';
 import '../../../../../core/utils/username_input_rules.dart';
+import '../../../../../core/utils/profile_field_limits.dart';
 import '../../../../../core/utils/resolve_media_url.dart';
 import '../../../../auth/data/services/auth_service.dart';
 import '../../../../../core/utils/exceptions.dart';
@@ -42,7 +44,6 @@ class _EditProfilePageState extends State<EditProfilePage>
   late TextEditingController _birthdateController;
   DateTime? _selectedDate;
   bool _isLoading = false;
-  String? _updateError;
   final ImagePicker _imagePicker = ImagePicker();
   XFile? _selectedProfilePhoto;
   Uint8List? _currentProfilePhotoBytes;
@@ -283,10 +284,6 @@ class _EditProfilePageState extends State<EditProfilePage>
   }
 
   Future<void> _saveChanges() async {
-    setState(() {
-      _updateError = null;
-    });
-
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -347,17 +344,15 @@ class _EditProfilePageState extends State<EditProfilePage>
     } catch (e) {
       if (mounted) {
         final errorMessage = ErrorHandler.getUserFriendlyMessage(e);
-        setState(() {
-          _updateError = errorMessage;
-          _isLoading = false;
-        });
-        _formKey.currentState?.validate();
+        CustomSnackBar.show(
+          context,
+          message: errorMessage,
+          variant: CustomSnackBarVariant.error,
+        );
       }
     } finally {
-      if (mounted && _updateError == null) {
-        setState(() {
-          _isLoading = false;
-        });
+      if (mounted) {
+        setState(() => _isLoading = false);
       }
     }
   }
@@ -549,8 +544,18 @@ class _EditProfilePageState extends State<EditProfilePage>
                               if (value == null || value.trim().isEmpty) {
                                 return 'Name is required';
                               }
+                              if (value.trim().length >
+                                  ProfileFieldLimits.maxFirstNameLength) {
+                                return 'First name must be at most '
+                                    '${ProfileFieldLimits.maxFirstNameLength} characters';
+                              }
                               return null;
                             },
+                            inputFormatters: [
+                              LengthLimitingTextInputFormatter(
+                                ProfileFieldLimits.maxFirstNameLength,
+                              ),
+                            ],
                           ),
                         ),
                         _buildLabeledField(
@@ -562,8 +567,18 @@ class _EditProfilePageState extends State<EditProfilePage>
                               if (value == null || value.trim().isEmpty) {
                                 return 'Surname is required';
                               }
+                              if (value.trim().length >
+                                  ProfileFieldLimits.maxLastNameLength) {
+                                return 'Last name must be at most '
+                                    '${ProfileFieldLimits.maxLastNameLength} characters';
+                              }
                               return null;
                             },
+                            inputFormatters: [
+                              LengthLimitingTextInputFormatter(
+                                ProfileFieldLimits.maxLastNameLength,
+                              ),
+                            ],
                           ),
                         ),
                         _buildLabeledField(
@@ -614,17 +629,12 @@ class _EditProfilePageState extends State<EditProfilePage>
                           field: AppInput(
                             controller: _userNameController,
                             hint: 'your_username',
-                            validator: (value) {
-                              if (_updateError != null) {
-                                return _updateError;
-                              }
-                              return UsernameInputRules.validateForForm(value);
-                            },
-                            onChanged: () {
-                              if (_updateError != null) {
-                                setState(() => _updateError = null);
-                              }
-                            },
+                            validator: UsernameInputRules.validateForForm,
+                            inputFormatters: [
+                              LengthLimitingTextInputFormatter(
+                                ProfileFieldLimits.maxUserNameLength,
+                              ),
+                            ],
                           ),
                         ),
                       ]),
