@@ -1903,14 +1903,18 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
                   shape: BoxShape.circle,
                 ),
                 child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Image.asset(
-                      'assets/images/Chatbot.png',
-                      fit: BoxFit.contain,
-                      color: (!isProductEntityActive(_currentProduct) || _isLoadingProduct)
-                          ? Colors.white.withValues(alpha: 0.38)
-                          : Colors.white,
+                  child: Opacity(
+                    opacity: (!isProductEntityActive(_currentProduct) ||
+                            _isLoadingProduct)
+                        ? 0.38
+                        : 1.0,
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: Image.asset(
+                        'assets/images/chatbot_white.png',
+                        fit: BoxFit.contain,
+                        semanticLabel: 'Product AI Chat',
+                      ),
                     ),
                   ),
                 ),

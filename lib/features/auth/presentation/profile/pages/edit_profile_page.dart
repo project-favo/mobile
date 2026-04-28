@@ -10,6 +10,7 @@ import '../../../../../core/theme/app_spacing.dart';
 import '../../../../../core/widgets/app_input.dart';
 import '../../../../../core/widgets/custom_snack_bar.dart';
 import '../../../../../core/utils/error_handler.dart';
+import '../../../../../core/utils/image_picker_errors.dart';
 import '../../../../../core/utils/app_datetime.dart';
 import '../../../../../core/utils/user_display_name_prefs.dart';
 import '../../../../../core/utils/username_input_rules.dart';
@@ -118,7 +119,7 @@ class _EditProfilePageState extends State<EditProfilePage>
       if (mounted) {
         CustomSnackBar.show(
           context,
-          message: 'Failed to pick image: ${e.toString()}',
+          message: messageForImagePickerError(e, source),
           variant: CustomSnackBarVariant.error,
         );
       }

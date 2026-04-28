@@ -47,14 +47,26 @@ class PushNotificationService {
     if (kIsWeb) return;
     if (FirebaseAuth.instance.currentUser == null) return;
 
-    // 1) getToken, bildirim izninden bağımsız; null değilse JWT (ensureSession) ile POST
+    // iOS: APNS token genelde izin + kısa gecikmeden sonra gelir; önce izin, sonra getToken.
     try {
+      if (defaultTargetPlatform == TargetPlatform.iOS) {
+        final fm = FirebaseMessaging.instance;
+        final perm = await fm.requestPermission(alert: true, badge: true, sound: true);
+        pushTokenLog(
+          'iOS requestPermission (before getToken)',
+          error: 'auth=${perm.authorizationStatus.name}',
+        );
+        await fm.setForegroundNotificationPresentationOptions(
+          alert: true,
+          badge: true,
+          sound: true,
+        );
+      }
       await _getTokenAndRegisterIfPossible(source: 'app_open');
     } catch (e, st) {
-      // Repository log + rethrow; burada tam stack (push-token / ağ hataları uygulamayı çökertmez)
       pushTokenLog('app_open push-token path failed (see above logs)', error: '$e | $st');
     }
-    // 2) İzin, foreground sunumu, onMessage, onTokenRefresh (yenilemede aynı POST)
+    // Android: izin burada; iOS’ta yukarıda istendi — dinleyiciler her iki platformda
     try {
       await _ensureAuthorizationAndListeners();
     } catch (e) {
@@ -62,24 +74,42 @@ class PushNotificationService {
     }
   }
 
-  /// İzin/notification channel akışı olmadan önce FCM token alınır.
+  /// FCM token; iOS’ta APNS gecikmesinde birkaç kez yeniden dener, uygulamayı bloklamaz.
   Future<void> _getTokenAndRegisterIfPossible({required String source}) async {
     if (kIsWeb) return;
     if (FirebaseAuth.instance.currentUser == null) return;
+
+    const maxAttempts = 10;
     String? token;
-    try {
-      pushTokenLog('getToken() start', error: 'source=$source');
-      token = await FirebaseMessaging.instance.getToken();
-    } catch (e, st) {
-      pushTokenLog('getToken() failed', error: '$e | $st');
-      rethrow;
+    pushTokenLog('getToken() start', error: 'source=$source');
+
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        token = await FirebaseMessaging.instance.getToken();
+        break;
+      } catch (e, st) {
+        final msg = e.toString();
+        final apnsPending = defaultTargetPlatform == TargetPlatform.iOS &&
+            (msg.contains('apns-token-not-set') || msg.contains('APNS'));
+        if (apnsPending && attempt < maxAttempts - 1) {
+          await Future<void>.delayed(Duration(milliseconds: 350 + attempt * 150));
+          continue;
+        }
+        pushTokenLog('getToken() failed', error: '$e | $st');
+        return;
+      }
     }
+
     if (token == null || token.isEmpty) {
       pushTokenLog('getToken() null/empty, skip push-token', error: 'source=$source');
       return;
     }
     pushTokenLog('getToken() ok, posting push-token', fcmTokenPrefix: _tokenTailForLog(token));
-    await _registerIfAuthenticated(token, source: source);
+    try {
+      await _registerIfAuthenticated(token, source: source);
+    } catch (e, st) {
+      pushTokenLog('registerPushToken failed', error: '$e | $st');
+    }
   }
 
   String _tokenTailForLog(String t) {
@@ -89,10 +119,10 @@ class PushNotificationService {
 
   Future<void> _ensureAuthorizationAndListeners() async {
     final fm = FirebaseMessaging.instance;
-    // getToken yukarıda açılışta zaten; burada sadece izin + sunum
+    // iOS: izin zaten [_onSignedIn] içinde getToken öncesi istendi.
     if (defaultTargetPlatform == TargetPlatform.iOS) {
-      final perm = await fm.requestPermission(alert: true, badge: true, sound: true);
-      pushTokenLog('iOS requestPermission', error: 'auth=${perm.authorizationStatus.name}');
+      final perm = await fm.getNotificationSettings();
+      pushTokenLog('iOS notification settings', error: 'auth=${perm.authorizationStatus.name}');
     } else {
       final s = await fm.getNotificationSettings();
       if (s.authorizationStatus == AuthorizationStatus.notDetermined) {

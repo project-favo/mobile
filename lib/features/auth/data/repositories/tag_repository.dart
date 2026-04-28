@@ -46,6 +46,30 @@ class TagRepository {
         .toList();
   }
 
+  /// GET /api/tags/roots: düz dizi, `Page.content`, veya `{ data: { content: [...] } }` gibi sarmalayıcılar.
+  List<TagDto> _parseRootTagsPayload(dynamic raw) {
+    dynamic list = raw;
+    if (raw is Map) {
+      final m = Map<String, dynamic>.from(raw);
+      list =
+          m['content'] ??
+          m['data'] ??
+          m['tags'] ??
+          m['results'] ??
+          m['items'];
+      if (list is Map) {
+        final inner = Map<String, dynamic>.from(list);
+        list =
+            inner['content'] ??
+            inner['data'] ??
+            inner['items'] ??
+            inner['tags'] ??
+            inner['results'];
+      }
+    }
+    return _parseTagList(list is List ? list : const []);
+  }
+
   /// Fetches root tags from GET /api/tags/roots
   /// Token optional: backend may allow public access
   Future<List<TagDto>> getRootTags([String? firebaseIdToken]) async {
@@ -54,14 +78,7 @@ class TagRepository {
         _apiClient.setAuthToken(firebaseIdToken);
       }
       final response = await _apiClient.dio.get('/api/tags/roots');
-      
-      if (response.data is List) {
-        return (response.data as List)
-            .map((json) => TagDto.fromJson(json as Map<String, dynamic>))
-            .toList();
-      }
-      
-      return [];
+      return _parseRootTagsPayload(response.data);
     } on DioException catch (e) {
       if (e.response != null) {
         final errorData = e.response?.data;

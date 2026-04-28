@@ -84,7 +84,7 @@ class _AuthSplashGateState extends State<AuthSplashGate> {
     }
 
     try {
-      await user.reload();
+      await user.reload().timeout(const Duration(seconds: 12));
     } catch (_) {}
 
     if (!mounted) return;
@@ -94,8 +94,16 @@ class _AuthSplashGateState extends State<AuthSplashGate> {
       return;
     }
 
-    await HomeFeedCache.instance.restoreFromDisk();
-    await ConversationListCache.instance.restoreFromDisk();
+    try {
+      await HomeFeedCache.instance
+          .restoreFromDisk()
+          .timeout(const Duration(seconds: 6));
+    } catch (_) {}
+    try {
+      await ConversationListCache.instance
+          .restoreFromDisk()
+          .timeout(const Duration(seconds: 6));
+    } catch (_) {}
 
     await Future.wait([
       minSplashFuture,

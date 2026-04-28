@@ -64,6 +64,9 @@ String _friendsFeedDtoDedupeKey(FriendsFeedItemDto e) {
   return '$t|u:$aid|p:$pid|r:$rid|${e.createdAt?.millisecondsSinceEpoch ?? 0}';
 }
 
+/// Ana + alt kategori şeridinde seçim vurgusu (referans mockup ile uyumlu lacivert-mavi).
+const Color _homeCategoryAccent = Color(0xFF1546A8);
+
 /// [ActivityItem.id] çakışınca aynı üründe ikinci arkadaş baloncuğu kaybolmasın.
 String _friendLikerActivityMergeKey(ActivityItem item) {
   final base = item.id.trim();
@@ -1854,7 +1857,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             style: AppTextStyles.heading2.copyWith(
               fontSize: 18,
               fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
+              color: const Color(0xFF1A2B4A),
             ),
           ),
         ),
@@ -1911,51 +1914,43 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   Widget _buildSubCategoryPanel() {
-    final selectedTag = _tags[_selectedCategoryIndex];
-    final style = _categoryStyle(selectedTag.name);
-
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-      child: Container(
-        decoration: BoxDecoration(
-          color: style.bgColor.withValues(alpha: 0.22),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 9),
-            // ── Sub-category chips ──
-            if (_isLoadingSubTags)
-              SizedBox(
-                height: 34,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
-                  itemCount: 5,
-                  separatorBuilder: (_, __) => const SizedBox(width: 7),
-                  itemBuilder: (_, __) => const SkeletonLoader(
-                    width: 66,
-                    height: 28,
-                    borderRadius: BorderRadius.all(Radius.circular(20)),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_isLoadingSubTags)
+            SizedBox(
+              height: 34,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 0),
+                itemCount: 5,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (_, __) => const Center(
+                  child: SkeletonLoader(
+                    width: 64,
+                    height: 26,
+                    borderRadius: BorderRadius.all(Radius.circular(100)),
                   ),
                 ),
-              )
-            else if (_subTags.isNotEmpty)
-              SizedBox(
-                height: 34,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
-                  itemCount: _subTags.length + 1,
-                  separatorBuilder: (_, __) => const SizedBox(width: 7),
-                  itemBuilder: (context, i) {
-                    if (i == 0) {
-                      return _SubChip(
+              ),
+            )
+          else if (_subTags.isNotEmpty)
+            SizedBox(
+              height: 34,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 0),
+                itemCount: _subTags.length + 1,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, i) {
+                  if (i == 0) {
+                    return Center(
+                      child: _SubChip(
                         title: 'All',
                         selected: _selectedSubCategoryIndex == -1,
-                        iconColor: style.iconColor,
                         onTap: () async {
                           final rootTag = _tags[_selectedCategoryIndex];
                           setState(() {
@@ -1965,14 +1960,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                           });
                           await _loadProductsPage(0);
                         },
-                      );
-                    }
-                    final subIndex = i - 1;
-                    final subTag = _subTags[subIndex];
-                    return _SubChip(
+                      ),
+                    );
+                  }
+                  final subIndex = i - 1;
+                  final subTag = _subTags[subIndex];
+                  return Center(
+                    child: _SubChip(
                       title: subTag.name,
                       selected: subIndex == _selectedSubCategoryIndex,
-                      iconColor: style.iconColor,
                       onTap: () async {
                         setState(() {
                           _selectedSubCategoryIndex = subIndex;
@@ -1981,13 +1977,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                         });
                         await _loadProductsPage(0);
                       },
-                    );
-                  },
-                ),
+                    ),
+                  );
+                },
               ),
-            const SizedBox(height: 9),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -2251,8 +2246,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       List<TagDto> tags = [];
       try {
         tags = await _tagRepository.getRootTags(firebaseIdToken);
-      } catch (_) {
-        // Tags 401 verebilir; kategorileri boş bırak, ürünler yine yüklensin
+      } catch (_) {}
+
+      // API boş/hatalı parse döndüyse ana kategorileri kaybetme (önbellek + son bilinen liste).
+      if (tags.isEmpty) {
+        final cached = SearchWarmCache.instance.peekRootTags();
+        if (cached.isNotEmpty) {
+          tags = cached;
+        } else if (_tags.isNotEmpty) {
+          tags = List<TagDto>.from(_tags);
+        }
       }
 
       if (!mounted) return;
@@ -2282,7 +2285,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           _isBannerCollapsed = false;
         }
       });
-      SearchWarmCache.instance.rememberRootTags(tags);
+      if (tags.isNotEmpty) {
+        SearchWarmCache.instance.rememberRootTags(tags);
+      }
       if (wasInCategoryMode && _selectedCategoryIndex != -1) {
         final rootTag = _tags[_selectedCategoryIndex];
         unawaited(_loadSubTagsForRoot(rootTag));
@@ -2689,12 +2694,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 class _SubChip extends StatelessWidget {
   final String title;
   final bool selected;
-  final Color iconColor;
   final VoidCallback? onTap;
 
   const _SubChip({
     required this.title,
-    required this.iconColor,
     this.selected = false,
     this.onTap,
   });
@@ -2702,28 +2705,40 @@ class _SubChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final displayTitle = _formatCategoryLabel(title);
-    final textColor = selected ? AppColors.textPrimary : AppColors.textSecondary;
-    final underlineColor = selected
-        ? AppColors.primary.withValues(alpha: 0.9)
-        : AppColors.textSecondary.withValues(alpha: 0.35);
-    return InkWell(
-      borderRadius: BorderRadius.circular(6),
+    const accent = _homeCategoryAccent;
+    return GestureDetector(
       onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Text(
-          displayTitle,
-          style: TextStyle(
-            color: textColor,
-            fontSize: 13,
-            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            letterSpacing: 0.1,
-            decoration: TextDecoration.underline,
-            decorationColor: underlineColor,
-            decorationThickness: selected ? 2.2 : 1.0,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(999),
+          color: selected ? accent : accent.withValues(alpha: 0.10),
+          border: selected
+              ? null
+              : Border.all(
+                  color: accent.withValues(alpha: 0.42),
+                  width: 1,
+                ),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 120),
+          child: Text(
+            displayTitle,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: selected ? Colors.white : accent,
+              fontSize: 11.5,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+              letterSpacing: 0.02,
+              height: 1.0,
+              leadingDistribution: TextLeadingDistribution.even,
+            ),
           ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
         ),
       ),
     );
@@ -3034,14 +3049,16 @@ class _CircleCategoryItem extends StatelessWidget {
               height: 62,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: isSelected ? style.bgColor : style.bgColor.withValues(alpha: 0.55),
+                color: isSelected
+                    ? AppColors.surface
+                    : style.bgColor.withValues(alpha: 0.55),
                 border: isSelected
-                    ? Border.all(color: style.iconColor, width: 2.5)
+                    ? Border.all(color: _homeCategoryAccent, width: 2.5)
                     : null,
                 boxShadow: [
                   BoxShadow(
                     color: isSelected
-                        ? style.iconColor.withValues(alpha: 0.2)
+                        ? _homeCategoryAccent.withValues(alpha: 0.18)
                         : Colors.black.withValues(alpha: 0.06),
                     blurRadius: isSelected ? 8 : 4,
                     offset: const Offset(0, 2),
@@ -3053,7 +3070,7 @@ class _CircleCategoryItem extends StatelessWidget {
                   style.icon,
                   size: 26,
                   color: isSelected
-                      ? style.iconColor
+                      ? _homeCategoryAccent
                       : style.iconColor.withValues(alpha: 0.65),
                 ),
               ),
@@ -3067,7 +3084,7 @@ class _CircleCategoryItem extends StatelessWidget {
               style: TextStyle(
                 fontSize: 10.5,
                 fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                color: isSelected ? style.iconColor : AppColors.textPrimary,
+                color: isSelected ? _homeCategoryAccent : AppColors.textPrimary,
                 height: 1.2,
               ),
             ),
