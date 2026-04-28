@@ -48,6 +48,8 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> with RouteAware {
   static const Duration _topReviewersRefreshInterval = Duration(seconds: 10);
+  /// [_TopReviewerRow] içindeki sıra rozeti kartın altına taşıyor; dar satırda taşmayı önlemek için.
+  static const double _topReviewerRowExtent = 148.0;
   final ProductRepository _productRepository = ProductRepository();
   final TagRepository _tagRepository = TagRepository();
   final ReviewRepository _reviewRepository = ReviewRepository();
@@ -1155,6 +1157,14 @@ class _SearchPageState extends State<SearchPage> with RouteAware {
     });
   }
 
+  /// Arama + Top reviewers üstte; kalan yükseklik alt panele. Yatay modda [Expanded] taşmasını önlemek için sabit.
+  double _lowerPanelHeight(BoxConstraints viewport) {
+    final h = viewport.maxHeight;
+    final emptyQuery = _searchController.text.trim().isEmpty;
+    final reserved = emptyQuery ? 290.0 : 130.0;
+    return (h - reserved).clamp(200.0, 720.0);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1207,11 +1217,16 @@ class _SearchPageState extends State<SearchPage> with RouteAware {
                       physics: const AlwaysScrollableScrollPhysics(
                         parent: ClampingScrollPhysics(),
                       ),
-                      child: SizedBox(
-                        height: constraints.maxHeight,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minWidth: constraints.maxWidth,
+                          minHeight: constraints.maxHeight,
+                        ),
                         child: Padding(
                           padding: const EdgeInsets.all(AppSpacing.xLarge),
                           child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                       AnimatedContainer(
                         duration: const Duration(milliseconds: 140),
@@ -1304,7 +1319,7 @@ class _SearchPageState extends State<SearchPage> with RouteAware {
                                   ),
                                 ),
                                 SizedBox(
-                                  height: 114,
+                                  height: _topReviewerRowExtent,
                                   child: Row(
                                     children: List.generate(
                                       5,
@@ -1367,7 +1382,7 @@ class _SearchPageState extends State<SearchPage> with RouteAware {
                                 Padding(
                                   padding: const EdgeInsets.only(bottom: 14),
                                   child: SizedBox(
-                                  height: 114,
+                                  height: _topReviewerRowExtent,
                                   child: Row(
                                     children: List.generate(5, (index) {
                                       final hasData = index < _topReviewers.length;
@@ -1426,7 +1441,8 @@ class _SearchPageState extends State<SearchPage> with RouteAware {
                           (_loadingTopReviewers || _topReviewers.isNotEmpty))
                         const SizedBox(height: AppSpacing.small),
                       const SizedBox(height: AppSpacing.xLarge),
-                      Expanded(
+                      SizedBox(
+                        height: _lowerPanelHeight(constraints),
                         child: _searchController.text.trim().isNotEmpty
                             ? (_isSearching
                             ? const Center(child: ListLoadMoreSkeleton())
