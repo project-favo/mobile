@@ -653,6 +653,12 @@ class _ProductAiTranscriptCache {
   static final Map<String, DateTime> _at = {};
   static const Duration _ttl = Duration(minutes: 40);
 
+  /// [clearAllAppCachesOnLogout] — hesap değişince önceki kullanıcı mesajları kalmasın.
+  static void clearAll() {
+    _byId.clear();
+    _at.clear();
+  }
+
   static List<_ProductAiMessage>? load(String productId) {
     final list = _byId[productId];
     final t = _at[productId];
@@ -683,4 +689,9 @@ class _ProductAiTranscriptCache {
     ];
     _at[productId] = DateTime.now();
   }
+}
+
+/// [clearAllAppCachesOnLogout] tarafından çağrılır.
+void clearProductAiTranscriptCachesForLogout() {
+  _ProductAiTranscriptCache.clearAll();
 }

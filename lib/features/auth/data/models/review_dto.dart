@@ -67,6 +67,18 @@ class ReviewDto {
     return isProductNotListedFromJsonMap(json);
   }
 
+  static String _normalizedIdValue(dynamic value) {
+    if (value == null) return '';
+    if (value is num) return value.toInt().toString();
+    final t = value.toString().trim();
+    if (t.isEmpty) return '';
+    final match = RegExp(r'^\d+\.0+$').firstMatch(t);
+    if (match != null) {
+      return t.substring(0, t.indexOf('.'));
+    }
+    return t;
+  }
+
   /// Backend farklı anahtarlar kullanabildiği için metin alanlarını sırayla okur.
   static String? _firstNonEmptyString(Map<String, dynamic> json, List<String> keys) {
     for (final k in keys) {
@@ -102,15 +114,15 @@ class ReviewDto {
       'comment',
     ]);
     return ReviewDto(
-      id: json['id']?.toString() ?? '',
+      id: _normalizedIdValue(json['id']),
       title: title,
       description: description,
       isCollaborative: json['isCollaborative'] as bool? ?? false,
       rating: (json['rating'] as num?)?.toInt() ?? 0,
       createdAt: json['createdAt']?.toString() ?? '',
-      productId: json['productId']?.toString() ?? '',
+      productId: _normalizedIdValue(json['productId']),
       productName: json['productName']?.toString() ?? '',
-      ownerId: json['ownerId']?.toString() ?? '',
+      ownerId: _normalizedIdValue(json['ownerId']),
       ownerUserName: json['ownerUserName']?.toString() ?? '',
       ownerProfilePhotoUrl: _ownerPhotoFromJson(json),
       mediaList: (json['mediaList'] as List?)

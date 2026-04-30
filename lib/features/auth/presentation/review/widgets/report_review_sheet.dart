@@ -34,14 +34,7 @@ Future<void> openReviewReportFlow(
     }
     await ReviewReportStorage.hydrateForCurrentUser();
     if (!context.mounted) return;
-    if (ReviewReportStorage.hasReportedSync(reviewId)) {
-      CustomSnackBar.show(
-        context,
-        message: 'Already reported',
-        variant: CustomSnackBarVariant.neutral,
-      );
-      return;
-    }
+    final hadLocalReportMark = ReviewReportStorage.hasReportedSync(reviewId);
     final token = await sessionHelper.ensureSession();
     if (!context.mounted) return;
     if (token == null) {
@@ -65,7 +58,7 @@ Future<void> openReviewReportFlow(
       if (context.mounted) {
         CustomSnackBar.show(
           context,
-          message: 'Reported',
+          message: hadLocalReportMark ? 'Already reported' : 'Reported',
           variant: CustomSnackBarVariant.primary,
         );
       }

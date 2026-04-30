@@ -603,6 +603,12 @@ class _AiChatTranscriptCache {
   static DateTime? _savedAt;
   static const Duration _ttl = Duration(minutes: 40);
 
+  /// [clearAllAppCachesOnLogout] — hesap değişince önceki kullanıcı mesajları kalmasın.
+  static void clear() {
+    _lines = null;
+    _savedAt = null;
+  }
+
   static void save(List<_AiMessage> src) {
     _lines = [
       for (final m in src)
@@ -631,4 +637,9 @@ class _AiChatTranscriptCache {
         ),
     ];
   }
+}
+
+/// [clearAllAppCachesOnLogout] tarafından çağrılır.
+void clearAiAssistantTranscriptCacheForLogout() {
+  _AiChatTranscriptCache.clear();
 }

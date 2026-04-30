@@ -19,6 +19,10 @@ import '../utils/user_display_name_prefs.dart';
 import '../utils/review_report_storage.dart';
 import '../notifications/app_badge_sync.dart';
 import '../../features/auth/widgets/product_card.dart' show clearAllProductCardSocialCaches;
+import '../../features/auth/presentation/messages/ai_chat_page.dart'
+    show clearAiAssistantTranscriptCacheForLogout;
+import '../../features/auth/presentation/messages/product_ai_chat_page.dart'
+    show clearProductAiTranscriptCachesForLogout;
 
 /// [AuthService.signOut] ve Firebase-only çıkışlarda: hesap değişiminde kalan tüm in-memory
 /// ve (ilgili) disk önbelleklerini temizle.
@@ -48,6 +52,8 @@ void clearAllAppCachesOnLogout() {
   FollowingIdSetCache.instance.invalidate();
   ReviewReportStorage.clearMemory();
   ChatOutgoingUserCache.clear();
+  clearAiAssistantTranscriptCacheForLogout();
+  clearProductAiTranscriptCachesForLogout();
   clearAllProductCardSocialCaches();
   // ignore: discarded_futures
   UserDisplayNamePrefs.instance.removeAllCaseDisplayKeys();
