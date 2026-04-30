@@ -33,14 +33,15 @@ import '../../../data/models/notification_dto.dart';
 import '../../../data/models/product_dto.dart';
 import '../../../data/models/review_dto.dart';
 import '../../../data/models/tag_dto.dart';
+import '../../../data/models/conversation_dto.dart';
 import '../../../data/repositories/interaction_repository.dart';
 import '../../../data/repositories/review_repository.dart';
 import '../../../data/repositories/product_repository.dart';
-import '../../../data/repositories/message_repository.dart';
 import '../../../data/services/auth_service.dart';
 import 'add_review_page.dart';
 import 'review_detail_page.dart';
 import 'compare_product_select_page.dart';
+import '../../messages/chat_detail_page.dart';
 import '../../messages/product_ai_chat_page.dart';
 import '../review_page_pop_result.dart';
 import '../widgets/review_delete_flow.dart';
@@ -65,7 +66,6 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
   final ReviewRepository _reviewRepository = ReviewRepository();
   final ProductRepository _productRepository = ProductRepository();
   final SessionHelper _sessionHelper = SessionHelper();
-  final MessageRepository _messageRepository = MessageRepository();
   String? _currentUsername;
   String? _currentUserId;
   late ProductDto _currentProduct;
@@ -1344,7 +1344,6 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
     if (!isProductEntityActive(_currentProduct) || !isReviewEntityVisible(review)) {
       return;
     }
-    final pageContext = context;
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       if (mounted) {
@@ -1356,119 +1355,37 @@ class _ReviewPageState extends State<ReviewPage> with WidgetsBindingObserver {
       }
       return;
     }
-
-    final controller = TextEditingController();
-    bool isSending = false;
-
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+    final recipientId = int.tryParse(review.ownerId);
+    if (recipientId == null || recipientId <= 0) {
+      if (!mounted) return;
+      CustomSnackBar.show(
+        context,
+        message: 'Recipient is unavailable. Please open profile and try again.',
+        variant: CustomSnackBarVariant.error,
+      );
+      return;
+    }
+    final syntheticConversation = ConversationDto(
+      id: 0,
+      otherParticipant: ConversationUserDto(
+        id: recipientId,
+        username: review.ownerUserName,
+        profilePhotoUrl: review.ownerProfilePhotoUrl,
       ),
-      builder: (ctx) {
-        return Padding(
-          padding: EdgeInsets.only(
-            left: AppSpacing.xLarge,
-            right: AppSpacing.xLarge,
-            top: AppSpacing.large,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + AppSpacing.large,
-          ),
-          child: StatefulBuilder(
-            builder: (context, setState) {
-              Future<void> send() async {
-                final text = controller.text.trim();
-                if (text.isEmpty || isSending) return;
-                setState(() => isSending = true);
-                try {
-                  final token = await _sessionHelper.ensureSession();
-                  if (token == null) {
-                    throw Exception('Failed to get Firebase ID token');
-                  }
-                  await _messageRepository.sendMessage(
-                    recipientId: int.tryParse(review.ownerId),
-                    content: text,
-                  );
-                  if (!context.mounted) return;
-                  FocusManager.instance.primaryFocus?.unfocus();
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (!context.mounted) return;
-                    Navigator.of(context).pop();
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (!pageContext.mounted) return;
-                      CustomSnackBar.show(
-                        pageContext,
-                        message:
-                            'Message sent to @${review.ownerUserName}',
-                        variant: CustomSnackBarVariant.success,
-                      );
-                    });
-                  });
-                } catch (e) {
-                  final msg = ErrorHandler.getUserFriendlyMessage(e);
-                  if (context.mounted) {
-                    CustomSnackBar.show(
-                      context,
-                      message: msg,
-                      variant: CustomSnackBarVariant.error,
-                    );
-                  } else if (mounted && pageContext.mounted) {
-                    CustomSnackBar.show(
-                      pageContext,
-                      message: msg,
-                      variant: CustomSnackBarVariant.error,
-                    );
-                  }
-                  if (context.mounted) {
-                    setState(() => isSending = false);
-                  }
-                }
-              }
-
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Message @${review.ownerUserName}',
-                    style: AppTextStyles.heading3,
-                  ),
-                  const SizedBox(height: AppSpacing.medium),
-                  TextField(
-                    controller: controller,
-                    maxLines: 3,
-                    maxLength: 1000,
-                    decoration: const InputDecoration(
-                      hintText: 'Write your message...',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.medium),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: ElevatedButton(
-                      onPressed: isSending ? null : send,
-                      child:
-                          isSending
-                              ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                              : const Text('Send'),
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-        );
-      },
+      lastMessage: '',
+      lastMessageAt: '',
+      unreadCount: 0,
     );
-    controller.dispose();
+    if (!mounted) return;
+    await Navigator.push<void>(
+      context,
+      SlideRightRoute(
+        page: ChatDetailPage(
+          conversation: syntheticConversation,
+          recipientId: recipientId,
+        ),
+      ),
+    );
   }
 
   /// Product'ı backend'den yeniden yükler (rating ve like durumu için)
