@@ -7,7 +7,8 @@ class ReviewReportStorage {
 
   static String normalizeId(String id) => id.toString().trim();
 
-  static String _key(String uid) => 'reported_review_ids_v1_$uid';
+  // v2: stale/yanlis local "reported" cachelerini invalidate etmek için key bump
+  static String _key(String uid) => 'reported_review_ids_v2_$uid';
 
   static final Map<String, Set<String>> _memory = {};
   static final Set<String> _hydratedUids = {};

@@ -10,9 +10,17 @@ import '../models/review_dto.dart';
 bool _dioMeansReviewAlreadyReported(DioException e) {
   final code = e.response?.statusCode;
   if (code == 409) return true;
-  final s = dioResponseDataAsSearchString(e.response?.data).toLowerCase();
-  if (s.contains('duplicate')) return true;
-  if (s.contains('zaten')) return true;
+  final data = e.response?.data;
+  if (data is Map) {
+    final m = Map<String, dynamic>.from(data);
+    final errorCode = m['errorCode']?.toString().trim().toUpperCase();
+    if (errorCode == 'REVIEW_REPORT_ALREADY_SUBMITTED') return true;
+    final internalCode = m['internalCode']?.toString().trim();
+    if (internalCode == '12007') return true;
+  }
+  final s = dioResponseDataAsSearchString(data).toLowerCase();
+  if (s.contains('already') && s.contains('reported')) return true;
+  if (s.contains('zaten') && s.contains('şikayet')) return true;
   if (s.contains('already') &&
       (s.contains('flag') ||
           s.contains('report') ||
@@ -25,6 +33,7 @@ bool _dioMeansReviewAlreadyReported(DioException e) {
 
 class ReviewRepository {
   final ApiClient _apiClient = ApiClient();
+  static final RegExp _numericIdPattern = RegExp(r'^\d+(?:\.0+)?$');
 
   static const String reviewSortNewest = 'newest';
   static const String reviewSortMostLiked = 'most_liked';
@@ -432,31 +441,11 @@ class ReviewRepository {
   ) async {
     try {
       _apiClient.setAuthToken(firebaseIdToken);
-      final id = reviewId.trim();
-      final notes = request.notes?.trim() ?? '';
-      final reportBody = <String, dynamic>{'reason': request.reason};
-      if (notes.isNotEmpty) {
-        reportBody['description'] = notes;
-        reportBody['notes'] = notes;
-      }
-
-      try {
-        await _apiClient.dio.post(
-          '/api/reviews/$id/flag',
-          data: request.toJson(),
-        );
-      } on DioException catch (e) {
-        final code = e.response?.statusCode;
-        // Eski uç: yalnızca `/report`. Bazı kurulumlarda `/flag` yokken 404/405/401 görülebiliyor.
-        if (code == 404 || code == 405 || code == 401) {
-          await _apiClient.dio.post(
-            '/api/reviews/$id/report',
-            data: reportBody,
-          );
-          return;
-        }
-        rethrow;
-      }
+      final id = _normalizeReviewId(reviewId);
+      await _apiClient.dio.post(
+        '/api/reviews/$id/flag',
+        data: request.toJson(),
+      );
     } on DioException catch (e) {
       if (_dioMeansReviewAlreadyReported(e)) {
         throw const ReviewAlreadyReportedException();
@@ -472,6 +461,18 @@ class ReviewRepository {
       }
       throw Exception('Network error: ${e.message}');
     }
+  }
+
+  String _normalizeReviewId(String raw) {
+    final t = raw.trim();
+    if (t.isEmpty) {
+      throw Exception('Invalid review id');
+    }
+    if (_numericIdPattern.hasMatch(t)) {
+      final dot = t.indexOf('.');
+      return dot >= 0 ? t.substring(0, dot) : t;
+    }
+    return t;
   }
 }
 

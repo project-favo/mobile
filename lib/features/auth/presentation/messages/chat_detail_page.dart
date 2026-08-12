@@ -25,8 +25,10 @@ import '../../../../core/widgets/profile_avatar.dart';
 import '../../../../core/cache/chat_outgoing_user_cache.dart';
 import '../../../../core/cache/current_user_cache.dart';
 import '../../../../core/cache/message_list_cache.dart';
+import '../../../../core/cache/conversation_list_cache.dart';
 import '../../../../core/utils/user_profile_navigation.dart';
 import '../../../../core/widgets/custom_snack_bar.dart';
+import '../../../../core/notifications/message_unread_service.dart';
 
 class ChatDetailPage extends StatefulWidget {
   final ConversationDto conversation;
@@ -431,6 +433,7 @@ class _ChatDetailPageState extends State<ChatDetailPage>
           _startPolling();
         }
       }
+      _upsertConversationPreviewAfterSend(msg, text);
       if (!mounted) return;
       setState(() {
         final withoutTemp = _messages.where((m) => m.id != tempId).toList();
@@ -455,6 +458,38 @@ class _ChatDetailPageState extends State<ChatDetailPage>
     } finally {
       _sendInFlight = false;
     }
+  }
+
+  void _upsertConversationPreviewAfterSend(MessageDto sent, String fallbackText) {
+    final conversationId =
+        sent.conversationId > 0 ? sent.conversationId : _conversationId;
+    if (conversationId <= 0) return;
+
+    final participant = widget.conversation.otherParticipant;
+    final preview = ConversationDto(
+      id: conversationId,
+      otherParticipant: ConversationUserDto(
+        id: participant.id,
+        username: participant.username,
+        profilePhotoUrl: _effectiveOtherUrl ?? participant.profilePhotoUrl,
+        profilePhotoData: participant.profilePhotoData,
+        isAccountInactive: participant.isAccountInactive,
+      ),
+      lastMessage: sent.content.trim().isNotEmpty ? sent.content : fallbackText,
+      lastMessageAt: sent.createdAt,
+      unreadCount: 0,
+    );
+
+    final existing = ConversationListCache.instance.peek() ?? const <ConversationDto>[];
+    final next = <ConversationDto>[preview];
+    for (final c in existing) {
+      if (c.id == preview.id) continue;
+      if (c.otherParticipant.id == preview.otherParticipant.id) continue;
+      next.add(c);
+    }
+    ConversationListCache.instance.remember(next);
+    final unread = next.where((c) => c.unreadCount > 0).length;
+    MessageUnreadService.instance.unreadCount.value = unread;
   }
 
   @override

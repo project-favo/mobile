@@ -32,11 +32,12 @@ import 'review_page.dart';
 import '../../home_page.dart';
 import '../../../data/models/review_dto.dart';
 import '../../../data/models/product_dto.dart';
+import '../../../data/models/conversation_dto.dart';
 import '../../../data/repositories/interaction_repository.dart';
 import '../../../data/repositories/product_repository.dart';
 import '../../../data/repositories/review_repository.dart';
-import '../../../data/repositories/message_repository.dart';
 import '../../../data/services/auth_service.dart';
+import '../../messages/chat_detail_page.dart';
 import '../widgets/report_review_sheet.dart';
 import '../widgets/review_delete_flow.dart';
 import 'add_review_page.dart';
@@ -71,8 +72,6 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
   late ReviewDto _currentReview;
   /// Açıldığında [widget.product], poll ile GET’te tazelenebilir.
   late ProductDto _currentProduct;
-  final MessageRepository _messageRepository = MessageRepository();
-
   /// Şikayet butonunu gizlemek için (kendi yorumu).
   String? _viewerUserId;
 
@@ -837,118 +836,36 @@ class _ReviewDetailPageState extends State<ReviewDetailPage>
       }
       return;
     }
-
-    final controller = TextEditingController();
-    bool isSending = false;
-    final pageContext = context;
-
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+    final recipientId = int.tryParse(_currentReview.ownerId);
+    if (recipientId == null || recipientId <= 0) {
+      if (!mounted) return;
+      CustomSnackBar.show(
+        context,
+        message: 'Recipient is unavailable. Please open profile and try again.',
+        variant: CustomSnackBarVariant.error,
+      );
+      return;
+    }
+    final syntheticConversation = ConversationDto(
+      id: 0,
+      otherParticipant: ConversationUserDto(
+        id: recipientId,
+        username: _currentReview.ownerUserName,
+        profilePhotoUrl: _currentReview.ownerProfilePhotoUrl,
       ),
-      builder: (ctx) {
-        return Padding(
-          padding: EdgeInsets.only(
-            left: AppSpacing.xLarge,
-            right: AppSpacing.xLarge,
-            top: AppSpacing.large,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + AppSpacing.large,
-          ),
-          child: StatefulBuilder(
-            builder: (context, setState) {
-              Future<void> send() async {
-                final text = controller.text.trim();
-                if (text.isEmpty || isSending) return;
-                setState(() => isSending = true);
-                try {
-                  final token = await _sessionHelper.ensureSession();
-                  if (token == null) {
-                    throw Exception('Failed to get Firebase ID token');
-                  }
-                  await _messageRepository.sendMessage(
-                    recipientId: int.tryParse(_currentReview.ownerId),
-                    content: text,
-                  );
-                  if (!context.mounted) return;
-                  FocusManager.instance.primaryFocus?.unfocus();
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (!context.mounted) return;
-                    Navigator.of(context).pop();
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (!pageContext.mounted) return;
-                      CustomSnackBar.show(
-                        pageContext,
-                        message:
-                            'Message sent to @${_currentReview.ownerUserName}',
-                        variant: CustomSnackBarVariant.success,
-                      );
-                    });
-                  });
-                } catch (e) {
-                  final msg = ErrorHandler.getUserFriendlyMessage(e);
-                  if (context.mounted) {
-                    CustomSnackBar.show(
-                      context,
-                      message: msg,
-                      variant: CustomSnackBarVariant.error,
-                    );
-                  } else if (mounted && pageContext.mounted) {
-                    CustomSnackBar.show(
-                      pageContext,
-                      message: msg,
-                      variant: CustomSnackBarVariant.error,
-                    );
-                  }
-                  if (context.mounted) {
-                    setState(() => isSending = false);
-                  }
-                }
-              }
-
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Message @${_currentReview.ownerUserName}',
-                    style: AppTextStyles.heading3,
-                  ),
-                  const SizedBox(height: AppSpacing.medium),
-                  TextField(
-                    controller: controller,
-                    maxLines: 3,
-                    maxLength: 1000,
-                    decoration: const InputDecoration(
-                      hintText: 'Write your message...',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.medium),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: ElevatedButton(
-                      onPressed: isSending ? null : send,
-                      child:
-                          isSending
-                              ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                              : const Text('Send'),
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-        );
-      },
+      lastMessage: '',
+      lastMessageAt: '',
+      unreadCount: 0,
+    );
+    if (!mounted) return;
+    await Navigator.push<void>(
+      context,
+      SlideRightRoute(
+        page: ChatDetailPage(
+          conversation: syntheticConversation,
+          recipientId: recipientId,
+        ),
+      ),
     );
   }
 
